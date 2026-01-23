@@ -1,0 +1,3 @@
+[submodule "submodules/PySceneDetect"]
+	path = submodules/PySceneDetect
+	url = https://github.com/Breakthrough/PySceneDetect
