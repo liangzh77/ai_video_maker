@@ -1,0 +1,155 @@
+.player {
+  position: relative;
+  background-color: #000;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+
+.video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  cursor: pointer;
+}
+
+.controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.controls.visible {
+  opacity: 1;
+}
+
+.progress {
+  margin-bottom: var(--spacing-xs);
+}
+
+.progressSlider {
+  margin: 0;
+}
+
+.progressSlider :global(.ant-slider-rail) {
+  background-color: rgba(255, 255, 255, 0.3);
+  height: 4px;
+}
+
+.progressSlider :global(.ant-slider-track) {
+  background-color: var(--color-primary);
+  height: 4px;
+}
+
+.progressSlider :global(.ant-slider-handle) {
+  width: 12px;
+  height: 12px;
+  background-color: white;
+  border: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.controlBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.leftControls,
+.rightControls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.controlButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: white;
+  font-size: 18px;
+  transition: background-color 0.15s;
+}
+
+.controlButton:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.time {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  font-variant-numeric: tabular-nums;
+}
+
+.volumeControl {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.volumeSlider {
+  width: 60px;
+  margin: 0;
+}
+
+.volumeSlider :global(.ant-slider-rail) {
+  background-color: rgba(255, 255, 255, 0.3);
+  height: 3px;
+}
+
+.volumeSlider :global(.ant-slider-track) {
+  background-color: white;
+  height: 3px;
+}
+
+.volumeSlider :global(.ant-slider-handle) {
+  width: 10px;
+  height: 10px;
+  background-color: white;
+  border: none;
+}
+
+.playOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+.playOverlayIcon {
+  font-size: 64px;
+  color: rgba(255, 255, 255, 0.9);
+  transition: transform 0.2s;
+}
+
+.playOverlay:hover .playOverlayIcon {
+  transform: scale(1.1);
+}
+
+.errorOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+.errorText {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+}

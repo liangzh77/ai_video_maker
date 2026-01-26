@@ -1,0 +1,40 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--spacing-md);
+}
+
+.header {
+  padding-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.logo {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin: 0;
+}
+
+.actions {
+  margin-bottom: var(--spacing-md);
+}
+
+.createButton {
+  border-radius: var(--radius-md);
+  height: 40px;
+  font-weight: 500;
+}
+
+.content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.placeholder {
+  color: var(--color-text-tertiary);
+  text-align: center;
+  padding: var(--spacing-lg);
+}

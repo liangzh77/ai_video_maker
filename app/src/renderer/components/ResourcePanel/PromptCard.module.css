@@ -1,0 +1,82 @@
+.card {
+  position: relative;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-main);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  min-height: 80px;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.card.selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  word-break: break-word;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+}
+
+.empty {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+.editButton {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.card:hover .editButton {
+  opacity: 1;
+}
+
+.editButton:hover {
+  background-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.editMode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.textarea {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.editActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+}

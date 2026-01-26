@@ -1,0 +1,31 @@
+.editor {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background-color: var(--color-bg-main);
+  padding: var(--spacing-md);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.textarea {
+  font-size: 14px;
+  line-height: 1.6;
+  border: none;
+  background-color: transparent;
+  resize: none;
+}
+
+.textarea:focus {
+  box-shadow: none !important;
+}
