@@ -1,2 +1,3 @@
 ﻿backup
 tools/__pycache__
+.env.local
