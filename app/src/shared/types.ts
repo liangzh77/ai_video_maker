@@ -135,6 +135,7 @@ export interface UpscaleConfig {
 export interface GenerateConfig {
   prompt: string;
   negativePrompt?: string;
+  modelEndpoint?: string;
 }
 
 export interface SynthesizeConfig {

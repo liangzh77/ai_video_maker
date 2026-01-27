@@ -14,6 +14,8 @@ export interface ElectronAPI {
     get: (params: { id: string }) => Promise<any>;
     add: (params: { draftId: string; type: string; filePath: string }) => Promise<any>;
     addBatch: (params: { draftId: string; files: Array<{ type: string; filePath: string }> }) => Promise<any>;
+    addFrame: (params: { draftId: string; type: string; imageData: string; fileName: string }) => Promise<any>;
+    addText: (params: { draftId: string; type: string; content: string }) => Promise<any>;
     update: (params: { id: string; metadata?: any }) => Promise<any>;
     delete: (params: { id: string }) => Promise<any>;
     openFolder: (params: { id: string }) => Promise<any>;
@@ -22,9 +24,10 @@ export interface ElectronAPI {
   task: {
     list: (params?: { draftId?: string; status?: string }) => Promise<any>;
     get: (params: { id: string }) => Promise<any>;
+    getModels: () => Promise<Array<{ id: string; name: string }>>;
     splitVideo: (params: { draftId: string; sourceVideoId: string; config?: any }) => Promise<any>;
     upscaleVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
-    generateImage: (params: { draftId: string; sourceImageId: string; promptResourceId: string }) => Promise<any>;
+    generateImage: (params: { draftId: string; sourceImageId: string; promptResourceId: string; modelEndpoint: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
   };
@@ -51,6 +54,8 @@ const api: ElectronAPI = {
     get: (params) => ipcRenderer.invoke('resource:get', params),
     add: (params) => ipcRenderer.invoke('resource:add', params),
     addBatch: (params) => ipcRenderer.invoke('resource:addBatch', params),
+    addFrame: (params) => ipcRenderer.invoke('resource:addFrame', params),
+    addText: (params) => ipcRenderer.invoke('resource:addText', params),
     update: (params) => ipcRenderer.invoke('resource:update', params),
     delete: (params) => ipcRenderer.invoke('resource:delete', params),
     openFolder: (params) => ipcRenderer.invoke('resource:openFolder', params),
@@ -59,6 +64,7 @@ const api: ElectronAPI = {
   task: {
     list: (params) => ipcRenderer.invoke('task:list', params),
     get: (params) => ipcRenderer.invoke('task:get', params),
+    getModels: () => ipcRenderer.invoke('task:getModels'),
     splitVideo: (params) => ipcRenderer.invoke('task:splitVideo', params),
     upscaleVideo: (params) => ipcRenderer.invoke('task:upscaleVideo', params),
     generateImage: (params) => ipcRenderer.invoke('task:generateImage', params),

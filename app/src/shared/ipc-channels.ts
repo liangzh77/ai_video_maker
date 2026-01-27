@@ -20,6 +20,8 @@ export const RESOURCE_CHANNELS = {
   GET: 'resource:get',
   ADD: 'resource:add',
   ADD_BATCH: 'resource:addBatch',
+  ADD_FRAME: 'resource:addFrame',
+  ADD_TEXT: 'resource:addText',
   UPDATE: 'resource:update',
   DELETE: 'resource:delete',
   OPEN_FOLDER: 'resource:openFolder',
@@ -37,6 +39,7 @@ export const TASK_CHANNELS = {
   GENERATE_IMAGE: 'task:generateImage',
   SYNTHESIZE_VIDEO: 'task:synthesizeVideo',
   CANCEL: 'task:cancel',
+  GET_MODELS: 'task:getModels',
 } as const;
 
 // ============================================

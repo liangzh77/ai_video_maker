@@ -1,0 +1,124 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.sectionTitle {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.count {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.modelSelect {
+  width: 100%;
+}
+
+.promptPreview {
+  padding: var(--spacing-md);
+  background-color: var(--color-bg-main);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  max-height: 100px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.imageGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--spacing-md);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: var(--spacing-xs);
+}
+
+.imageItem {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+  background-color: var(--color-bg-main);
+}
+
+.imageItem:hover {
+  border-color: var(--color-primary-light);
+}
+
+.imageItem.selected {
+  border-color: var(--color-primary);
+}
+
+.thumbnail {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+
+.selectedBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: var(--color-primary);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.imageName {
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  padding: var(--spacing-lg) 0;
+}
+
+.progressSection {
+  padding: var(--spacing-md);
+  background-color: var(--color-bg-main);
+  border-radius: var(--radius-md);
+}
+
+.statusText {
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-top: var(--spacing-sm);
+}
+
+.timer {
+  color: var(--color-primary);
+  font-weight: 500;
+}

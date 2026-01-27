@@ -6,6 +6,7 @@ import { lookup } from 'mime-types';
 import storage from './services/storage';
 import registerDraftHandlers from './ipc/draft';
 import registerResourceHandlers from './ipc/resource';
+import registerTaskHandlers from './ipc/task';
 
 // Register custom protocol for local files
 protocol.registerSchemesAsPrivileged([
@@ -127,6 +128,9 @@ app.whenReady().then(async () => {
   });
 
   createWindow();
+
+  // Register task handlers after window creation
+  registerTaskHandlers(mainWindow);
 
   app.on('activate', () => {
     // On macOS re-create a window when dock icon is clicked

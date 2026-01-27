@@ -37,31 +37,42 @@
   font-style: italic;
 }
 
-.editButton {
+.actions {
   position: absolute;
   top: var(--spacing-sm);
   right: var(--spacing-sm);
   display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.card:hover .actions {
+  opacity: 1;
+}
+
+.actionButton {
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: none;
   background: transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--color-text-tertiary);
-  opacity: 0;
-  transition: opacity 0.15s, background-color 0.15s;
+  transition: background-color 0.15s, color 0.15s;
 }
 
-.card:hover .editButton {
-  opacity: 1;
-}
-
-.editButton:hover {
+.actionButton:hover {
   background-color: var(--color-border);
   color: var(--color-text-primary);
+}
+
+.actionButton.deleteButton:hover {
+  background-color: var(--color-error);
+  color: white;
 }
 
 .editMode {

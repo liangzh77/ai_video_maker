@@ -12,6 +12,12 @@
   margin-bottom: var(--spacing-sm);
 }
 
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
 .label {
   font-size: 12px;
   font-weight: 500;
