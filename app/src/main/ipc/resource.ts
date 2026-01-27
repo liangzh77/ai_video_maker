@@ -47,9 +47,103 @@ interface ResourceOpenFolderRequest {
   id: string;
 }
 
+interface ResourceAddFrameRequest {
+  draftId: string;
+  type: ResourceType;
+  imageData: string; // base64 encoded image data (without data URL prefix)
+  fileName: string;
+}
+
+interface ResourceAddTextRequest {
+  draftId: string;
+  type: ResourceType;
+  content: string;
+}
+
 // ============================================
 // Helper Functions
 // ============================================
+
+async function createResourceFromImageData(
+  draftId: string,
+  type: ResourceType,
+  imageData: string,
+  fileName: string
+): Promise<Resource> {
+  // Decode base64 image data
+  const buffer = Buffer.from(imageData, 'base64');
+
+  // Generate unique filename
+  const ext = path.extname(fileName) || '.png';
+  const baseName = path.basename(fileName, ext);
+  const uniqueId = uuidv4().slice(0, 8);
+  const newFileName = `${baseName}_${uniqueId}${ext}`;
+
+  // Get destination path in draft's files directory
+  const filesDir = storage.getFilesPath(draftId);
+  await fs.mkdir(filesDir, { recursive: true });
+  const destPath = path.join(filesDir, newFileName);
+
+  // Write image data to file
+  await fs.writeFile(destPath, buffer);
+
+  // Get file stats
+  const stats = await fs.stat(destPath);
+  const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
+
+  // Extract metadata
+  const metadata = await extractMetadata(destPath, type);
+
+  return await storage.resource.add(draftId, {
+    type,
+    filePath: destPath,
+    fileName: fileName,
+    fileSize: stats.size,
+    mimeType,
+    metadata,
+  });
+}
+
+async function createResourceFromText(
+  draftId: string,
+  type: ResourceType,
+  content: string
+): Promise<Resource> {
+  console.log('createResourceFromText: Starting...', { draftId, type, contentLength: content?.length });
+
+  // Generate unique filename
+  const uniqueId = uuidv4().slice(0, 8);
+  const fileName = `prompt_${uniqueId}.txt`;
+
+  // Get destination path in draft's files directory
+  const filesDir = storage.getFilesPath(draftId);
+  console.log('createResourceFromText: filesDir =', filesDir);
+  await fs.mkdir(filesDir, { recursive: true });
+  const destPath = path.join(filesDir, fileName);
+  console.log('createResourceFromText: destPath =', destPath);
+
+  // Write text content to file
+  await fs.writeFile(destPath, content, 'utf-8');
+  console.log('createResourceFromText: File written');
+
+  // Get file stats
+  const stats = await fs.stat(destPath);
+  console.log('createResourceFromText: File size =', stats.size);
+
+  const resource = await storage.resource.add(draftId, {
+    type,
+    filePath: destPath,
+    fileName: fileName,
+    fileSize: stats.size,
+    mimeType: 'text/plain',
+    metadata: {
+      content,
+      encoding: 'utf-8',
+    },
+  });
+  console.log('createResourceFromText: Resource added to storage:', resource.id);
+  return resource;
+}
 
 async function createResourceFromFile(
   draftId: string,
@@ -197,6 +291,69 @@ export function registerResourceHandlers(): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to add resources',
+        };
+      }
+    }
+  );
+
+  // Add frame as image resource (from base64 data)
+  ipcMain.handle(
+    RESOURCE_CHANNELS.ADD_FRAME,
+    async (_, request: ResourceAddFrameRequest): Promise<OperationResult<Resource>> => {
+      console.log('ADD_FRAME handler called:', { draftId: request.draftId, type: request.type, fileName: request.fileName, imageDataLength: request.imageData?.length });
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          console.error('ADD_FRAME: Draft not found:', request.draftId);
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        const resource = await createResourceFromImageData(
+          request.draftId,
+          request.type,
+          request.imageData,
+          request.fileName
+        );
+
+        console.log('ADD_FRAME: Resource created:', resource.id);
+        return { success: true, data: resource };
+      } catch (error) {
+        console.error('ADD_FRAME error:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to add frame',
+        };
+      }
+    }
+  );
+
+  // Add text resource (for prompts)
+  ipcMain.handle(
+    RESOURCE_CHANNELS.ADD_TEXT,
+    async (_, request: ResourceAddTextRequest): Promise<OperationResult<Resource>> => {
+      console.log('ADD_TEXT handler called:', { draftId: request.draftId, type: request.type, contentLength: request.content?.length });
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          console.error('ADD_TEXT: Draft not found:', request.draftId);
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        const resource = await createResourceFromText(
+          request.draftId,
+          request.type,
+          request.content
+        );
+
+        console.log('ADD_TEXT: Resource created:', resource.id);
+        return { success: true, data: resource };
+      } catch (error) {
+        console.error('ADD_TEXT error:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to add text resource',
         };
       }
     }

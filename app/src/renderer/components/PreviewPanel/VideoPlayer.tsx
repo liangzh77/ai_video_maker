@@ -6,9 +6,13 @@ import {
   SoundOutlined,
   MutedOutlined,
   FullscreenOutlined,
+  CameraOutlined,
 } from '@ant-design/icons';
 import type { Resource } from '@shared/types';
 import styles from './VideoPlayer.module.css';
+
+// Custom MIME type for frame data transfer
+const FRAME_DATA_MIME = 'application/x-video-frame';
 
 interface VideoPlayerProps {
   src: string;
@@ -237,6 +241,63 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, resource }) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Capture current frame as base64 image
+  const captureCurrentFrame = useCallback((): { imageData: string; fileName: string } | null => {
+    const video = videoRef.current;
+    if (!video || video.readyState < 2) {
+      console.log('captureCurrentFrame: video not ready', video?.readyState);
+      return null;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/png');
+    // Remove data URL prefix to get pure base64
+    const imageData = dataUrl.replace(/^data:image\/png;base64,/, '');
+
+    // Generate filename based on video name and timestamp
+    const baseName = resource.fileName.replace(/\.[^/.]+$/, '');
+    const timeStr = formatTime(currentTime).replace(':', '-');
+    const fileName = `${baseName}_frame_${timeStr}.png`;
+
+    console.log('captureCurrentFrame: captured', { fileName, imageDataLength: imageData.length });
+    return { imageData, fileName };
+  }, [resource.fileName, currentTime]);
+
+  // Handle drag start - capture frame and set data
+  const handleDragStart = useCallback((e: React.DragEvent) => {
+    console.log('handleDragStart called');
+    const frameData = captureCurrentFrame();
+    if (!frameData) {
+      console.log('handleDragStart: no frame data, preventing drag');
+      e.preventDefault();
+      return;
+    }
+
+    // Set custom data for frame transfer
+    e.dataTransfer.setData(FRAME_DATA_MIME, JSON.stringify(frameData));
+    e.dataTransfer.effectAllowed = 'copy';
+    console.log('handleDragStart: data set successfully');
+
+    // Create drag image from current frame
+    const video = videoRef.current;
+    if (video) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 120;
+      canvas.height = Math.round(120 * video.videoHeight / video.videoWidth);
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        e.dataTransfer.setDragImage(canvas, 60, canvas.height / 2);
+      }
+    }
+  }, [captureCurrentFrame]);
+
   return (
     <div
       ref={containerRef}
@@ -250,6 +311,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, resource }) => {
         className={styles.video}
         onClick={togglePlay}
         preload="metadata"
+        draggable
+        onDragStart={handleDragStart}
       />
 
       <div className={`${styles.controls} ${showControls ? styles.visible : ''}`}>

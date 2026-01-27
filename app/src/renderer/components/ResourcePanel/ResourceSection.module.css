@@ -24,6 +24,27 @@
   border-radius: var(--radius-sm);
 }
 
+.addButton {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.addButton:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background-color: rgba(0, 122, 255, 0.05);
+}
+
 .content {
   background-color: var(--color-bg-card);
   border-radius: var(--radius-lg);

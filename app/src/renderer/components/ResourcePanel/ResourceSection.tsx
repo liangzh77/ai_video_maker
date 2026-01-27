@@ -1,11 +1,14 @@
 import React, { useState, useCallback } from 'react';
 import { Empty, App } from 'antd';
-import { InboxOutlined } from '@ant-design/icons';
+import { InboxOutlined, PlusOutlined } from '@ant-design/icons';
 import type { Resource, ResourceType } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import ResourceCard from './ResourceCard';
 import PromptCard from './PromptCard';
 import styles from './ResourceSection.module.css';
+
+// Custom MIME type for frame data transfer (must match VideoPlayer)
+const FRAME_DATA_MIME = 'application/x-video-frame';
 
 interface ResourceSectionProps {
   title: string;
@@ -45,10 +48,35 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   isLarge = false,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
-  const { selectedDraftId, addResource } = useDraftStore();
+  const { selectedDraftId, addResource, addFrameAsResource, addTextResource } = useDraftStore();
   const { message } = App.useApp();
 
   const canDrop = !!acceptFormats && acceptFormats.length > 0;
+
+  const handleAddPrompt = async () => {
+    console.log('=== handleAddPrompt START ===');
+    console.log('handleAddPrompt params:', { selectedDraftId, type, isText });
+    if (!selectedDraftId) {
+      console.error('handleAddPrompt: No selectedDraftId - aborting');
+      message.error('请先选择一个草稿');
+      return;
+    }
+    console.log('handleAddPrompt: Calling addTextResource...');
+    try {
+      const result = await addTextResource(selectedDraftId, type, '');
+      console.log('handleAddPrompt result:', result);
+      if (result) {
+        message.success('已添加提示词');
+        console.log('=== handleAddPrompt SUCCESS ===');
+      } else {
+        message.error('添加失败');
+        console.error('=== handleAddPrompt FAILED (null result) ===');
+      }
+    } catch (error) {
+      console.error('handleAddPrompt exception:', error);
+      message.error('添加失败: ' + (error instanceof Error ? error.message : String(error)));
+    }
+  };
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -76,6 +104,30 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     if (!canDrop || !selectedDraftId) return;
 
+    // Check for frame data from video player
+    const frameDataStr = e.dataTransfer.getData(FRAME_DATA_MIME);
+    if (frameDataStr) {
+      try {
+        const frameData = JSON.parse(frameDataStr) as { imageData: string; fileName: string };
+        const result = await addFrameAsResource(
+          selectedDraftId,
+          type,
+          frameData.imageData,
+          frameData.fileName
+        );
+        if (result) {
+          message.success('已添加视频帧截图');
+        } else {
+          message.error('添加视频帧失败');
+        }
+      } catch (error) {
+        console.error('Failed to add frame:', error);
+        message.error('添加视频帧失败');
+      }
+      return;
+    }
+
+    // Handle regular file drops
     const files = Array.from(e.dataTransfer.files);
     if (files.length === 0) return;
 
@@ -116,7 +168,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     if (skippedCount > 0) {
       message.warning(`${skippedCount} 个文件格式不支持或添加失败`);
     }
-  }, [canDrop, selectedDraftId, type, acceptFormats, addResource]);
+  }, [canDrop, selectedDraftId, type, acceptFormats, addResource, addFrameAsResource, message]);
 
   const contentClasses = [
     styles.content,
@@ -130,6 +182,11 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       <div className={styles.header}>
         <h3 className={styles.title}>{title}</h3>
         <span className={styles.count}>{resources.length}</span>
+        {isText && (
+          <button className={styles.addButton} onClick={handleAddPrompt} title="添加提示词">
+            <PlusOutlined />
+          </button>
+        )}
       </div>
 
       <div

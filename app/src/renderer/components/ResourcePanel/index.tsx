@@ -49,12 +49,6 @@ const ResourcePanel: React.FC = () => {
         />
 
         <ResourceSection
-          title="分镜源视频"
-          type="scene_source"
-          resources={sceneSource}
-        />
-
-        <ResourceSection
           title="提示词"
           type="prompt"
           resources={prompts}
@@ -66,6 +60,12 @@ const ResourcePanel: React.FC = () => {
           type="new_character"
           resources={newCharacters}
           badge="AI 生成"
+        />
+
+        <ResourceSection
+          title="分镜源视频"
+          type="scene_source"
+          resources={sceneSource}
         />
 
         <ResourceSection

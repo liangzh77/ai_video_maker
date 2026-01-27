@@ -52,9 +52,13 @@ const DraftItem: React.FC<DraftItemProps> = ({ draft, isSelected }) => {
       key: 'rename',
       icon: <EditOutlined />,
       label: '重命名',
-      onClick: () => {
+      onClick: (e) => {
+        e.domEvent.stopPropagation();
         setEditName(draft.name);
-        setIsEditing(true);
+        // 延迟设置编辑状态，确保菜单关闭后再显示输入框
+        setTimeout(() => {
+          setIsEditing(true);
+        }, 100);
       },
     },
     {

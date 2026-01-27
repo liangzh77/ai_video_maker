@@ -25,6 +25,8 @@ interface DraftState {
   loadResources: (draftId: string) => Promise<void>;
   selectResource: (id: string | null) => void;
   addResource: (draftId: string, type: ResourceType, filePath: string) => Promise<Resource | null>;
+  addFrameAsResource: (draftId: string, type: ResourceType, imageData: string, fileName: string) => Promise<Resource | null>;
+  addTextResource: (draftId: string, type: ResourceType, content: string) => Promise<Resource | null>;
   updateResource: (id: string, metadata: Partial<Resource['metadata']>) => Promise<Resource | null>;
   deleteResource: (id: string) => Promise<boolean>;
   openResourceFolder: (id: string) => Promise<void>;
@@ -149,6 +151,57 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       }
       return null;
     } catch {
+      return null;
+    }
+  },
+
+  addFrameAsResource: async (draftId: string, type: ResourceType, imageData: string, fileName: string) => {
+    try {
+      console.log('addFrameAsResource called:', { draftId, type, fileName, imageDataLength: imageData.length });
+      const result: OperationResult<Resource> = await window.api.resource.addFrame({
+        draftId,
+        type,
+        imageData,
+        fileName,
+      });
+      console.log('addFrameAsResource result:', result);
+      if (result.success && result.data) {
+        set((state) => ({
+          resources: [...state.resources, result.data!],
+        }));
+        return result.data;
+      }
+      console.error('addFrameAsResource failed:', result.error);
+      return null;
+    } catch (error) {
+      console.error('addFrameAsResource exception:', error);
+      return null;
+    }
+  },
+
+  addTextResource: async (draftId: string, type: ResourceType, content: string) => {
+    console.log('=== store.addTextResource START ===');
+    console.log('store.addTextResource params:', { draftId, type, contentLength: content.length });
+    try {
+      console.log('store.addTextResource: Calling window.api.resource.addText...');
+      const result: OperationResult<Resource> = await window.api.resource.addText({
+        draftId,
+        type,
+        content,
+      });
+      console.log('store.addTextResource IPC result:', result);
+      if (result.success && result.data) {
+        console.log('store.addTextResource: Updating state with new resource:', result.data.id);
+        set((state) => ({
+          resources: [...state.resources, result.data!],
+        }));
+        console.log('=== store.addTextResource SUCCESS ===');
+        return result.data;
+      }
+      console.error('store.addTextResource: IPC returned failure:', result.error);
+      return null;
+    } catch (error) {
+      console.error('store.addTextResource exception:', error);
       return null;
     }
   },

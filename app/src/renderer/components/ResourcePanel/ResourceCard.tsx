@@ -1,5 +1,6 @@
 import React from 'react';
-import { PlayCircleOutlined, FileImageOutlined, CheckCircleFilled } from '@ant-design/icons';
+import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined } from '@ant-design/icons';
+import { App } from 'antd';
 import type { Resource } from '@shared/types';
 import { isVideoMetadata, isImageMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
@@ -18,13 +19,24 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   badgeType = 'default',
   isLarge = false,
 }) => {
-  const { selectedResourceId, selectResource } = useDraftStore();
+  const { selectedResourceId, selectResource, deleteResource } = useDraftStore();
+  const { message } = App.useApp();
   const isSelected = selectedResourceId === resource.id;
   const isVideo = resource.mimeType.startsWith('video/');
   const isImage = resource.mimeType.startsWith('image/');
 
   const handleClick = () => {
     selectResource(resource.id);
+  };
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const success = await deleteResource(resource.id);
+    if (success) {
+      message.success('已删除');
+    } else {
+      message.error('删除失败');
+    }
   };
 
   const formatDuration = (seconds: number): string => {
@@ -59,6 +71,10 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
     >
       <div className={styles.thumbnailWrapper}>
         {getThumbnail()}
+
+        <button className={styles.deleteButton} onClick={handleDelete}>
+          <CloseOutlined />
+        </button>
 
         {badge && (
           <span className={`${styles.badge} ${styles[badgeType]}`}>
