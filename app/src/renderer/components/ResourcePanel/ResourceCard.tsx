@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined } from '@ant-design/icons';
 import { App } from 'antd';
 import type { Resource } from '@shared/types';
-import { isVideoMetadata, isImageMetadata } from '@shared/types';
+import { isVideoMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import styles from './ResourceCard.module.css';
 
@@ -12,6 +12,87 @@ interface ResourceCardProps {
   badgeType?: 'default' | 'success' | 'warning';
   isLarge?: boolean;
 }
+
+// Video thumbnail component that displays the first frame
+const VideoThumbnail: React.FC<{ src: string; alt: string }> = ({ src, alt }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasError, setHasError] = useState(false);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    let isMounted = true;
+
+    console.log('[VideoThumbnail] Starting to load video:', src);
+
+    // Reset state
+    setIsLoaded(false);
+    setHasError(false);
+
+    const handleLoadedMetadata = () => {
+      if (!isMounted) return;
+      console.log('[VideoThumbnail] loadedmetadata event, seeking to 0.1s');
+      video.currentTime = 0.1;
+    };
+
+    const handleSeeked = () => {
+      if (!isMounted) return;
+      console.log('[VideoThumbnail] seeked event, video loaded successfully');
+      setIsLoaded(true);
+    };
+
+    const handleError = () => {
+      if (!isMounted) return;
+      console.error('[VideoThumbnail] Failed to load video:', src, 'error:', video.error);
+      setHasError(true);
+    };
+
+    // Register listeners BEFORE setting src
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('seeked', handleSeeked);
+    video.addEventListener('error', handleError);
+
+    // Now set src and trigger load
+    video.src = src;
+    video.load();
+
+    return () => {
+      isMounted = false;
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('seeked', handleSeeked);
+      video.removeEventListener('error', handleError);
+      // Release file reference to prevent file locking
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    };
+  }, [src]);
+
+  return (
+    <>
+      {/* Always render video element, hide with CSS when not loaded */}
+      <video
+        ref={videoRef}
+        className={styles.thumbnail}
+        preload="auto"
+        muted
+        playsInline
+        crossOrigin="anonymous"
+        style={{
+          opacity: isLoaded && !hasError ? 1 : 0,
+          position: isLoaded && !hasError ? 'relative' : 'absolute',
+        }}
+      />
+      {(!isLoaded || hasError) && (
+        <div className={styles.videoPlaceholder} style={{ position: 'absolute', inset: 0 }}>
+          <PlayCircleOutlined className={styles.playIcon} />
+        </div>
+      )}
+    </>
+  );
+};
 
 const ResourceCard: React.FC<ResourceCardProps> = ({
   resource,
@@ -45,18 +126,36 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Build local file URL - need triple slash for Windows paths
+  const getLocalFileUrl = (filePath: string) => {
+    // On Windows, paths start with drive letter like C:\
+    // URL format should be: local-file:///C:/path/to/file
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    return `local-file:///${normalizedPath}`;
+  };
+
   const getThumbnail = () => {
     if (isImage) {
       return (
         <img
-          src={`local-file://${encodeURIComponent(resource.filePath)}`}
+          src={getLocalFileUrl(resource.filePath)}
           alt={resource.fileName}
           className={styles.thumbnail}
         />
       );
     }
 
-    // For video, show placeholder with play icon
+    // For video, show first frame as thumbnail
+    if (isVideo) {
+      return (
+        <VideoThumbnail
+          src={getLocalFileUrl(resource.filePath)}
+          alt={resource.fileName}
+        />
+      );
+    }
+
+    // Fallback placeholder
     return (
       <div className={styles.videoPlaceholder}>
         <PlayCircleOutlined className={styles.playIcon} />
@@ -87,22 +186,6 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
           <span className={styles.duration}>
             {formatDuration(resource.metadata.duration)}
           </span>
-        )}
-      </div>
-
-      <div className={styles.info}>
-        <div className={styles.name} title={resource.fileName}>
-          {resource.fileName}
-        </div>
-        {isVideoMetadata(resource.metadata) && (
-          <div className={styles.meta}>
-            {resource.metadata.width}×{resource.metadata.height}
-          </div>
-        )}
-        {isImageMetadata(resource.metadata) && (
-          <div className={styles.meta}>
-            {resource.metadata.width}×{resource.metadata.height}
-          </div>
         )}
       </div>
     </div>

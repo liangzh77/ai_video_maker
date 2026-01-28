@@ -26,6 +26,9 @@ export const RESOURCE_CHANNELS = {
   DELETE: 'resource:delete',
   OPEN_FOLDER: 'resource:openFolder',
   CAPTURE_FRAME: 'resource:captureFrame',
+  DELETE_SPLIT_FOLDERS: 'resource:deleteSplitFolders',
+  SAVE_SPLIT_POINTS: 'resource:saveSplitPoints',
+  LOAD_SPLIT_POINTS: 'resource:loadSplitPoints',
 } as const;
 
 // ============================================
@@ -34,7 +37,9 @@ export const RESOURCE_CHANNELS = {
 export const TASK_CHANNELS = {
   LIST: 'task:list',
   GET: 'task:get',
+  ANALYZE_VIDEO: 'task:analyzeVideo',           // 分析视频（只检测分割点）
   SPLIT_VIDEO: 'task:splitVideo',
+  SPLIT_VIDEO_WITH_POINTS: 'task:splitVideoWithPoints', // 使用自定义分割点切分
   UPSCALE_VIDEO: 'task:upscaleVideo',
   GENERATE_IMAGE: 'task:generateImage',
   SYNTHESIZE_VIDEO: 'task:synthesizeVideo',

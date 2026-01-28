@@ -486,6 +486,123 @@ export function registerResourceHandlers(): void {
       }
     }
   );
+
+  // Delete all split folders for a draft
+  ipcMain.handle(
+    RESOURCE_CHANNELS.DELETE_SPLIT_FOLDERS,
+    async (_, request: { draftId: string }): Promise<OperationResult<number>> => {
+      try {
+        const filesDir = storage.getFilesPath(request.draftId);
+        let deletedCount = 0;
+
+        try {
+          const entries = await fs.readdir(filesDir, { withFileTypes: true });
+
+          for (const entry of entries) {
+            // Find directories matching split_* pattern
+            if (entry.isDirectory() && entry.name.startsWith('split_')) {
+              const splitDir = path.join(filesDir, entry.name);
+              try {
+                await fs.rm(splitDir, { recursive: true, force: true });
+                deletedCount++;
+                console.log('[Resource] Deleted split folder:', splitDir);
+              } catch (err) {
+                console.error('[Resource] Failed to delete split folder:', splitDir, err);
+              }
+            }
+          }
+        } catch {
+          // files directory may not exist, which is fine
+        }
+
+        return { success: true, data: deletedCount };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to delete split folders',
+        };
+      }
+    }
+  );
+
+  // Save split points for a video
+  ipcMain.handle(
+    RESOURCE_CHANNELS.SAVE_SPLIT_POINTS,
+    async (
+      _,
+      request: {
+        draftId: string;
+        videoId: string;
+        duration: number;
+        fps: number;
+        splitPoints: Array<{
+          id: string;
+          time: number;
+          frame: number;
+          isAutoDetected: boolean;
+        }>;
+      }
+    ): Promise<OperationResult> => {
+      try {
+        await storage.splitPoints.save(request.draftId, request.videoId, {
+          videoId: request.videoId,
+          duration: request.duration,
+          fps: request.fps,
+          splitPoints: request.splitPoints,
+        });
+        console.log('[Resource] Saved split points for video:', request.videoId);
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to save split points',
+        };
+      }
+    }
+  );
+
+  // Load split points for a video
+  ipcMain.handle(
+    RESOURCE_CHANNELS.LOAD_SPLIT_POINTS,
+    async (
+      _,
+      request: { draftId: string; videoId: string }
+    ): Promise<
+      OperationResult<{
+        videoId: string;
+        duration: number;
+        fps: number;
+        splitPoints: Array<{
+          id: string;
+          time: number;
+          frame: number;
+          isAutoDetected: boolean;
+        }>;
+      }>
+    > => {
+      try {
+        const data = await storage.splitPoints.load(request.draftId, request.videoId);
+        if (data) {
+          console.log('[Resource] Loaded split points for video:', request.videoId);
+          return {
+            success: true,
+            data: {
+              videoId: data.videoId,
+              duration: data.duration,
+              fps: data.fps,
+              splitPoints: data.splitPoints,
+            },
+          };
+        }
+        return { success: true, data: undefined };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to load split points',
+        };
+      }
+    }
+  );
 }
 
 export default registerResourceHandlers;

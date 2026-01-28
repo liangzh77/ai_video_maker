@@ -24,6 +24,18 @@ export interface UpscaleResult {
   fps: number;
 }
 
+export interface AnalyzeSceneResult {
+  scenes: Array<{
+    index: number;
+    startTime: number;
+    endTime: number;
+    startFrame: number;
+    endFrame: number;
+  }>;
+  fps: number;
+  duration: number;
+}
+
 // ============================================
 // Path Utilities
 // ============================================
@@ -78,14 +90,23 @@ export async function runVideoSplitter(
 
   const args = [videoPath, '-o', outputDir];
 
-  if (config.detectorType) {
-    args.push('-d', config.detectorType);
-  }
-  if (config.threshold !== undefined) {
-    args.push('-t', String(config.threshold));
-  }
-  if (config.minSceneLen !== undefined) {
-    args.push('-m', String(config.minSceneLen));
+  // 如果有自定义分割点，使用它们而不是自动检测参数
+  if (config.customPoints && config.customPoints.length > 0) {
+    // 提取分割点时间并转为 JSON
+    const pointTimes = config.customPoints.map((p) => p.time);
+    args.push('--points', JSON.stringify(pointTimes));
+    console.log('[VideoSplitter] Using custom points:', pointTimes.length);
+  } else {
+    // 使用自动检测参数
+    if (config.detectorType) {
+      args.push('-d', config.detectorType);
+    }
+    if (config.threshold !== undefined) {
+      args.push('-t', String(config.threshold));
+    }
+    if (config.minSceneLen !== undefined) {
+      args.push('-m', String(config.minSceneLen));
+    }
   }
 
   const options: Options = {
@@ -155,6 +176,131 @@ export async function runVideoSplitter(
       resolve({
         outputDir: outputDirResult,
         scenes,
+      });
+    });
+  });
+}
+
+// ============================================
+// Video Analyzer (Detect Only)
+// ============================================
+
+export async function runVideoAnalyzer(
+  videoPath: string,
+  config: Partial<SplitConfig> = {},
+  onProgress?: (progress: number) => void,
+  appConfig?: AppConfig
+): Promise<AnalyzeSceneResult> {
+  const toolsPath = getToolsPath();
+  const scriptPath = path.join(toolsPath, 'video_splitter.py');
+
+  // 使用 --detect-only 参数只检测场景，不切分
+  const args = [videoPath, '--detect-only'];
+
+  if (config.detectorType) {
+    args.push('-d', config.detectorType);
+  }
+  if (config.threshold !== undefined) {
+    args.push('-t', String(config.threshold));
+  }
+  if (config.minSceneLen !== undefined) {
+    args.push('-m', String(config.minSceneLen));
+  }
+
+  const options: Options = {
+    mode: 'text',
+    pythonPath: getPythonPath(appConfig),
+    args,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+    },
+  };
+
+  return new Promise((resolve, reject) => {
+    console.log('[VideoAnalyzer] Starting with script:', scriptPath);
+    console.log('[VideoAnalyzer] Args:', args);
+
+    const shell = new PythonShell(scriptPath, options);
+    const scenes: AnalyzeSceneResult['scenes'] = [];
+    let fps = 30;
+    let duration = 0;
+
+    shell.on('message', (message: string) => {
+      console.log('[VideoAnalyzer] stdout:', message);
+
+      // Parse progress
+      const progress = parseProgress(message);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
+
+      // Parse scene info: "Scene 1: 0.00s - 5.00s (frame 0 - 150)"
+      // 或者现有格式: "Scene 1: 0.00s - 5.00s -> filepath"
+      const sceneMatch = message.match(
+        /Scene\s+(\d+):\s*([\d.]+)s\s*-\s*([\d.]+)s/i
+      );
+      if (sceneMatch) {
+        const startTime = parseFloat(sceneMatch[2]);
+        const endTime = parseFloat(sceneMatch[3]);
+        // 从时间和 fps 计算帧号
+        scenes.push({
+          index: parseInt(sceneMatch[1], 10),
+          startTime,
+          endTime,
+          startFrame: Math.round(startTime * fps),
+          endFrame: Math.round(endTime * fps),
+        });
+      }
+
+      // Parse FPS info
+      const fpsMatch = message.match(/FPS[:\s]*([\d.]+)/i);
+      if (fpsMatch) {
+        fps = parseFloat(fpsMatch[1]);
+      }
+
+      // Parse duration info
+      const durationMatch = message.match(/Duration[:\s]*([\d.]+)/i);
+      if (durationMatch) {
+        duration = parseFloat(durationMatch[1]);
+      }
+
+      // Parse total scenes info for duration estimation
+      const totalMatch = message.match(/Total files:\s*(\d+)/i);
+      if (totalMatch && scenes.length > 0) {
+        // 使用最后一个场景的结束时间作为视频时长
+        duration = scenes[scenes.length - 1].endTime;
+      }
+    });
+
+    shell.on('stderr', (stderr: string) => {
+      console.log('[VideoAnalyzer stderr]', stderr);
+    });
+
+    shell.on('error', (err: Error) => {
+      reject(new Error(`Video analyzer failed: ${err.message}`));
+    });
+
+    shell.on('close', () => {
+      console.log('[VideoAnalyzer] Process closed. Total scenes:', scenes.length);
+
+      // 如果检测到场景，使用最后一个场景的结束时间作为时长
+      if (scenes.length > 0 && duration === 0) {
+        duration = scenes[scenes.length - 1].endTime;
+      }
+
+      // 重新计算帧号（使用最终的 fps）
+      const scenesWithFrames = scenes.map((scene) => ({
+        ...scene,
+        startFrame: Math.round(scene.startTime * fps),
+        endFrame: Math.round(scene.endTime * fps),
+      }));
+
+      resolve({
+        scenes: scenesWithFrames,
+        fps,
+        duration,
       });
     });
   });
@@ -256,6 +402,7 @@ export async function runVideoUpscaler(
 // ============================================
 
 export const pythonBridge = {
+  analyzeVideo: runVideoAnalyzer,
   splitVideo: runVideoSplitter,
   upscaleVideo: runVideoUpscaler,
 };

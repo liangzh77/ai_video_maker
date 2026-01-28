@@ -241,6 +241,57 @@ export async function deleteResource(draftId: string, resourceId: string): Promi
 }
 
 // ============================================
+// Split Points Storage
+// ============================================
+
+function getSplitPointsPath(draftId: string, videoId: string): string {
+  return path.join(getDraftPath(draftId), `split_points_${videoId}.json`);
+}
+
+interface SplitPointsFile {
+  videoId: string;
+  duration: number;
+  fps: number;
+  splitPoints: Array<{
+    id: string;
+    time: number;
+    frame: number;
+    isAutoDetected: boolean;
+  }>;
+  savedAt: string;
+}
+
+export async function saveSplitPoints(
+  draftId: string,
+  videoId: string,
+  data: Omit<SplitPointsFile, 'savedAt'>
+): Promise<void> {
+  const filePath = getSplitPointsPath(draftId, videoId);
+  await writeJson(filePath, {
+    ...data,
+    savedAt: new Date().toISOString(),
+  });
+}
+
+export async function loadSplitPoints(
+  draftId: string,
+  videoId: string
+): Promise<SplitPointsFile | null> {
+  const filePath = getSplitPointsPath(draftId, videoId);
+  return readJson<SplitPointsFile | null>(filePath, null);
+}
+
+export async function deleteSplitPoints(draftId: string, videoId: string): Promise<boolean> {
+  const filePath = getSplitPointsPath(draftId, videoId);
+  try {
+    await fs.unlink(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ============================================
 // Task CRUD Operations
 // ============================================
 
@@ -327,6 +378,11 @@ export const storage = {
     get: getTask,
     add: addTask,
     update: updateTask,
+  },
+  splitPoints: {
+    save: saveSplitPoints,
+    load: loadSplitPoints,
+    delete: deleteSplitPoints,
   },
 };
 

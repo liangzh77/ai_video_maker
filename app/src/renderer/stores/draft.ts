@@ -29,6 +29,7 @@ interface DraftState {
   addTextResource: (draftId: string, type: ResourceType, content: string) => Promise<Resource | null>;
   updateResource: (id: string, metadata: Partial<Resource['metadata']>) => Promise<Resource | null>;
   deleteResource: (id: string) => Promise<boolean>;
+  deleteResourcesByType: (type: ResourceType) => Promise<{ success: number; failed: number }>;
   openResourceFolder: (id: string) => Promise<void>;
 
   // Computed
@@ -238,6 +239,71 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     } catch {
       return false;
     }
+  },
+
+  deleteResourcesByType: async (type: ResourceType) => {
+    const { resources, selectedDraftId } = get();
+    const toDelete = resources.filter((r) => r.type === type);
+
+    if (toDelete.length === 0) {
+      return { success: 0, failed: 0 };
+    }
+
+    const deleteIds = toDelete.map((r) => r.id);
+    const currentSelectedId = get().selectedResourceId;
+    const wasSelectedDeleted = deleteIds.includes(currentSelectedId || '');
+
+    // If deleting scene_source and current selection was deleted, select source_video to keep split points visible
+    let newSelectedId: string | null = wasSelectedDeleted ? null : currentSelectedId;
+    if (type === 'scene_source' && wasSelectedDeleted) {
+      const sourceVideo = resources.find((r) => r.type === 'source_video');
+      if (sourceVideo) {
+        newSelectedId = sourceVideo.id;
+      }
+    }
+
+    // Step 1: Update UI first to unmount components and release file locks
+    set((state) => ({
+      resources: state.resources.filter((r) => r.type !== type),
+      selectedResourceId: newSelectedId,
+    }));
+
+    // Step 2: Wait for components to unmount and release file locks
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Step 3: Now delete files from disk
+    let successCount = 0;
+    let failedCount = 0;
+
+    for (const resource of toDelete) {
+      try {
+        const result: OperationResult = await window.api.resource.delete({ id: resource.id });
+        if (result.success) {
+          successCount++;
+        } else {
+          failedCount++;
+        }
+      } catch {
+        failedCount++;
+      }
+    }
+
+    // Step 4: If deleting scene_source, also delete split folders
+    if (type === 'scene_source' && selectedDraftId) {
+      try {
+        await window.api.resource.deleteSplitFolders({ draftId: selectedDraftId });
+      } catch (err) {
+        console.error('Failed to delete split folders:', err);
+      }
+    }
+
+    // Reload resources to ensure sync with disk
+    const { loadResources } = get();
+    if (selectedDraftId) {
+      await loadResources(selectedDraftId);
+    }
+
+    return { success: successCount, failed: failedCount };
   },
 
   openResourceFolder: async (id: string) => {

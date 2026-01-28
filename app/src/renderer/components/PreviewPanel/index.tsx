@@ -1,24 +1,57 @@
-import React, { useState } from 'react';
-import { Button, Tooltip } from 'antd';
-import { FolderOpenOutlined, ScissorOutlined } from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
+import { Button, Tooltip, Space } from 'antd';
+import { FolderOpenOutlined, ScissorOutlined, SearchOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
+import { useSplitPointsStore } from '../../stores/splitPoints';
 import { isVideoMetadata, isImageMetadata, isTextMetadata } from '@shared/types';
 import VideoPlayer from './VideoPlayer';
 import ImagePreview from './ImagePreview';
 import TextEditor from './TextEditor';
 import ResourceInfo from './ResourceInfo';
 import SplitVideoDialog from './SplitVideoDialog';
+import AnalyzeVideoDialog from './AnalyzeVideoDialog';
 import styles from './PreviewPanel.module.css';
 
 const PreviewPanel: React.FC = () => {
-  const { selectedResourceId, getSelectedResource, openResourceFolder } = useDraftStore();
+  const { selectedDraftId, selectedResourceId, getSelectedResource, openResourceFolder } = useDraftStore();
+  const { splitPoints, videoId, loadSplitPoints, clearPoints } = useSplitPointsStore();
   const selectedResource = getSelectedResource();
   const [splitDialogVisible, setSplitDialogVisible] = useState(false);
+  const [analyzeDialogVisible, setAnalyzeDialogVisible] = useState(false);
+
+  // Auto-load split points when selecting a source video
+  useEffect(() => {
+    if (!selectedDraftId || !selectedResourceId || !selectedResource) {
+      return;
+    }
+
+    // Only auto-load for source_video type
+    if (selectedResource.type !== 'source_video') {
+      return;
+    }
+
+    // Skip if already loaded for this video
+    if (videoId === selectedResourceId && splitPoints.length > 0) {
+      return;
+    }
+
+    // Try to load saved split points
+    loadSplitPoints(selectedDraftId, selectedResourceId);
+  }, [selectedDraftId, selectedResourceId, selectedResource, videoId, splitPoints.length, loadSplitPoints]);
 
   const handleOpenFolder = async () => {
     if (selectedResourceId) {
       await openResourceFolder(selectedResourceId);
     }
+  };
+
+  // Check if split points are for current video
+  const hasSplitPoints = splitPoints.length > 0 && videoId === selectedResourceId;
+
+  // Build local file URL - need triple slash for Windows paths
+  const getLocalFileUrl = (filePath: string) => {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    return `local-file:///${normalizedPath}`;
   };
 
   if (!selectedResourceId || !selectedResource) {
@@ -43,13 +76,25 @@ const PreviewPanel: React.FC = () => {
         <h3 className={styles.title}>预览</h3>
         <div className={styles.headerActions}>
           {isSourceVideo && (
-            <Tooltip title="分割视频">
-              <Button
-                type="text"
-                icon={<ScissorOutlined />}
-                onClick={() => setSplitDialogVisible(true)}
-              />
-            </Tooltip>
+            <Space size={0}>
+              {/* Analyze button */}
+              <Tooltip title="分析视频场景">
+                <Button
+                  type="text"
+                  icon={<SearchOutlined />}
+                  onClick={() => setAnalyzeDialogVisible(true)}
+                />
+              </Tooltip>
+              {/* Split button - only enabled when has split points */}
+              <Tooltip title={hasSplitPoints ? '切分视频' : '请先分析视频'}>
+                <Button
+                  type="text"
+                  icon={<ScissorOutlined />}
+                  onClick={() => setSplitDialogVisible(true)}
+                  disabled={!hasSplitPoints}
+                />
+              </Tooltip>
+            </Space>
           )}
           <Tooltip title="打开所在文件夹">
             <Button
@@ -64,14 +109,15 @@ const PreviewPanel: React.FC = () => {
       <div className={styles.content}>
         {isVideo && (
           <VideoPlayer
-            src={`local-file://${encodeURIComponent(selectedResource.filePath)}`}
+            src={getLocalFileUrl(selectedResource.filePath)}
             resource={selectedResource}
+            showSplitTimeline={isSourceVideo && hasSplitPoints}
           />
         )}
 
         {isImage && (
           <ImagePreview
-            src={`local-file://${encodeURIComponent(selectedResource.filePath)}`}
+            src={getLocalFileUrl(selectedResource.filePath)}
             resource={selectedResource}
           />
         )}
@@ -82,6 +128,15 @@ const PreviewPanel: React.FC = () => {
 
         <ResourceInfo resource={selectedResource} />
       </div>
+
+      {/* Analyze Video Dialog */}
+      {isSourceVideo && (
+        <AnalyzeVideoDialog
+          visible={analyzeDialogVisible}
+          resource={selectedResource}
+          onClose={() => setAnalyzeDialogVisible(false)}
+        />
+      )}
 
       {/* Split Video Dialog */}
       {isSourceVideo && (

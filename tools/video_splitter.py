@@ -430,6 +430,7 @@ if __name__ == "__main__":
     parser.add_argument("--save-images", action="store_true", help="保存场景图像")
     parser.add_argument("--images-per-scene", type=int, default=3, help="每个场景保存的图像数量")
     parser.add_argument("--detect-only", action="store_true", help="仅检测场景，不切分")
+    parser.add_argument("--points", type=str, help="自定义分割点（JSON格式，时间秒数列表）")
     parser.add_argument("-q", "--quiet", action="store_true", help="静默模式")
 
     args = parser.parse_args()
@@ -442,6 +443,11 @@ if __name__ == "__main__":
 
     if args.detect_only:
         # 仅检测场景
+        # 获取视频 FPS
+        video = open_video(args.video)
+        fps = video.frame_rate
+        duration = video.duration.get_seconds()
+
         scenes = splitter.detect_scenes(
             args.video,
             start_time=args.start,
@@ -449,12 +455,69 @@ if __name__ == "__main__":
             show_progress=not args.quiet,
             stats_file=args.stats,
         )
-        splitter.print_scenes(scenes)
+
+        if not args.quiet:
+            # Output in format expected by python-bridge.ts
+            print(f"FPS: {fps:.2f}")
+            print(f"Duration: {duration:.2f}")
+            for scene in scenes:
+                print(f"Scene {scene.index}: {scene.start_time:.2f}s - {scene.end_time:.2f}s")
+            print(f"Total scenes: {len(scenes)}")
     else:
-        # 检测并切分
+        # 获取视频信息
+        video = open_video(args.video)
+        fps = video.frame_rate
+        duration = video.duration.get_seconds()
+
+        # 检查是否使用自定义分割点
+        custom_scenes = None
+        if args.points:
+            import json
+            try:
+                # 解析分割点时间列表
+                points = json.loads(args.points)
+                if isinstance(points, list) and len(points) > 0:
+                    # 排序分割点
+                    points = sorted(points)
+                    # 从分割点创建场景列表
+                    custom_scenes = []
+                    prev_time = 0.0
+                    for i, point_time in enumerate(points):
+                        if point_time > prev_time and point_time < duration:
+                            custom_scenes.append(SceneInfo(
+                                index=i + 1,
+                                start_time=prev_time,
+                                end_time=point_time,
+                                start_frame=int(prev_time * fps),
+                                end_frame=int(point_time * fps),
+                                duration=point_time - prev_time,
+                                start_timecode=f"{int(prev_time//60):02d}:{prev_time%60:06.3f}",
+                                end_timecode=f"{int(point_time//60):02d}:{point_time%60:06.3f}",
+                            ))
+                            prev_time = point_time
+                    # 添加最后一个场景（从最后一个分割点到视频结束）
+                    if prev_time < duration:
+                        custom_scenes.append(SceneInfo(
+                            index=len(custom_scenes) + 1,
+                            start_time=prev_time,
+                            end_time=duration,
+                            start_frame=int(prev_time * fps),
+                            end_frame=int(duration * fps),
+                            duration=duration - prev_time,
+                            start_timecode=f"{int(prev_time//60):02d}:{prev_time%60:06.3f}",
+                            end_timecode=f"{int(duration//60):02d}:{duration%60:06.3f}",
+                        ))
+                    if not args.quiet:
+                        print(f"Using {len(points)} custom split points to create {len(custom_scenes)} scenes")
+            except json.JSONDecodeError as e:
+                print(f"Error parsing points JSON: {e}")
+                custom_scenes = None
+
+        # 切分视频
         result = splitter.split_video(
             args.video,
             args.output,
+            scenes=custom_scenes,  # 使用自定义场景（如果有）
             start_time=args.start,
             end_time=args.end,
             show_progress=not args.quiet,

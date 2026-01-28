@@ -121,6 +121,25 @@ export interface SplitConfig {
   detectorType: 'content' | 'adaptive' | 'threshold' | 'histogram' | 'hash';
   threshold?: number;
   minSceneLen: number;
+  customPoints?: SplitPoint[];  // 自定义分割点
+}
+
+// ============================================
+// Split Point Types (视频分割点)
+// ============================================
+
+export interface SplitPoint {
+  id: string;
+  time: number;            // 秒
+  frame: number;           // 帧号
+  isAutoDetected: boolean; // 是否为自动检测
+}
+
+export interface AnalyzeResult {
+  videoId: string;
+  duration: number;
+  fps: number;
+  splitPoints: SplitPoint[];
 }
 
 export interface UpscaleConfig {

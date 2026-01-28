@@ -8,7 +8,8 @@ import {
   FullscreenOutlined,
   CameraOutlined,
 } from '@ant-design/icons';
-import type { Resource } from '@shared/types';
+import type { Resource, VideoMetadata } from '@shared/types';
+import SplitPointTimeline from './SplitPointTimeline';
 import styles from './VideoPlayer.module.css';
 
 // Custom MIME type for frame data transfer
@@ -17,12 +18,19 @@ const FRAME_DATA_MIME = 'application/x-video-frame';
 interface VideoPlayerProps {
   src: string;
   resource: Resource;
+  showSplitTimeline?: boolean;
+  onTimeUpdate?: (time: number) => void;
 }
 
 // 节流间隔（毫秒）
 const SEEK_THROTTLE_MS = 100;
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, resource }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({
+  src,
+  resource,
+  showSplitTimeline = false,
+  onTimeUpdate,
+}) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -63,6 +71,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, resource }) => {
     const handleTimeUpdate = () => {
       if (!isSeekingRef.current) {
         setCurrentTime(video.currentTime);
+        onTimeUpdate?.(video.currentTime);
       }
     };
 
@@ -214,6 +223,51 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, resource }) => {
     }, 2000);
   }, []);
 
+  // Get video fps from metadata
+  const getVideoFps = useCallback(() => {
+    const meta = resource.metadata as VideoMetadata;
+    return meta?.fps || 30;
+  }, [resource.metadata]);
+
+  // Frame step navigation
+  const handleFrameStep = useCallback((direction: 'prev' | 'next') => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const fps = getVideoFps();
+    const frameDuration = 1 / fps;
+
+    // Pause video if playing
+    if (isPlaying) {
+      video.pause();
+      setIsPlaying(false);
+    }
+
+    if (direction === 'prev') {
+      video.currentTime = Math.max(0, video.currentTime - frameDuration);
+    } else {
+      video.currentTime = Math.min(video.duration, video.currentTime + frameDuration);
+    }
+    setCurrentTime(video.currentTime);
+    onTimeUpdate?.(video.currentTime);
+  }, [isPlaying, getVideoFps, onTimeUpdate]);
+
+  // Seek to specific time (for split point timeline)
+  const seekToTime = useCallback((time: number) => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Pause video if playing
+    if (isPlaying) {
+      video.pause();
+      setIsPlaying(false);
+    }
+
+    video.currentTime = time;
+    setCurrentTime(time);
+    onTimeUpdate?.(time);
+  }, [isPlaying, onTimeUpdate]);
+
   const handleVolumeChange = useCallback((value: number) => {
     const video = videoRef.current;
     if (!video) return;
@@ -299,81 +353,94 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ src, resource }) => {
   }, [captureCurrentFrame]);
 
   return (
-    <div
-      ref={containerRef}
-      className={styles.player}
-      onMouseEnter={() => setShowControls(true)}
-      onMouseLeave={() => setShowControls(!isPlaying)}
-    >
-      <video
-        ref={videoRef}
-        src={src}
-        className={styles.video}
-        onClick={togglePlay}
-        preload="metadata"
-        draggable
-        onDragStart={handleDragStart}
-      />
+    <div className={styles.playerWrapper}>
+      <div
+        ref={containerRef}
+        className={styles.player}
+        onMouseEnter={() => setShowControls(true)}
+        onMouseLeave={() => setShowControls(!isPlaying)}
+      >
+        <video
+          ref={videoRef}
+          src={src}
+          className={styles.video}
+          onClick={togglePlay}
+          preload="metadata"
+          draggable
+          onDragStart={handleDragStart}
+        />
 
-      <div className={`${styles.controls} ${showControls ? styles.visible : ''}`}>
-        <div className={styles.progress}>
-          <Slider
-            value={currentTime}
-            min={0}
-            max={duration || 100}
-            step={0.1}
-            onChange={handleSliderChange}
-            onChangeComplete={handleSliderAfterChange}
-            tooltip={{ formatter: (value) => formatTime(value || 0) }}
-            className={styles.progressSlider}
-          />
-        </div>
-
-        <div className={styles.controlBar}>
-          <div className={styles.leftControls}>
-            <button className={styles.controlButton} onClick={togglePlay}>
-              {isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
-            </button>
-
-            <span className={styles.time}>
-              {formatTime(currentTime)} / {formatTime(duration)}
-            </span>
+        <div className={`${styles.controls} ${showControls ? styles.visible : ''}`}>
+          <div className={styles.progress}>
+            <Slider
+              value={currentTime}
+              min={0}
+              max={duration || 100}
+              step={0.1}
+              onChange={handleSliderChange}
+              onChangeComplete={handleSliderAfterChange}
+              tooltip={{ formatter: (value) => formatTime(value || 0) }}
+              className={styles.progressSlider}
+            />
           </div>
 
-          <div className={styles.rightControls}>
-            <div className={styles.volumeControl}>
-              <button className={styles.controlButton} onClick={toggleMute}>
-                {isMuted || volume === 0 ? <MutedOutlined /> : <SoundOutlined />}
+          <div className={styles.controlBar}>
+            <div className={styles.leftControls}>
+              <button className={styles.controlButton} onClick={togglePlay}>
+                {isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
               </button>
-              <Slider
-                value={isMuted ? 0 : volume}
-                min={0}
-                max={1}
-                step={0.1}
-                onChange={handleVolumeChange}
-                className={styles.volumeSlider}
-              />
+
+              <span className={styles.time}>
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </span>
             </div>
 
-            <Tooltip title="全屏">
-              <button className={styles.controlButton} onClick={handleFullscreen}>
-                <FullscreenOutlined />
-              </button>
-            </Tooltip>
+            <div className={styles.rightControls}>
+              <div className={styles.volumeControl}>
+                <button className={styles.controlButton} onClick={toggleMute}>
+                  {isMuted || volume === 0 ? <MutedOutlined /> : <SoundOutlined />}
+                </button>
+                <Slider
+                  value={isMuted ? 0 : volume}
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  onChange={handleVolumeChange}
+                  className={styles.volumeSlider}
+                />
+              </div>
+
+              <Tooltip title="全屏">
+                <button className={styles.controlButton} onClick={handleFullscreen}>
+                  <FullscreenOutlined />
+                </button>
+              </Tooltip>
+            </div>
           </div>
         </div>
+
+        {hasError && (
+          <div className={styles.errorOverlay}>
+            <span className={styles.errorText}>视频加载失败</span>
+          </div>
+        )}
+
+        {!hasError && !isPlaying && currentTime === 0 && (
+          <div className={styles.playOverlay} onClick={togglePlay}>
+            <PlayCircleOutlined className={styles.playOverlayIcon} />
+          </div>
+        )}
       </div>
 
-      {hasError && (
-        <div className={styles.errorOverlay}>
-          <span className={styles.errorText}>视频加载失败</span>
-        </div>
-      )}
-
-      {!hasError && !isPlaying && currentTime === 0 && (
-        <div className={styles.playOverlay} onClick={togglePlay}>
-          <PlayCircleOutlined className={styles.playOverlayIcon} />
-        </div>
+      {/* Split Point Timeline - rendered outside of player to avoid overflow:hidden */}
+      {showSplitTimeline && (
+        <SplitPointTimeline
+          currentTime={currentTime}
+          duration={duration}
+          fps={getVideoFps()}
+          onSeek={seekToTime}
+          onFrameStep={handleFrameStep}
+        />
       )}
     </div>
   );

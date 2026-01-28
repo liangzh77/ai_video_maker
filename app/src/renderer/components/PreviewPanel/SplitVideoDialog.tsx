@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Progress, App, Select, InputNumber } from 'antd';
-import type { Resource, SplitConfig } from '@shared/types';
+import { Modal, Progress, App } from 'antd';
+import type { Resource } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import { useNotificationStore } from '../../stores/notification';
+import { useSplitPointsStore } from '../../stores/splitPoints';
 import styles from './SplitVideoDialog.module.css';
 
 interface SplitVideoDialogProps {
@@ -10,14 +11,6 @@ interface SplitVideoDialogProps {
   resource: Resource;
   onClose: () => void;
 }
-
-const DETECTOR_OPTIONS = [
-  { value: 'content', label: '内容检测 (推荐)', description: '适用于大多数场景' },
-  { value: 'adaptive', label: '自适应检测', description: '适用于快速相机运动' },
-  { value: 'threshold', label: '阈值检测', description: '适用于淡入淡出' },
-  { value: 'histogram', label: '直方图检测', description: '基于颜色分布' },
-  { value: 'hash', label: '感知哈希', description: '较慢但准确' },
-];
 
 const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
   visible,
@@ -27,20 +20,20 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
   const { message } = App.useApp();
   const { selectedDraftId, loadResources } = useDraftStore();
   const { showError } = useNotificationStore();
+  const { splitPoints, videoId } = useSplitPointsStore();
 
-  const [detectorType, setDetectorType] = useState<SplitConfig['detectorType']>('content');
-  const [minSceneLen, setMinSceneLen] = useState(15);
   const [isSplitting, setIsSplitting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sceneCount, setSceneCount] = useState(0);
 
+  // Check if we have split points for current video
+  const hasSplitPoints = splitPoints.length > 0 && videoId === resource.id;
+
   // Reset state when dialog opens
   useEffect(() => {
     if (visible) {
-      setDetectorType('content');
-      setMinSceneLen(15);
       setIsSplitting(false);
       setProgress(0);
       setStatusText('');
@@ -125,18 +118,21 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
       return;
     }
 
+    if (!hasSplitPoints) {
+      message.error('没有可用的分割点');
+      return;
+    }
+
     setIsSplitting(true);
     setProgress(0);
     setStatusText('提交任务...');
 
     try {
-      const result = await window.api.task.splitVideo({
+      // 使用已编辑的分割点
+      const result = await window.api.task.splitVideoWithPoints({
         draftId: selectedDraftId,
         sourceVideoId: resource.id,
-        config: {
-          detectorType,
-          minSceneLen,
-        },
+        splitPoints: splitPoints,
       });
 
       if (!result.success) {
@@ -155,20 +151,20 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
 
   return (
     <Modal
-      title="分割视频"
+      title="切分视频"
       open={visible}
       onCancel={isSplitting ? undefined : onClose}
       closable={!isSplitting}
       maskClosable={!isSplitting}
-      okText={isSplitting ? '分割中...' : '开始分割'}
-      cancelText="取消"
+      okText={isSplitting ? '切分中...' : '确认切分'}
+      cancelText={sceneCount > 0 ? '完成' : '取消'}
       onOk={handleSplit}
       okButtonProps={{
-        disabled: isSplitting,
+        disabled: isSplitting || sceneCount > 0,
         loading: isSplitting,
       }}
       cancelButtonProps={{ disabled: isSplitting }}
-      width={500}
+      width={400}
     >
       <div className={styles.content}>
         {/* Video Info */}
@@ -179,48 +175,23 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
           </div>
         </div>
 
-        {/* Detector Type */}
+        {/* Split Points Info */}
         <div className={styles.section}>
-          <div className={styles.sectionTitle}>场景检测方式</div>
-          <Select
-            value={detectorType}
-            onChange={setDetectorType}
-            disabled={isSplitting}
-            className={styles.select}
-            options={DETECTOR_OPTIONS.map((opt) => ({
-              value: opt.value,
-              label: (
-                <div className={styles.optionLabel}>
-                  <span>{opt.label}</span>
-                  <span className={styles.optionDesc}>{opt.description}</span>
-                </div>
-              ),
-            }))}
-          />
-        </div>
-
-        {/* Min Scene Length */}
-        <div className={styles.section}>
-          <div className={styles.sectionTitle}>最小场景长度 (帧)</div>
-          <InputNumber
-            value={minSceneLen}
-            onChange={(value) => setMinSceneLen(value || 15)}
-            min={1}
-            max={300}
-            disabled={isSplitting}
-            className={styles.inputNumber}
-          />
-          <div className={styles.hint}>
-            避免过短的场景，默认 15 帧 (约 0.5 秒)
+          <div className={styles.splitInfo}>
+            将按 <strong>{splitPoints.length}</strong> 个分割点切分为 <strong>{splitPoints.length + 1}</strong> 个分镜视频
           </div>
         </div>
 
         {/* Progress */}
-        {isSplitting && (
+        {(isSplitting || sceneCount > 0) && (
           <div className={styles.progressSection}>
-            <Progress percent={progress} status="active" />
+            <Progress
+              percent={Math.round(progress)}
+              status={sceneCount > 0 ? 'success' : 'active'}
+            />
             <div className={styles.statusText}>
-              {statusText} <span className={styles.timer}>({elapsedSeconds}秒)</span>
+              {statusText}
+              {isSplitting && <span className={styles.timer}> ({elapsedSeconds}秒)</span>}
             </div>
           </div>
         )}

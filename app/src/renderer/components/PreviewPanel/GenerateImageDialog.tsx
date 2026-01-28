@@ -174,7 +174,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   };
 
   const getImageUrl = (resource: Resource) => {
-    return `local-file://${encodeURIComponent(resource.filePath)}`;
+    // Use triple slash for Windows paths: local-file:///C:/path/to/file
+    const normalizedPath = resource.filePath.replace(/\\/g, '/');
+    return `local-file:///${normalizedPath}`;
   };
 
   return (

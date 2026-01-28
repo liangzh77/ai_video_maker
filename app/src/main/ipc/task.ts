@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import { getAvailableModels, createDoubaoServiceWithModel } from '../services/doubao-api';
-import { runVideoSplitter } from '../services/python-bridge';
+import { runVideoSplitter, runVideoAnalyzer } from '../services/python-bridge';
 import storage from '../services/storage';
 import appConfigService from '../services/config';
 import type {
@@ -17,6 +17,8 @@ import type {
   OperationResult,
   GenerateConfig,
   SplitConfig,
+  SplitPoint,
+  AnalyzeResult,
   Resource,
   TextMetadata,
   VideoMetadata,
@@ -50,6 +52,18 @@ interface TaskSplitVideoRequest {
   draftId: string;
   sourceVideoId: string;
   config?: Partial<SplitConfig>;
+}
+
+interface TaskAnalyzeVideoRequest {
+  draftId: string;
+  sourceVideoId: string;
+  config?: Partial<SplitConfig>;
+}
+
+interface TaskSplitVideoWithPointsRequest {
+  draftId: string;
+  sourceVideoId: string;
+  splitPoints: SplitPoint[];
 }
 
 // ============================================
@@ -418,6 +432,141 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return { success: true, data: task };
       } catch (error) {
         console.error('[TaskIPC] Failed to create split video task:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'PYTHON_TOOL_ERROR',
+        };
+      }
+    }
+  );
+
+  // Analyze video (detect scenes only)
+  ipcMain.handle(
+    TASK_CHANNELS.ANALYZE_VIDEO,
+    async (_, request: TaskAnalyzeVideoRequest): Promise<OperationResult<AnalyzeResult>> => {
+      console.log('[TaskIPC] Received analyze video request:', request);
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Verify source video exists
+        const sourceVideo = await storage.resource.get(request.draftId, request.sourceVideoId);
+        if (!sourceVideo) {
+          return { success: false, error: 'RESOURCE_NOT_FOUND: Source video not found' };
+        }
+
+        // Load app config for Python path
+        const appConfig = await appConfigService.load();
+
+        // Create analyze config with defaults
+        const analyzeConfig: Partial<SplitConfig> = {
+          detectorType: request.config?.detectorType || 'content',
+          threshold: request.config?.threshold,
+          minSceneLen: request.config?.minSceneLen || 15,
+        };
+
+        console.log('[TaskIPC] Starting video analysis...');
+
+        // Run video analyzer
+        const result = await runVideoAnalyzer(
+          sourceVideo.filePath,
+          analyzeConfig,
+          (progress) => {
+            console.log('[TaskIPC] Analyze progress:', progress);
+          },
+          appConfig
+        );
+
+        console.log('[TaskIPC] Analysis completed, scenes:', result.scenes.length);
+
+        // Convert scenes to SplitPoints (skip first scene, its start time is not a split point)
+        // Split points are boundaries BETWEEN scenes, not the video start
+        const splitPoints: SplitPoint[] = result.scenes.slice(1).map((scene, index) => ({
+          id: `point-${index}-${Date.now()}`,
+          time: scene.startTime,
+          frame: scene.startFrame,
+          isAutoDetected: true,
+        }));
+
+        // Get video metadata for fps and duration
+        const videoMeta = sourceVideo.metadata as VideoMetadata;
+        const fps = result.fps || videoMeta?.fps || 30;
+        const duration = result.duration || videoMeta?.duration || 0;
+
+        const analyzeResult: AnalyzeResult = {
+          videoId: request.sourceVideoId,
+          duration,
+          fps,
+          splitPoints,
+        };
+
+        return { success: true, data: analyzeResult };
+      } catch (error) {
+        console.error('[TaskIPC] Failed to analyze video:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'PYTHON_TOOL_ERROR',
+        };
+      }
+    }
+  );
+
+  // Split video with custom points
+  ipcMain.handle(
+    TASK_CHANNELS.SPLIT_VIDEO_WITH_POINTS,
+    async (_, request: TaskSplitVideoWithPointsRequest): Promise<OperationResult<ProcessingTask>> => {
+      console.log('[TaskIPC] Received split video with points request:', request);
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Verify source video exists
+        const sourceVideo = await storage.resource.get(request.draftId, request.sourceVideoId);
+        if (!sourceVideo) {
+          return { success: false, error: 'RESOURCE_NOT_FOUND: Source video not found' };
+        }
+
+        // Verify split points
+        if (!request.splitPoints || request.splitPoints.length === 0) {
+          return { success: false, error: 'No split points provided' };
+        }
+
+        // Create task config with custom points
+        const splitConfig: SplitConfig = {
+          detectorType: 'content',
+          minSceneLen: 1, // Allow short scenes when using custom points
+          customPoints: request.splitPoints,
+        };
+
+        // Add task to queue
+        const task = taskQueue.addTask(
+          request.draftId,
+          'split',
+          [request.sourceVideoId],
+          splitConfig
+        );
+
+        console.log('[TaskIPC] Split with points task created:', task.id);
+
+        // Persist task
+        await storage.task.add(request.draftId, {
+          type: task.type,
+          status: task.status,
+          progress: task.progress,
+          inputResourceIds: task.inputResourceIds,
+          outputResourceIds: task.outputResourceIds,
+          config: task.config,
+        });
+
+        return { success: true, data: task };
+      } catch (error) {
+        console.error('[TaskIPC] Failed to create split with points task:', error);
         return {
           success: false,
           error: error instanceof Error ? error.message : 'PYTHON_TOOL_ERROR',

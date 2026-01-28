@@ -45,6 +45,21 @@
   background-color: rgba(0, 122, 255, 0.05);
 }
 
+.clearButton {
+  margin-left: 0;
+}
+
+.clearButton:hover {
+  border-color: var(--color-error, #ff4d4f);
+  color: var(--color-error, #ff4d4f);
+  background-color: rgba(255, 77, 79, 0.05);
+}
+
+.clearButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .content {
   background-color: var(--color-bg-card);
   border-radius: var(--radius-lg);

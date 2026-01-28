@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { Empty, App } from 'antd';
-import { InboxOutlined, PlusOutlined } from '@ant-design/icons';
+import { Empty, App, Popconfirm, Tooltip } from 'antd';
+import { InboxOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { Resource, ResourceType } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import ResourceCard from './ResourceCard';
@@ -48,10 +48,29 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   isLarge = false,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
-  const { selectedDraftId, addResource, addFrameAsResource, addTextResource } = useDraftStore();
+  const [isClearing, setIsClearing] = useState(false);
+  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType } = useDraftStore();
   const { message } = App.useApp();
 
   const canDrop = !!acceptFormats && acceptFormats.length > 0;
+  const canClear = type === 'scene_source' && resources.length > 0;
+
+  const handleClearAll = async () => {
+    setIsClearing(true);
+    try {
+      const result = await deleteResourcesByType(type);
+      if (result.success > 0) {
+        message.success(`已删除 ${result.success} 个${title}`);
+      }
+      if (result.failed > 0) {
+        message.warning(`${result.failed} 个文件删除失败`);
+      }
+    } catch (error) {
+      message.error('清除失败');
+    } finally {
+      setIsClearing(false);
+    }
+  };
 
   const handleAddPrompt = async () => {
     console.log('=== handleAddPrompt START ===');
@@ -186,6 +205,22 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           <button className={styles.addButton} onClick={handleAddPrompt} title="添加提示词">
             <PlusOutlined />
           </button>
+        )}
+        {canClear && (
+          <Popconfirm
+            title="确认清除"
+            description={`确定要删除所有 ${resources.length} 个${title}吗？文件将被永久删除。`}
+            onConfirm={handleClearAll}
+            okText="确认删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true, loading: isClearing }}
+          >
+            <Tooltip title="清除所有">
+              <button className={`${styles.addButton} ${styles.clearButton}`} disabled={isClearing}>
+                <DeleteOutlined />
+              </button>
+            </Tooltip>
+          </Popconfirm>
         )}
       </div>
 

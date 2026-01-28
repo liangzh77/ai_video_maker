@@ -59,13 +59,19 @@ function createWindow(): void {
 app.whenReady().then(async () => {
   // Register protocol handler for local files with Range request support
   protocol.handle('local-file', (request) => {
-    // Convert local-file://path to file path
-    let filePath = decodeURIComponent(request.url.replace('local-file://', ''));
+    // Convert local-file:///path to file path
+    // URL format: local-file:///C:/path/to/file (triple slash for Windows)
+    let filePath = decodeURIComponent(request.url.replace('local-file:///', ''));
 
-    // Handle Windows paths - normalize slashes
-    if (process.platform === 'win32') {
+    // Remove any leading slash that might remain (for non-Windows)
+    if (process.platform !== 'win32' && filePath.startsWith('/')) {
+      // Keep the leading slash on Unix
+    } else if (process.platform === 'win32') {
+      // On Windows, convert forward slashes to backslashes
       filePath = filePath.replace(/\//g, '\\');
     }
+
+    console.log('[Protocol] Handling request:', request.url, '-> filePath:', filePath);
 
     try {
       const stat = statSync(filePath);
@@ -92,6 +98,7 @@ app.whenReady().then(async () => {
               'Content-Length': String(chunkSize),
               'Content-Range': `bytes ${start}-${end}/${fileSize}`,
               'Accept-Ranges': 'bytes',
+              'Access-Control-Allow-Origin': '*',
             },
           });
         }
@@ -105,6 +112,7 @@ app.whenReady().then(async () => {
           'Content-Type': mimeType,
           'Content-Length': String(fileSize),
           'Accept-Ranges': 'bytes',
+          'Access-Control-Allow-Origin': '*',
         },
       });
     } catch (error) {

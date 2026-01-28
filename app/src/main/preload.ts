@@ -20,12 +20,17 @@ export interface ElectronAPI {
     delete: (params: { id: string }) => Promise<any>;
     openFolder: (params: { id: string }) => Promise<any>;
     captureFrame: (params: { videoResourceId: string; timestamp: number; outputType: string }) => Promise<any>;
+    deleteSplitFolders: (params: { draftId: string }) => Promise<any>;
+    saveSplitPoints: (params: { draftId: string; videoId: string; duration: number; fps: number; splitPoints: any[] }) => Promise<any>;
+    loadSplitPoints: (params: { draftId: string; videoId: string }) => Promise<any>;
   };
   task: {
     list: (params?: { draftId?: string; status?: string }) => Promise<any>;
     get: (params: { id: string }) => Promise<any>;
     getModels: () => Promise<Array<{ id: string; name: string }>>;
+    analyzeVideo: (params: { draftId: string; sourceVideoId: string; config?: any }) => Promise<any>;
     splitVideo: (params: { draftId: string; sourceVideoId: string; config?: any }) => Promise<any>;
+    splitVideoWithPoints: (params: { draftId: string; sourceVideoId: string; splitPoints: any[] }) => Promise<any>;
     upscaleVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
     generateImage: (params: { draftId: string; sourceImageId: string; promptResourceId: string; modelEndpoint: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
@@ -60,12 +65,17 @@ const api: ElectronAPI = {
     delete: (params) => ipcRenderer.invoke('resource:delete', params),
     openFolder: (params) => ipcRenderer.invoke('resource:openFolder', params),
     captureFrame: (params) => ipcRenderer.invoke('resource:captureFrame', params),
+    deleteSplitFolders: (params) => ipcRenderer.invoke('resource:deleteSplitFolders', params),
+    saveSplitPoints: (params) => ipcRenderer.invoke('resource:saveSplitPoints', params),
+    loadSplitPoints: (params) => ipcRenderer.invoke('resource:loadSplitPoints', params),
   },
   task: {
     list: (params) => ipcRenderer.invoke('task:list', params),
     get: (params) => ipcRenderer.invoke('task:get', params),
     getModels: () => ipcRenderer.invoke('task:getModels'),
+    analyzeVideo: (params) => ipcRenderer.invoke('task:analyzeVideo', params),
     splitVideo: (params) => ipcRenderer.invoke('task:splitVideo', params),
+    splitVideoWithPoints: (params) => ipcRenderer.invoke('task:splitVideoWithPoints', params),
     upscaleVideo: (params) => ipcRenderer.invoke('task:upscaleVideo', params),
     generateImage: (params) => ipcRenderer.invoke('task:generateImage', params),
     synthesizeVideo: (params) => ipcRenderer.invoke('task:synthesizeVideo', params),
