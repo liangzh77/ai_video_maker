@@ -32,7 +32,9 @@ function getToolsPath(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'tools');
   }
-  return path.join(process.cwd(), 'tools');
+  // 开发模式下，tools 目录在 app 的父目录（项目根目录）
+  // process.cwd() 在 app/ 目录，所以需要向上一级
+  return path.join(process.cwd(), '..', 'tools');
 }
 
 function getPythonPath(config?: AppConfig): string {
@@ -90,14 +92,26 @@ export async function runVideoSplitter(
     mode: 'text',
     pythonPath: getPythonPath(appConfig),
     args,
+    // 确保 Windows 上正确处理中文编码
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+    },
   };
 
   return new Promise((resolve, reject) => {
-    const shell = PythonShell.run(scriptPath, options);
+    console.log('[VideoSplitter] Starting with script:', scriptPath);
+    console.log('[VideoSplitter] Args:', args);
+    console.log('[VideoSplitter] Python path:', options.pythonPath);
+
+    const shell = new PythonShell(scriptPath, options);
     const scenes: SplitResult['scenes'] = [];
     let outputDirResult = outputDir;
 
     shell.on('message', (message: string) => {
+      console.log('[VideoSplitter] stdout:', message);
+
       // Parse progress
       const progress = parseProgress(message);
       if (progress !== null && onProgress) {
@@ -124,11 +138,20 @@ export async function runVideoSplitter(
       }
     });
 
+    shell.on('stderr', (stderr: string) => {
+      console.log('[VideoSplitter stderr]', stderr);
+    });
+
     shell.on('error', (err: Error) => {
       reject(new Error(`Video splitter failed: ${err.message}`));
     });
 
     shell.on('close', () => {
+      console.log('[VideoSplitter] Process closed. Total scenes parsed:', scenes.length);
+      console.log('[VideoSplitter] Output dir:', outputDirResult);
+      if (scenes.length > 0) {
+        console.log('[VideoSplitter] First scene:', JSON.stringify(scenes[0]));
+      }
       resolve({
         outputDir: outputDirResult,
         scenes,
@@ -173,15 +196,23 @@ export async function runVideoUpscaler(
     mode: 'text',
     pythonPath: getPythonPath(appConfig),
     args,
+    // 确保 Windows 上正确处理中文编码
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+    },
   };
 
   return new Promise((resolve, reject) => {
-    const shell = PythonShell.run(scriptPath, options);
+    const shell = new PythonShell(scriptPath, options);
     let resultWidth = config.targetWidth || 1920;
     let resultHeight = config.targetHeight || 1080;
     let resultFps = config.targetFps || 30;
 
     shell.on('message', (message: string) => {
+      console.log('[VideoUpscaler]', message);
+
       // Parse progress
       const progress = parseProgress(message);
       if (progress !== null && onProgress) {
@@ -199,6 +230,10 @@ export async function runVideoUpscaler(
       if (fpsMatch) {
         resultFps = parseFloat(fpsMatch[1]);
       }
+    });
+
+    shell.on('stderr', (stderr: string) => {
+      console.log('[VideoUpscaler stderr]', stderr);
     });
 
     shell.on('error', (err: Error) => {

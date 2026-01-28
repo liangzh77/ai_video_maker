@@ -3,6 +3,7 @@ import { Layout, App as AntdApp } from 'antd';
 import Sidebar from './components/Sidebar';
 import ResourcePanel from './components/ResourcePanel';
 import PreviewPanel from './components/PreviewPanel';
+import NotificationBar from './components/NotificationBar';
 import { useDraftStore } from './stores/draft';
 import styles from './App.module.css';
 
@@ -44,6 +45,7 @@ const App: React.FC = () => {
   return (
     <AntdApp>
       <AppContent />
+      <NotificationBar />
     </AntdApp>
   );
 };

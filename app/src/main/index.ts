@@ -1,14 +1,8 @@
-import { app, BrowserWindow, protocol } from 'electron';
-import { join } from 'path';
-import { createReadStream, statSync } from 'fs';
-import { electronApp, optimizer, is } from '@electron-toolkit/utils';
-import { lookup } from 'mime-types';
-import storage from './services/storage';
-import registerDraftHandlers from './ipc/draft';
-import registerResourceHandlers from './ipc/resource';
-import registerTaskHandlers from './ipc/task';
+// Use require for electron to ensure proper loading order
+const electron = require('electron');
+const { app, BrowserWindow, protocol } = electron;
 
-// Register custom protocol for local files
+// Register custom protocol IMMEDIATELY - must be before app ready
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'local-file',
@@ -20,6 +14,14 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
+
+import { join } from 'path';
+import { createReadStream, statSync } from 'fs';
+import { lookup } from 'mime-types';
+import storage from './services/storage';
+import registerDraftHandlers from './ipc/draft';
+import registerResourceHandlers from './ipc/resource';
+import registerTaskHandlers from './ipc/task';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -46,7 +48,7 @@ function createWindow(): void {
   });
 
   // Load the renderer
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
@@ -119,13 +121,7 @@ app.whenReady().then(async () => {
   registerResourceHandlers();
 
   // Set app user model id for Windows
-  electronApp.setAppUserModelId('com.ai-video-maker.app');
-
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window);
-  });
+  app.setAppUserModelId('com.ai-video-maker.app');
 
   createWindow();
 

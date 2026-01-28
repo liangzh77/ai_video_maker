@@ -465,5 +465,8 @@ if __name__ == "__main__":
 
         if not args.quiet:
             splitter.print_scenes(result.scenes)
-            print(f"输出目录: {result.output_dir}")
-            print(f"生成文件: {len(result.output_files)} 个")
+            # Output in format expected by python-bridge.ts
+            print(f"Output directory: {result.output_dir}")
+            for i, (scene, filepath) in enumerate(zip(result.scenes, result.output_files)):
+                print(f"Scene {i+1}: {scene.start_time:.2f}s - {scene.end_time:.2f}s -> {filepath}")
+            print(f"Total files: {len(result.output_files)}")

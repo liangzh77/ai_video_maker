@@ -9,13 +9,17 @@ import { v4 as uuidv4 } from 'uuid';
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import { getAvailableModels, createDoubaoServiceWithModel } from '../services/doubao-api';
+import { runVideoSplitter } from '../services/python-bridge';
 import storage from '../services/storage';
+import appConfigService from '../services/config';
 import type {
   ProcessingTask,
   OperationResult,
   GenerateConfig,
+  SplitConfig,
   Resource,
   TextMetadata,
+  VideoMetadata,
 } from '@shared/types';
 
 // ============================================
@@ -40,6 +44,12 @@ interface TaskGenerateImageRequest {
 
 interface TaskCancelRequest {
   id: string;
+}
+
+interface TaskSplitVideoRequest {
+  draftId: string;
+  sourceVideoId: string;
+  config?: Partial<SplitConfig>;
 }
 
 // ============================================
@@ -128,6 +138,86 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
   return [newResource.id];
 };
 
+/**
+ * Video split task handler
+ */
+const splitVideoHandler: TaskHandler = async (task, onProgress) => {
+  const { draftId, inputResourceIds, config } = task;
+  const splitConfig = config as SplitConfig;
+
+  console.log('[TaskHandler] Start processing video split task:', task.id);
+
+  // Get source video resource
+  const sourceVideoId = inputResourceIds[0];
+  const sourceResource = await storage.resource.get(draftId, sourceVideoId);
+  if (!sourceResource) {
+    throw new Error('Source video not found');
+  }
+  console.log('[TaskHandler] Source video:', sourceResource.fileName);
+
+  onProgress(5);
+
+  // Prepare output directory
+  const filesDir = storage.getFilesPath(draftId);
+  const outputDir = path.join(filesDir, `split_${uuidv4().slice(0, 8)}`);
+  await fs.mkdir(outputDir, { recursive: true });
+
+  console.log('[TaskHandler] Output directory:', outputDir);
+  onProgress(10);
+
+  // Load app config for Python path
+  const appConfig = await appConfigService.load();
+
+  // Run video splitter
+  const result = await runVideoSplitter(
+    sourceResource.filePath,
+    outputDir,
+    splitConfig,
+    (progress) => {
+      // Map Python progress (0-100) to 10-90
+      onProgress(10 + Math.floor(progress * 0.8));
+    },
+    appConfig
+  );
+
+  console.log('[TaskHandler] Split completed, scenes:', result.scenes.length);
+  onProgress(90);
+
+  // Create resource records for each split video
+  const outputResourceIds: string[] = [];
+
+  for (const scene of result.scenes) {
+    // Get file stats
+    const stats = await fs.stat(scene.filePath);
+    const fileName = path.basename(scene.filePath);
+
+    // Create resource record as 'scene_source' type
+    const newResource = await storage.resource.add(draftId, {
+      type: 'scene_source',
+      filePath: scene.filePath,
+      fileName,
+      fileSize: stats.size,
+      mimeType: 'video/mp4',
+      metadata: {
+        duration: scene.endTime - scene.startTime,
+        width: (sourceResource.metadata as VideoMetadata).width || 1920,
+        height: (sourceResource.metadata as VideoMetadata).height || 1080,
+        fps: (sourceResource.metadata as VideoMetadata).fps || 30,
+        codec: 'h264',
+        hasAudio: true,
+      } as VideoMetadata,
+    });
+
+    console.log(`[TaskHandler] Created scene resource: ${newResource.id} (${fileName})`);
+    outputResourceIds.push(newResource.id);
+  }
+
+  console.log('[TaskHandler] All scene resources created:', outputResourceIds.length);
+  onProgress(100);
+
+  return outputResourceIds;
+};
+
 // ============================================
 // IPC Handlers
 // ============================================
@@ -139,8 +229,9 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
 
   console.log('[TaskIPC] Registering task handlers');
 
-  // Register task handler to queue
+  // Register task handlers to queue
   taskQueue.registerHandler('generate', generateImageHandler);
+  taskQueue.registerHandler('split', splitVideoHandler);
 
   // Set task update callback (persist to storage)
   taskQueue.setUpdateCallback(async (task) => {
@@ -274,6 +365,62 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'DOUBAO_API_ERROR',
+        };
+      }
+    }
+  );
+
+  // Split video task
+  ipcMain.handle(
+    TASK_CHANNELS.SPLIT_VIDEO,
+    async (_, request: TaskSplitVideoRequest): Promise<OperationResult<ProcessingTask>> => {
+      console.log('[TaskIPC] Received split video request:', request);
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Verify source video exists
+        const sourceVideo = await storage.resource.get(request.draftId, request.sourceVideoId);
+        if (!sourceVideo) {
+          return { success: false, error: 'RESOURCE_NOT_FOUND: Source video not found' };
+        }
+
+        // Create task config with defaults
+        const splitConfig: SplitConfig = {
+          detectorType: request.config?.detectorType || 'content',
+          threshold: request.config?.threshold,
+          minSceneLen: request.config?.minSceneLen || 15,
+        };
+
+        // Add task to queue
+        const task = taskQueue.addTask(
+          request.draftId,
+          'split',
+          [request.sourceVideoId],
+          splitConfig
+        );
+
+        console.log('[TaskIPC] Split task created:', task.id);
+
+        // Persist task
+        await storage.task.add(request.draftId, {
+          type: task.type,
+          status: task.status,
+          progress: task.progress,
+          inputResourceIds: task.inputResourceIds,
+          outputResourceIds: task.outputResourceIds,
+          config: task.config,
+        });
+
+        return { success: true, data: task };
+      } catch (error) {
+        console.error('[TaskIPC] Failed to create split video task:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'PYTHON_TOOL_ERROR',
         };
       }
     }
