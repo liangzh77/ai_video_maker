@@ -410,11 +410,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 />
               </div>
 
-              <Tooltip title="全屏">
-                <button className={styles.controlButton} onClick={handleFullscreen}>
-                  <FullscreenOutlined />
-                </button>
-              </Tooltip>
             </div>
           </div>
         </div>
@@ -425,11 +420,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           </div>
         )}
 
-        {!hasError && !isPlaying && currentTime === 0 && (
-          <div className={styles.playOverlay} onClick={togglePlay}>
-            <PlayCircleOutlined className={styles.playOverlayIcon} />
-          </div>
-        )}
       </div>
 
       {/* Split Point Timeline - rendered outside of player to avoid overflow:hidden */}
@@ -440,6 +430,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           fps={getVideoFps()}
           onSeek={seekToTime}
           onFrameStep={handleFrameStep}
+          onTogglePlay={togglePlay}
         />
       )}
     </div>

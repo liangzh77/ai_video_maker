@@ -10,6 +10,7 @@ interface SplitPointTimelineProps {
   fps: number;
   onSeek: (time: number) => void;
   onFrameStep: (direction: 'prev' | 'next') => void;
+  onTogglePlay?: () => void;
 }
 
 const formatTime = (seconds: number): string => {
@@ -21,19 +22,24 @@ const formatTime = (seconds: number): string => {
 
 const SplitPointTimeline: React.FC<SplitPointTimelineProps> = ({
   currentTime,
-  duration,
+  duration: propDuration,
   fps,
   onSeek,
   onFrameStep,
+  onTogglePlay,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const {
     splitPoints,
     selectedPointId,
+    videoDuration: storeDuration,
     selectPoint,
     addPoint,
     removePoint,
   } = useSplitPointsStore();
+
+  // 优先使用 props 传入的 duration，如果为 0 则使用 store 中的 videoDuration
+  const duration = propDuration > 0 ? propDuration : storeDuration;
 
   // Handle clicking a marker
   const handleMarkerClick = useCallback(
@@ -79,6 +85,10 @@ const SplitPointTimeline: React.FC<SplitPointTimelineProps> = ({
       }
 
       switch (e.key) {
+        case ' ':
+          e.preventDefault();
+          onTogglePlay?.();
+          break;
         case 'ArrowLeft':
           e.preventDefault();
           onFrameStep('prev');
@@ -99,7 +109,7 @@ const SplitPointTimeline: React.FC<SplitPointTimelineProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onFrameStep, selectedPointId, removePoint]);
+  }, [onFrameStep, onTogglePlay, selectedPointId, removePoint]);
 
   const selectedPoint = splitPoints.find((p) => p.id === selectedPointId);
 
