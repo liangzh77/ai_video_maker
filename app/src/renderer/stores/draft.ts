@@ -66,6 +66,16 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     set({ selectedDraftId: id, selectedResourceId: null, resources: [] });
 
     if (id) {
+      // 清理未被引用的文件
+      try {
+        const cleanupResult = await window.api.draft.cleanupFiles({ draftId: id });
+        if (cleanupResult.success && cleanupResult.data > 0) {
+          console.log(`[Draft] Cleaned up ${cleanupResult.data} orphaned files`);
+        }
+      } catch (err) {
+        console.error('[Draft] Failed to cleanup orphaned files:', err);
+      }
+
       await get().loadResources(id);
     }
   },

@@ -8,6 +8,7 @@ export interface ElectronAPI {
     create: (params: { name: string }) => Promise<any>;
     update: (params: { id: string; name?: string }) => Promise<any>;
     delete: (params: { id: string }) => Promise<any>;
+    cleanupFiles: (params: { draftId: string }) => Promise<any>;
   };
   resource: {
     list: (params: { draftId: string; type?: string }) => Promise<any>;
@@ -53,6 +54,7 @@ const api: ElectronAPI = {
     create: (params) => ipcRenderer.invoke('draft:create', params),
     update: (params) => ipcRenderer.invoke('draft:update', params),
     delete: (params) => ipcRenderer.invoke('draft:delete', params),
+    cleanupFiles: (params) => ipcRenderer.invoke('draft:cleanupFiles', params),
   },
   resource: {
     list: (params) => ipcRenderer.invoke('resource:list', params),

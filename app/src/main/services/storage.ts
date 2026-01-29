@@ -41,6 +41,112 @@ function getFilesPath(draftId: string): string {
 }
 
 // ============================================
+// Resource File Naming Convention
+// ============================================
+
+/**
+ * 资源类型到文件夹/文件名的映射
+ *
+ * 规则：
+ * - 源视频：文件名 "源视频.{ext}"
+ * - 原角色图片：文件夹 "原角色图片/"
+ * - 提示词：文件夹 "提示词/"
+ * - 新角色图片：文件夹 "新角色图片/"
+ * - 分镜源视频：文件夹 "分镜源视频/"
+ * - 分镜新视频：文件夹 "分镜新视频/"
+ * - 高清分镜新视频：文件夹 "高清分镜新视频/"
+ * - 对口型新视频：文件夹 "对口型新视频/"
+ * - 合成新视频：文件名 "合成新视频.{ext}"
+ */
+interface ResourcePathConfig {
+  isFolder: boolean;
+  name: string;
+}
+
+const RESOURCE_PATH_CONFIG: Record<ResourceType, ResourcePathConfig> = {
+  'source_video': { isFolder: false, name: '源视频' },
+  'source_character': { isFolder: true, name: '原角色图片' },
+  'prompt': { isFolder: true, name: '提示词' },
+  'new_character': { isFolder: true, name: '新角色图片' },
+  'scene_source': { isFolder: true, name: '分镜源视频' },
+  'scene_new': { isFolder: true, name: '分镜新视频' },
+  'scene_hd': { isFolder: true, name: '高清分镜新视频' },
+  'lipsync': { isFolder: true, name: '对口型新视频' },
+  'synthesized': { isFolder: false, name: '合成新视频' },
+};
+
+/**
+ * 获取资源文件的目标路径
+ * @param draftId 草稿ID
+ * @param resourceType 资源类型
+ * @param ext 文件扩展名（包含点号，如 ".mp4"）
+ * @param sequenceNumber 序号（用于文件夹内多个文件的情况）
+ */
+export function getResourceFilePath(
+  draftId: string,
+  resourceType: ResourceType,
+  ext: string,
+  sequenceNumber?: number
+): string {
+  const filesDir = getFilesPath(draftId);
+  const config = RESOURCE_PATH_CONFIG[resourceType];
+
+  if (config.isFolder) {
+    // 放在子文件夹中，使用序号命名
+    const folderPath = path.join(filesDir, config.name);
+    const fileName = sequenceNumber !== undefined
+      ? `${sequenceNumber.toString().padStart(3, '0')}${ext}`
+      : `001${ext}`;
+    return path.join(folderPath, fileName);
+  } else {
+    // 直接在 files 文件夹中，使用固定名称
+    return path.join(filesDir, `${config.name}${ext}`);
+  }
+}
+
+/**
+ * 获取资源文件夹路径（仅对 isFolder=true 的资源类型有效）
+ */
+export function getResourceFolderPath(draftId: string, resourceType: ResourceType): string | null {
+  const config = RESOURCE_PATH_CONFIG[resourceType];
+  if (!config.isFolder) {
+    return null;
+  }
+  return path.join(getFilesPath(draftId), config.name);
+}
+
+/**
+ * 获取文件夹中下一个可用的序号
+ */
+export async function getNextSequenceNumber(draftId: string, resourceType: ResourceType): Promise<number> {
+  const folderPath = getResourceFolderPath(draftId, resourceType);
+  if (!folderPath) {
+    return 1;
+  }
+
+  try {
+    await fs.mkdir(folderPath, { recursive: true });
+    const entries = await fs.readdir(folderPath);
+
+    // 提取现有文件的序号
+    const numbers = entries
+      .map(name => {
+        const match = name.match(/^(\d+)\./);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter(n => n > 0);
+
+    if (numbers.length === 0) {
+      return 1;
+    }
+
+    return Math.max(...numbers) + 1;
+  } catch {
+    return 1;
+  }
+}
+
+// ============================================
 // JSON Read/Write Utilities
 // ============================================
 
@@ -350,6 +456,105 @@ export async function updateTask(
 }
 
 // ============================================
+// File Cleanup
+// ============================================
+
+/**
+ * 递归获取目录下所有文件路径
+ */
+async function getAllFilesRecursive(dirPath: string): Promise<string[]> {
+  const files: string[] = [];
+
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        const subFiles = await getAllFilesRecursive(fullPath);
+        files.push(...subFiles);
+      } else if (entry.isFile()) {
+        files.push(fullPath);
+      }
+    }
+  } catch {
+    // 目录不存在或无法读取
+  }
+
+  return files;
+}
+
+/**
+ * 清理草稿中未被引用的文件
+ * 扫描 files 目录，删除不在 resources.json 中引用的文件
+ * @returns 删除的文件数量
+ */
+export async function cleanupOrphanedFiles(draftId: string): Promise<number> {
+  const filesDir = getFilesPath(draftId);
+  const resources = await listResources(draftId);
+
+  // 获取所有被引用的文件路径（规范化为绝对路径）
+  const referencedPaths = new Set(
+    resources.map(r => path.normalize(r.filePath))
+  );
+
+  // 获取 files 目录下的所有文件
+  const allFiles = await getAllFilesRecursive(filesDir);
+
+  let deletedCount = 0;
+
+  for (const filePath of allFiles) {
+    const normalizedPath = path.normalize(filePath);
+
+    // 如果文件不在引用列表中，删除它
+    if (!referencedPaths.has(normalizedPath)) {
+      try {
+        await fs.unlink(filePath);
+        deletedCount++;
+        console.log('[Storage] Deleted orphaned file:', filePath);
+      } catch (err) {
+        console.error('[Storage] Failed to delete orphaned file:', filePath, err);
+      }
+    }
+  }
+
+  // 清理空文件夹
+  await cleanupEmptyFolders(filesDir);
+
+  return deletedCount;
+}
+
+/**
+ * 递归清理空文件夹
+ */
+async function cleanupEmptyFolders(dirPath: string): Promise<void> {
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const subDirPath = path.join(dirPath, entry.name);
+        // 先递归清理子目录
+        await cleanupEmptyFolders(subDirPath);
+
+        // 检查子目录是否为空
+        try {
+          const subEntries = await fs.readdir(subDirPath);
+          if (subEntries.length === 0) {
+            await fs.rmdir(subDirPath);
+            console.log('[Storage] Deleted empty folder:', subDirPath);
+          }
+        } catch {
+          // 目录可能已被删除
+        }
+      }
+    }
+  } catch {
+    // 目录不存在或无法读取
+  }
+}
+
+// ============================================
 // Exports
 // ============================================
 
@@ -359,6 +564,10 @@ export const storage = {
   getDraftPath,
   getThumbnailsPath,
   getFilesPath,
+  getResourceFilePath,
+  getResourceFolderPath,
+  getNextSequenceNumber,
+  cleanupOrphanedFiles,
   draft: {
     list: listDrafts,
     get: getDraft,

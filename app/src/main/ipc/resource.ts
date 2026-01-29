@@ -1,7 +1,6 @@
 import { ipcMain, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { v4 as uuidv4 } from 'uuid';
 import { RESOURCE_CHANNELS } from '@shared/ipc-channels';
 import storage from '../services/storage';
 import { extractMetadata, getResourceTypeFromMime, getMimeType } from '../services/metadata';
@@ -73,16 +72,13 @@ async function createResourceFromImageData(
   // Decode base64 image data
   const buffer = Buffer.from(imageData, 'base64');
 
-  // Generate unique filename
+  // 使用新的命名规范获取文件路径
   const ext = path.extname(fileName) || '.png';
-  const baseName = path.basename(fileName, ext);
-  const uniqueId = uuidv4().slice(0, 8);
-  const newFileName = `${baseName}_${uniqueId}${ext}`;
+  const sequenceNumber = await storage.getNextSequenceNumber(draftId, type);
+  const destPath = storage.getResourceFilePath(draftId, type, ext, sequenceNumber);
 
-  // Get destination path in draft's files directory
-  const filesDir = storage.getFilesPath(draftId);
-  await fs.mkdir(filesDir, { recursive: true });
-  const destPath = path.join(filesDir, newFileName);
+  // 确保目录存在
+  await fs.mkdir(path.dirname(destPath), { recursive: true });
 
   // Write image data to file
   await fs.writeFile(destPath, buffer);
@@ -97,7 +93,7 @@ async function createResourceFromImageData(
   return await storage.resource.add(draftId, {
     type,
     filePath: destPath,
-    fileName: fileName,
+    fileName: path.basename(destPath),  // 使用新文件名
     fileSize: stats.size,
     mimeType,
     metadata,
@@ -111,16 +107,14 @@ async function createResourceFromText(
 ): Promise<Resource> {
   console.log('createResourceFromText: Starting...', { draftId, type, contentLength: content?.length });
 
-  // Generate unique filename
-  const uniqueId = uuidv4().slice(0, 8);
-  const fileName = `prompt_${uniqueId}.txt`;
-
-  // Get destination path in draft's files directory
-  const filesDir = storage.getFilesPath(draftId);
-  console.log('createResourceFromText: filesDir =', filesDir);
-  await fs.mkdir(filesDir, { recursive: true });
-  const destPath = path.join(filesDir, fileName);
+  // 使用新的命名规范获取文件路径
+  const ext = '.txt';
+  const sequenceNumber = await storage.getNextSequenceNumber(draftId, type);
+  const destPath = storage.getResourceFilePath(draftId, type, ext, sequenceNumber);
   console.log('createResourceFromText: destPath =', destPath);
+
+  // 确保目录存在
+  await fs.mkdir(path.dirname(destPath), { recursive: true });
 
   // Write text content to file
   await fs.writeFile(destPath, content, 'utf-8');
@@ -133,7 +127,7 @@ async function createResourceFromText(
   const resource = await storage.resource.add(draftId, {
     type,
     filePath: destPath,
-    fileName: fileName,
+    fileName: path.basename(destPath),  // 使用新文件名
     fileSize: stats.size,
     mimeType: 'text/plain',
     metadata: {
@@ -160,14 +154,12 @@ async function createResourceFromFile(
   const ext = path.extname(originalFileName);
   const mimeType = getMimeType(sourcePath);
 
-  // Generate unique filename to avoid conflicts
-  const uniqueId = uuidv4().slice(0, 8);
-  const newFileName = `${path.basename(originalFileName, ext)}_${uniqueId}${ext}`;
+  // 使用新的命名规范获取文件路径
+  const sequenceNumber = await storage.getNextSequenceNumber(draftId, type);
+  const destPath = storage.getResourceFilePath(draftId, type, ext, sequenceNumber);
 
-  // Get destination path in draft's files directory
-  const filesDir = storage.getFilesPath(draftId);
-  await fs.mkdir(filesDir, { recursive: true });
-  const destPath = path.join(filesDir, newFileName);
+  // 确保目录存在
+  await fs.mkdir(path.dirname(destPath), { recursive: true });
 
   // Copy file to storage
   await fs.copyFile(sourcePath, destPath);
@@ -178,7 +170,7 @@ async function createResourceFromFile(
   return await storage.resource.add(draftId, {
     type,
     filePath: destPath,
-    fileName: originalFileName,
+    fileName: path.basename(destPath),  // 使用新文件名
     fileSize: stats.size,
     mimeType,
     metadata,
@@ -386,6 +378,18 @@ export function registerResourceHandlers(): void {
         const updatedMetadata = request.metadata
           ? { ...foundResource.metadata, ...request.metadata }
           : foundResource.metadata;
+
+        // 如果是文本资源（提示词），同步更新文件内容
+        if (foundResource.mimeType === 'text/plain' && request.metadata && 'content' in request.metadata) {
+          const textContent = request.metadata.content as string;
+          try {
+            await fs.writeFile(foundResource.filePath, textContent, 'utf-8');
+            console.log('[Resource] Updated text file:', foundResource.filePath);
+          } catch (err) {
+            console.error('[Resource] Failed to update text file:', err);
+            return { success: false, error: 'Failed to update text file' };
+          }
+        }
 
         const updated = await storage.resource.update(foundDraftId, request.id, {
           metadata: updatedMetadata,

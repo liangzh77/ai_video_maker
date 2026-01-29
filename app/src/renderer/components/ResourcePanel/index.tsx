@@ -52,6 +52,7 @@ const ResourcePanel: React.FC = () => {
           title="提示词"
           type="prompt"
           resources={prompts}
+          acceptFormats={['text/*', '.txt', '.md']}
           isText
         />
 
@@ -59,6 +60,7 @@ const ResourcePanel: React.FC = () => {
           title="新角色图片"
           type="new_character"
           resources={newCharacters}
+          acceptFormats={['image/*']}
           badge="AI 生成"
         />
 

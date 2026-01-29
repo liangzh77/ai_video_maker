@@ -158,6 +158,29 @@ export function registerDraftHandlers(): void {
       }
     }
   );
+
+  // Cleanup orphaned files in draft
+  ipcMain.handle(
+    DRAFT_CHANNELS.CLEANUP_FILES,
+    async (_, request: { draftId: string }): Promise<OperationResult<number>> => {
+      try {
+        const existing = await storage.draft.get(request.draftId);
+        if (!existing) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        const deletedCount = await storage.cleanupOrphanedFiles(request.draftId);
+        console.log(`[Draft] Cleaned up ${deletedCount} orphaned files for draft:`, request.draftId);
+
+        return { success: true, data: deletedCount };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to cleanup files',
+        };
+      }
+    }
+  );
 }
 
 export default registerDraftHandlers;

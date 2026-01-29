@@ -18,10 +18,62 @@ protocol.registerSchemesAsPrivileged([
 import { join } from 'path';
 import { createReadStream, statSync } from 'fs';
 import { lookup } from 'mime-types';
+import { Readable } from 'stream';
 import storage from './services/storage';
 import registerDraftHandlers from './ipc/draft';
 import registerResourceHandlers from './ipc/resource';
 import registerTaskHandlers from './ipc/task';
+
+/**
+ * 将 Node.js Readable 流安全转换为 Web ReadableStream
+ * 正确处理取消和错误情况，避免 "Controller is already closed" 错误
+ */
+function nodeStreamToWebStream(nodeStream: Readable): ReadableStream<Uint8Array> {
+  let controllerClosed = false;
+
+  return new ReadableStream({
+    start(controller) {
+      nodeStream.on('data', (chunk: Buffer) => {
+        if (!controllerClosed) {
+          try {
+            controller.enqueue(new Uint8Array(chunk));
+          } catch {
+            // Controller may be closed, ignore
+            controllerClosed = true;
+            nodeStream.destroy();
+          }
+        }
+      });
+
+      nodeStream.on('end', () => {
+        if (!controllerClosed) {
+          controllerClosed = true;
+          try {
+            controller.close();
+          } catch {
+            // Already closed, ignore
+          }
+        }
+      });
+
+      nodeStream.on('error', (err) => {
+        if (!controllerClosed) {
+          controllerClosed = true;
+          try {
+            controller.error(err);
+          } catch {
+            // Already closed, ignore
+          }
+        }
+      });
+    },
+
+    cancel() {
+      controllerClosed = true;
+      nodeStream.destroy();
+    },
+  });
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -89,9 +141,10 @@ app.whenReady().then(async () => {
           const end = match[2] ? parseInt(match[2], 10) : fileSize - 1;
           const chunkSize = end - start + 1;
 
-          const stream = createReadStream(filePath, { start, end });
+          const nodeStream = createReadStream(filePath, { start, end });
+          const webStream = nodeStreamToWebStream(nodeStream);
 
-          return new Response(stream as unknown as ReadableStream, {
+          return new Response(webStream, {
             status: 206,
             headers: {
               'Content-Type': mimeType,
@@ -105,8 +158,9 @@ app.whenReady().then(async () => {
       }
 
       // Full file request
-      const stream = createReadStream(filePath);
-      return new Response(stream as unknown as ReadableStream, {
+      const nodeStream = createReadStream(filePath);
+      const webStream = nodeStreamToWebStream(nodeStream);
+      return new Response(webStream, {
         status: 200,
         headers: {
           'Content-Type': mimeType,

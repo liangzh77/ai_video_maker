@@ -25,12 +25,18 @@ interface ResourceSectionProps {
 const validateFileType = (file: File, acceptFormats?: string[]): boolean => {
   if (!acceptFormats || acceptFormats.length === 0) return false;
 
+  const fileName = file.name.toLowerCase();
+
   for (const format of acceptFormats) {
     if (format.endsWith('/*')) {
-      // Check MIME type prefix (e.g., "video/*", "image/*")
+      // Check MIME type prefix (e.g., "video/*", "image/*", "text/*")
       const prefix = format.replace('/*', '');
       if (file.type.startsWith(prefix)) return true;
+    } else if (format.startsWith('.')) {
+      // Check file extension (e.g., ".txt", ".md")
+      if (fileName.endsWith(format)) return true;
     } else if (file.type === format) {
+      // Check exact MIME type
       return true;
     }
   }
