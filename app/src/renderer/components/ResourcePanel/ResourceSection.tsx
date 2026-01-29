@@ -44,9 +44,6 @@ const validateFileType = (file: File, acceptFormats?: string[]): boolean => {
   return false;
 };
 
-// 拖动排序的 MIME 类型
-const CARD_DRAG_MIME = 'application/x-resource-card';
-
 const ResourceSection: React.FC<ResourceSectionProps> = ({
   title,
   type,
@@ -60,6 +57,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
+  const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType } = useDraftStore();
   const { batchLink, getCustomOrder, setCustomOrder, swapOrder } = useSceneLinkStore();
   const { message } = App.useApp();
@@ -185,20 +183,26 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     }
   };
 
-  // 卡片拖动排序处理
+  // 卡片拖动排序处理 - 使用组件状态而不是 dataTransfer MIME 类型
   const handleCardDragStart = useCallback((e: React.DragEvent, resourceId: string) => {
-    e.dataTransfer.setData(CARD_DRAG_MIME, JSON.stringify({ resourceId, type }));
+    if (!isSortable) return;
+    setDraggingCardId(resourceId);
     e.dataTransfer.effectAllowed = 'move';
-  }, [type]);
+    // 设置一个简单的文本数据，某些浏览器需要这个才能正常工作
+    e.dataTransfer.setData('text/plain', resourceId);
+  }, [isSortable]);
 
   const handleCardDragOver = useCallback((e: React.DragEvent, resourceId: string) => {
-    const data = e.dataTransfer.types.includes(CARD_DRAG_MIME);
-    if (!data || !isSortable) return;
-
+    // 必须调用 preventDefault 才能使元素成为有效的 drop 目标
     e.preventDefault();
     e.stopPropagation();
-    setDragOverCardId(resourceId);
-  }, [isSortable]);
+
+    // 只有在拖动卡片时才显示高亮
+    if (!draggingCardId || !isSortable) return;
+    if (resourceId !== draggingCardId) {
+      setDragOverCardId(resourceId);
+    }
+  }, [draggingCardId, isSortable]);
 
   const handleCardDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -208,34 +212,29 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const handleCardDrop = useCallback((e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     e.stopPropagation();
+
+    const fromId = draggingCardId;
     setDragOverCardId(null);
+    setDraggingCardId(null);
 
-    const dataStr = e.dataTransfer.getData(CARD_DRAG_MIME);
-    if (!dataStr || !isSortable) return;
+    if (!fromId || !isSortable || fromId === targetId) return;
 
-    try {
-      const { resourceId: fromId, type: fromType } = JSON.parse(dataStr);
-      // 只允许同类型之间排序
-      if (fromType !== type || fromId === targetId) return;
-
-      swapOrder(type as SortableType, fromId, targetId);
-    } catch (error) {
-      console.error('Failed to parse card drag data:', error);
-    }
-  }, [isSortable, type, swapOrder]);
+    swapOrder(type as SortableType, fromId, targetId);
+  }, [draggingCardId, isSortable, type, swapOrder]);
 
   const handleCardDragEnd = useCallback(() => {
     setDragOverCardId(null);
+    setDraggingCardId(null);
   }, []);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     // 只有文件拖入时才高亮区域，卡片排序时不高亮
-    if (canDrop && !e.dataTransfer.types.includes(CARD_DRAG_MIME)) {
+    if (canDrop && !draggingCardId) {
       setIsDragOver(true);
     }
-  }, [canDrop]);
+  }, [canDrop, draggingCardId]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
