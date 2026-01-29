@@ -61,7 +61,6 @@ const ResourcePanel: React.FC = () => {
           type="new_character"
           resources={newCharacters}
           acceptFormats={['image/*']}
-          badge="AI 生成"
         />
 
         <ResourceSection
@@ -75,7 +74,6 @@ const ResourcePanel: React.FC = () => {
           type="scene_new"
           resources={sceneNew}
           acceptFormats={['video/*']}
-          badge="待高清化"
         />
 
         <ResourceSection

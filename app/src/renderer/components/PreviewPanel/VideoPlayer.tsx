@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Slider, Tooltip } from 'antd';
 import {
   PlayCircleOutlined,
@@ -20,17 +20,26 @@ interface VideoPlayerProps {
   resource: Resource;
   showSplitTimeline?: boolean;
   onTimeUpdate?: (time: number) => void;
+  onEnded?: () => void;
+  autoPlay?: boolean;
+}
+
+// 暴露给父组件的方法
+export interface VideoPlayerRef {
+  togglePlay: () => void;
 }
 
 // 节流间隔（毫秒）
 const SEEK_THROTTLE_MS = 100;
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({
+const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   src,
   resource,
   showSplitTimeline = false,
   onTimeUpdate,
-}) => {
+  onEnded,
+  autoPlay = false,
+}, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -58,6 +67,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     wasPlayingRef.current = false;
   }, [src]);
 
+  // Handle autoPlay when video is ready
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !autoPlay) return;
+
+    const handleCanPlayForAutoPlay = () => {
+      video.play().then(() => {
+        setIsPlaying(true);
+      }).catch((err) => {
+        console.warn('AutoPlay failed:', err);
+      });
+    };
+
+    // If video is already ready, play immediately
+    if (video.readyState >= 3) {
+      handleCanPlayForAutoPlay();
+    } else {
+      video.addEventListener('canplay', handleCanPlayForAutoPlay, { once: true });
+      return () => {
+        video.removeEventListener('canplay', handleCanPlayForAutoPlay);
+      };
+    }
+  }, [src, autoPlay]);
+
   // Setup video event listeners
   useEffect(() => {
     const video = videoRef.current;
@@ -77,6 +110,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     const handleEnded = () => {
       setIsPlaying(false);
+      onEnded?.();
     };
 
     const handleError = () => {
@@ -123,6 +157,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }
   }, [isPlaying, hasError]);
+
+  // 暴露方法给父组件
+  useImperativeHandle(ref, () => ({
+    togglePlay,
+  }), [togglePlay]);
 
   // 空格键播放/暂停
   useEffect(() => {
@@ -435,6 +474,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       )}
     </div>
   );
-};
+});
+
+VideoPlayer.displayName = 'VideoPlayer';
 
 export default VideoPlayer;

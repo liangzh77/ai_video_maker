@@ -4,6 +4,7 @@ import { App } from 'antd';
 import type { Resource } from '@shared/types';
 import { isVideoMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
+import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
 import styles from './ResourceCard.module.css';
 
 interface ResourceCardProps {
@@ -101,12 +102,20 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   isLarge = false,
 }) => {
   const { selectedResourceId, selectResource, deleteResource } = useDraftStore();
+  const { setShouldAutoPlay } = usePlaybackStore();
   const { message } = App.useApp();
   const isSelected = selectedResourceId === resource.id;
   const isVideo = resource.mimeType.startsWith('video/');
   const isImage = resource.mimeType.startsWith('image/');
 
+  // 检查是否支持点击播放
+  const supportsContinuousPlay = isVideo && CONTINUOUS_PLAY_TYPES.includes(resource.type as typeof CONTINUOUS_PLAY_TYPES[number]);
+
   const handleClick = () => {
+    // 如果是支持连续播放的视频类型，点击时触发自动播放
+    if (supportsContinuousPlay) {
+      setShouldAutoPlay(true);
+    }
     selectResource(resource.id);
   };
 
