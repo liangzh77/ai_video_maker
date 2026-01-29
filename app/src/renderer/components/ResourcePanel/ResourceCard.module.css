@@ -17,6 +17,25 @@
   outline-offset: 2px;
 }
 
+.card.linked {
+  outline: 2px solid var(--color-success);
+  outline-offset: 2px;
+}
+
+.card.draggable {
+  cursor: grab;
+}
+
+.card.draggable:active {
+  cursor: grabbing;
+}
+
+.card.dragOver {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: 2px;
+  background-color: rgba(0, 122, 255, 0.1);
+}
+
 .card.large {
   grid-column: span 2;
 }

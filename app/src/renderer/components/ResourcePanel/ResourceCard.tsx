@@ -5,6 +5,7 @@ import type { Resource } from '@shared/types';
 import { isVideoMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
+import { useSceneLinkStore } from '../../stores/sceneLink';
 import styles from './ResourceCard.module.css';
 
 interface ResourceCardProps {
@@ -12,6 +13,14 @@ interface ResourceCardProps {
   badge?: string;
   badgeType?: 'default' | 'success' | 'warning';
   isLarge?: boolean;
+  // 拖动排序相关 props
+  draggable?: boolean;
+  isDragOver?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onDragEnd?: () => void;
 }
 
 // Video thumbnail component that displays the first frame
@@ -100,9 +109,17 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   badge,
   badgeType = 'default',
   isLarge = false,
+  draggable = false,
+  isDragOver = false,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
 }) => {
-  const { selectedResourceId, selectResource, deleteResource } = useDraftStore();
+  const { selectedResourceId, selectResource, deleteResource, getSelectedResource } = useDraftStore();
   const { setShouldAutoPlay } = usePlaybackStore();
+  const { getLinkedId } = useSceneLinkStore();
   const { message } = App.useApp();
   const isSelected = selectedResourceId === resource.id;
   const isVideo = resource.mimeType.startsWith('video/');
@@ -110,6 +127,23 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
 
   // 检查是否支持点击播放
   const supportsContinuousPlay = isVideo && CONTINUOUS_PLAY_TYPES.includes(resource.type as typeof CONTINUOUS_PLAY_TYPES[number]);
+
+  // 检查是否是当前选中资源的关联资源
+  const selectedResource = getSelectedResource();
+  const isLinked = (() => {
+    if (!selectedResource || isSelected) return false;
+
+    // 只有 scene_source 和 scene_new 之间才有关联
+    if (resource.type === 'scene_source' && selectedResource.type === 'scene_new') {
+      const linkedSourceId = getLinkedId(selectedResource.id, 'scene_new');
+      return linkedSourceId === resource.id;
+    }
+    if (resource.type === 'scene_new' && selectedResource.type === 'scene_source') {
+      const linkedNewId = getLinkedId(selectedResource.id, 'scene_source');
+      return linkedNewId === resource.id;
+    }
+    return false;
+  })();
 
   const handleClick = () => {
     // 如果是支持连续播放的视频类型，点击时触发自动播放
@@ -175,10 +209,25 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
     );
   };
 
+  const cardClassName = [
+    styles.card,
+    isSelected ? styles.selected : '',
+    isLinked ? styles.linked : '',
+    isLarge ? styles.large : '',
+    isDragOver ? styles.dragOver : '',
+    draggable ? styles.draggable : '',
+  ].filter(Boolean).join(' ');
+
   return (
     <div
-      className={`${styles.card} ${isSelected ? styles.selected : ''} ${isLarge ? styles.large : ''}`}
+      className={cardClassName}
       onClick={handleClick}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
     >
       <div className={styles.thumbnailWrapper}>
         {getThumbnail()}

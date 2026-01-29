@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Button, Tooltip, Space } from 'antd';
 import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
 import { useSplitPointsStore } from '../../stores/splitPoints';
 import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
+import { useSceneLinkStore, SORTABLE_TYPES, type SortableType } from '../../stores/sceneLink';
 import { isVideoMetadata, isImageMetadata, isTextMetadata } from '@shared/types';
 import type { ResourceType } from '@shared/types';
 import VideoPlayer, { type VideoPlayerRef } from './VideoPlayer';
@@ -19,11 +20,40 @@ const PreviewPanel: React.FC = () => {
   const { selectedDraftId, selectedResourceId, getSelectedResource, openResourceFolder, selectResource, getResourcesByType } = useDraftStore();
   const { splitPoints, videoId, loadSplitPoints, clearPoints } = useSplitPointsStore();
   const { shouldAutoPlay, setShouldAutoPlay } = usePlaybackStore();
+  const { getCustomOrder } = useSceneLinkStore();
   const selectedResource = getSelectedResource();
   const [splitDialogVisible, setSplitDialogVisible] = useState(false);
   const [analyzeDialogVisible, setAnalyzeDialogVisible] = useState(false);
   const [editorDialogVisible, setEditorDialogVisible] = useState(false);
   const videoPlayerRef = useRef<VideoPlayerRef>(null);
+
+  // 获取按自定义排序的资源列表
+  const getSortedResources = useCallback((resourceType: ResourceType) => {
+    const resources = getResourcesByType(resourceType);
+    if (!SORTABLE_TYPES.includes(resourceType as SortableType)) {
+      return resources;
+    }
+
+    const customOrder = getCustomOrder(resourceType as SortableType);
+    if (!customOrder) return resources;
+
+    // 按自定义排序重新排列资源
+    const resourceMap = new Map(resources.map((r) => [r.id, r]));
+    const sorted = [];
+    for (const id of customOrder) {
+      const resource = resourceMap.get(id);
+      if (resource) {
+        sorted.push(resource);
+      }
+    }
+    // 添加不在排序中的资源
+    for (const resource of resources) {
+      if (!customOrder.includes(resource.id)) {
+        sorted.push(resource);
+      }
+    }
+    return sorted;
+  }, [getResourcesByType, getCustomOrder]);
 
   // 处理视频播放结束 - 自动播放下一个
   const handleVideoEnded = useCallback(() => {
@@ -35,8 +65,8 @@ const PreviewPanel: React.FC = () => {
       return;
     }
 
-    // 获取同类型的所有资源（已按文件名排序）
-    const resources = getResourcesByType(resourceType);
+    // 获取同类型的所有资源（使用自定义排序）
+    const resources = getSortedResources(resourceType);
     const currentIndex = resources.findIndex((r) => r.id === selectedResource.id);
 
     // 找到下一个视频
@@ -46,7 +76,7 @@ const PreviewPanel: React.FC = () => {
       setShouldAutoPlay(true);
       selectResource(nextResource.id);
     }
-  }, [selectedResource, getResourcesByType, setShouldAutoPlay, selectResource]);
+  }, [selectedResource, getSortedResources, setShouldAutoPlay, selectResource]);
 
   // 当资源切换后重置自动播放标志
   useEffect(() => {

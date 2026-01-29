@@ -45,6 +45,16 @@
   background-color: rgba(0, 122, 255, 0.05);
 }
 
+.linkButton {
+  margin-left: auto;
+}
+
+.linkButton:hover {
+  border-color: var(--color-success);
+  color: var(--color-success);
+  background-color: rgba(82, 196, 26, 0.05);
+}
+
 .clearButton {
   margin-left: 0;
 }

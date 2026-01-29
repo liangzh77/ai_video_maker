@@ -1,8 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Empty, App, Popconfirm, Tooltip } from 'antd';
-import { InboxOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined } from '@ant-design/icons';
 import type { Resource, ResourceType } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
+import { useSceneLinkStore, SORTABLE_TYPES, type SortableType } from '../../stores/sceneLink';
 import ResourceCard from './ResourceCard';
 import PromptCard from './PromptCard';
 import styles from './ResourceSection.module.css';
@@ -43,6 +44,9 @@ const validateFileType = (file: File, acceptFormats?: string[]): boolean => {
   return false;
 };
 
+// 拖动排序的 MIME 类型
+const CARD_DRAG_MIME = 'application/x-resource-card';
+
 const ResourceSection: React.FC<ResourceSectionProps> = ({
   title,
   type,
@@ -55,13 +59,61 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
-  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType } = useDraftStore();
+  const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
+  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType } = useDraftStore();
+  const { batchLink, getCustomOrder, setCustomOrder, swapOrder } = useSceneLinkStore();
   const { message } = App.useApp();
 
   const canDrop = !!acceptFormats && acceptFormats.length > 0;
   // 支持清除所有的资源类型
   const clearableTypes: ResourceType[] = ['scene_source', 'scene_new', 'scene_hd', 'lipsync'];
   const canClear = clearableTypes.includes(type) && resources.length > 0;
+  // 只有 scene_new 才显示批量关联按钮
+  const canBatchLink = type === 'scene_new';
+  // 是否支持拖动排序
+  const isSortable = SORTABLE_TYPES.includes(type as SortableType);
+
+  // 初始化自定义排序（当资源列表变化时）
+  useEffect(() => {
+    if (!isSortable || resources.length === 0) return;
+
+    const currentOrder = getCustomOrder(type as SortableType);
+    const resourceIds = resources.map((r) => r.id);
+
+    // 如果没有自定义排序或资源列表变化（有新增/删除），重新初始化
+    if (!currentOrder || currentOrder.length !== resourceIds.length) {
+      // 保留已有的顺序，添加新资源到末尾
+      const newOrder = currentOrder
+        ? [...currentOrder.filter((id) => resourceIds.includes(id)), ...resourceIds.filter((id) => !currentOrder.includes(id))]
+        : resourceIds;
+      setCustomOrder(type as SortableType, newOrder);
+    }
+  }, [isSortable, type, resources, getCustomOrder, setCustomOrder]);
+
+  // 获取排序后的资源列表
+  const sortedResources = useMemo(() => {
+    if (!isSortable) return resources;
+
+    const customOrder = getCustomOrder(type as SortableType);
+    if (!customOrder) return resources;
+
+    // 根据自定义排序重新排列资源
+    const resourceMap = new Map(resources.map((r) => [r.id, r]));
+    const sorted: Resource[] = [];
+    for (const id of customOrder) {
+      const resource = resourceMap.get(id);
+      if (resource) {
+        sorted.push(resource);
+      }
+    }
+    // 添加不在排序中的资源（理论上不应该发生）
+    for (const resource of resources) {
+      if (!customOrder.includes(resource.id)) {
+        sorted.push(resource);
+      }
+    }
+    return sorted;
+  }, [isSortable, type, resources, getCustomOrder]);
 
   const handleClearAll = async () => {
     setIsClearing(true);
@@ -78,6 +130,34 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     } finally {
       setIsClearing(false);
     }
+  };
+
+  const handleBatchLink = () => {
+    // 获取 scene_source 和 scene_new 资源列表
+    const sceneSourceResources = getResourcesByType('scene_source');
+    const sceneNewResources = getResourcesByType('scene_new');
+
+    if (sceneSourceResources.length === 0 || sceneNewResources.length === 0) {
+      message.warning('需要同时有分镜源视频和分镜新视频才能关联');
+      return;
+    }
+
+    // 使用自定义排序（如果存在），否则使用默认排序
+    const sourceOrder = getCustomOrder('scene_source');
+    const newOrder = getCustomOrder('scene_new');
+
+    // 按自定义排序获取 ID 列表
+    const sortedSourceIds = sourceOrder
+      ? sourceOrder.filter((id) => sceneSourceResources.some((r) => r.id === id))
+      : sceneSourceResources.map((r) => r.id);
+    const sortedNewIds = newOrder
+      ? newOrder.filter((id) => sceneNewResources.some((r) => r.id === id))
+      : sceneNewResources.map((r) => r.id);
+
+    batchLink(sortedSourceIds, sortedNewIds);
+
+    const linkedCount = Math.min(sortedSourceIds.length, sortedNewIds.length);
+    message.success(`已关联 ${linkedCount} 对分镜视频`);
   };
 
   const handleAddPrompt = async () => {
@@ -105,10 +185,54 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     }
   };
 
+  // 卡片拖动排序处理
+  const handleCardDragStart = useCallback((e: React.DragEvent, resourceId: string) => {
+    e.dataTransfer.setData(CARD_DRAG_MIME, JSON.stringify({ resourceId, type }));
+    e.dataTransfer.effectAllowed = 'move';
+  }, [type]);
+
+  const handleCardDragOver = useCallback((e: React.DragEvent, resourceId: string) => {
+    const data = e.dataTransfer.types.includes(CARD_DRAG_MIME);
+    if (!data || !isSortable) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCardId(resourceId);
+  }, [isSortable]);
+
+  const handleCardDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverCardId(null);
+  }, []);
+
+  const handleCardDrop = useCallback((e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCardId(null);
+
+    const dataStr = e.dataTransfer.getData(CARD_DRAG_MIME);
+    if (!dataStr || !isSortable) return;
+
+    try {
+      const { resourceId: fromId, type: fromType } = JSON.parse(dataStr);
+      // 只允许同类型之间排序
+      if (fromType !== type || fromId === targetId) return;
+
+      swapOrder(type as SortableType, fromId, targetId);
+    } catch (error) {
+      console.error('Failed to parse card drag data:', error);
+    }
+  }, [isSortable, type, swapOrder]);
+
+  const handleCardDragEnd = useCallback(() => {
+    setDragOverCardId(null);
+  }, []);
+
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (canDrop) {
+    // 只有文件拖入时才高亮区域，卡片排序时不高亮
+    if (canDrop && !e.dataTransfer.types.includes(CARD_DRAG_MIME)) {
       setIsDragOver(true);
     }
   }, [canDrop]);
@@ -214,6 +338,13 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
             <PlusOutlined />
           </button>
         )}
+        {canBatchLink && (
+          <Tooltip title="批量关联分镜源视频">
+            <button className={`${styles.addButton} ${styles.linkButton}`} onClick={handleBatchLink}>
+              <LinkOutlined />
+            </button>
+          </Tooltip>
+        )}
         {canClear && (
           <Popconfirm
             title="确认清除"
@@ -257,7 +388,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           </div>
         ) : (
           <div className={styles.grid}>
-            {resources.map((resource) =>
+            {sortedResources.map((resource) =>
               isText ? (
                 <PromptCard key={resource.id} resource={resource} />
               ) : (
@@ -267,6 +398,13 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
                   badge={badge}
                   badgeType={badgeType}
                   isLarge={isLarge}
+                  draggable={isSortable}
+                  isDragOver={dragOverCardId === resource.id}
+                  onDragStart={(e) => handleCardDragStart(e, resource.id)}
+                  onDragOver={(e) => handleCardDragOver(e, resource.id)}
+                  onDragLeave={handleCardDragLeave}
+                  onDrop={(e) => handleCardDrop(e, resource.id)}
+                  onDragEnd={handleCardDragEnd}
                 />
               )
             )}
