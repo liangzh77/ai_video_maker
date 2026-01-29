@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Tooltip, Space } from 'antd';
-import { FolderOpenOutlined, ScissorOutlined, SearchOutlined } from '@ant-design/icons';
+import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
 import { useSplitPointsStore } from '../../stores/splitPoints';
 import { isVideoMetadata, isImageMetadata, isTextMetadata } from '@shared/types';
@@ -10,6 +10,7 @@ import TextEditor from './TextEditor';
 import ResourceInfo from './ResourceInfo';
 import SplitVideoDialog from './SplitVideoDialog';
 import AnalyzeVideoDialog from './AnalyzeVideoDialog';
+import SplitPointEditorDialog from './SplitPointEditorDialog';
 import styles from './PreviewPanel.module.css';
 
 const PreviewPanel: React.FC = () => {
@@ -18,6 +19,7 @@ const PreviewPanel: React.FC = () => {
   const selectedResource = getSelectedResource();
   const [splitDialogVisible, setSplitDialogVisible] = useState(false);
   const [analyzeDialogVisible, setAnalyzeDialogVisible] = useState(false);
+  const [editorDialogVisible, setEditorDialogVisible] = useState(false);
 
   // Auto-load split points when selecting a source video
   useEffect(() => {
@@ -94,6 +96,15 @@ const PreviewPanel: React.FC = () => {
                   disabled={!hasSplitPoints}
                 />
               </Tooltip>
+              {/* Editor button - only enabled when has split points */}
+              <Tooltip title={hasSplitPoints ? '放大编辑分割点' : '请先分析视频'}>
+                <Button
+                  type="text"
+                  icon={<ExpandOutlined />}
+                  onClick={() => setEditorDialogVisible(true)}
+                  disabled={!hasSplitPoints}
+                />
+              </Tooltip>
             </Space>
           )}
           <Tooltip title="打开所在文件夹">
@@ -144,6 +155,16 @@ const PreviewPanel: React.FC = () => {
           visible={splitDialogVisible}
           resource={selectedResource}
           onClose={() => setSplitDialogVisible(false)}
+        />
+      )}
+
+      {/* Split Point Editor Dialog */}
+      {isSourceVideo && (
+        <SplitPointEditorDialog
+          visible={editorDialogVisible}
+          src={getLocalFileUrl(selectedResource.filePath)}
+          resource={selectedResource}
+          onClose={() => setEditorDialogVisible(false)}
         />
       )}
     </div>
