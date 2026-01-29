@@ -90,6 +90,7 @@ const VideoThumbnail: React.FC<{ src: string; alt: string }> = ({ src, alt }) =>
         muted
         playsInline
         crossOrigin="anonymous"
+        draggable={false}
         style={{
           opacity: isLoaded && !hasError ? 1 : 0,
           position: isLoaded && !hasError ? 'relative' : 'absolute',
@@ -187,6 +188,7 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
           src={getLocalFileUrl(resource.filePath)}
           alt={resource.fileName}
           className={styles.thumbnail}
+          draggable={false}
         />
       );
     }
