@@ -113,15 +113,18 @@ app.whenReady().then(async () => {
   protocol.handle('local-file', (request) => {
     // Convert local-file:///path to file path
     // URL format: local-file:///C:/path/to/file (triple slash for Windows)
-    let filePath = decodeURIComponent(request.url.replace('local-file:///', ''));
-
-    // Remove any leading slash that might remain (for non-Windows)
-    if (process.platform !== 'win32' && filePath.startsWith('/')) {
-      // Keep the leading slash on Unix
-    } else if (process.platform === 'win32') {
-      // On Windows, convert forward slashes to backslashes
+    // 使用 URL 对象解析，移除查询参数（用于缓存破坏）
+    const url = new URL(request.url);
+    let filePath = decodeURIComponent(url.pathname);
+    // 处理平台差异
+    if (process.platform === 'win32') {
+      // Windows: 移除开头的斜杠，并转换斜杠方向
+      if (filePath.startsWith('/')) {
+        filePath = filePath.slice(1);
+      }
       filePath = filePath.replace(/\//g, '\\');
     }
+    // Unix: 保留开头的斜杠
 
     console.log('[Protocol] Handling request:', request.url, '-> filePath:', filePath);
 

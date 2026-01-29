@@ -59,7 +59,9 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const { message } = App.useApp();
 
   const canDrop = !!acceptFormats && acceptFormats.length > 0;
-  const canClear = type === 'scene_source' && resources.length > 0;
+  // 支持清除所有的资源类型
+  const clearableTypes: ResourceType[] = ['scene_source', 'scene_new', 'scene_hd', 'lipsync'];
+  const canClear = clearableTypes.includes(type) && resources.length > 0;
 
   const handleClearAll = async () => {
     setIsClearing(true);

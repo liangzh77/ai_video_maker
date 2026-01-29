@@ -350,8 +350,9 @@ export async function deleteResource(draftId: string, resourceId: string): Promi
 // Split Points Storage
 // ============================================
 
-function getSplitPointsPath(draftId: string, videoId: string): string {
-  return path.join(getDraftPath(draftId), `split_points_${videoId}.json`);
+function getSplitPointsPath(draftId: string, _videoId: string): string {
+  // 使用固定的文件名，存储在 files 目录下
+  return path.join(getFilesPath(draftId), '源视频分割点.txt');
 }
 
 interface SplitPointsFile {

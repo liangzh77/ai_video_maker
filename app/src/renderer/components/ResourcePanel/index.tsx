@@ -74,6 +74,7 @@ const ResourcePanel: React.FC = () => {
           title="分镜新视频"
           type="scene_new"
           resources={sceneNew}
+          acceptFormats={['video/*']}
           badge="待高清化"
         />
 
@@ -81,22 +82,21 @@ const ResourcePanel: React.FC = () => {
           title="高清分镜新视频"
           type="scene_hd"
           resources={sceneHd}
-          badge="4K·60fps"
-          badgeType="success"
+          acceptFormats={['video/*']}
         />
 
         <ResourceSection
           title="对口型新视频"
           type="lipsync"
           resources={lipsync}
-          badge="已同步"
+          acceptFormats={['video/*']}
         />
 
         <ResourceSection
           title="合成新视频"
           type="synthesized"
           resources={synthesized}
-          isLarge
+          acceptFormats={['video/*']}
         />
       </div>
     </div>

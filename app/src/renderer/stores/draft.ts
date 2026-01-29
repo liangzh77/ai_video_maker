@@ -155,9 +155,19 @@ export const useDraftStore = create<DraftState>((set, get) => ({
         filePath,
       });
       if (result.success && result.data) {
-        set((state) => ({
-          resources: [...state.resources, result.data!],
-        }));
+        const newResource = result.data;
+        set((state) => {
+          // 检查是否已存在相同 ID 的资源（覆盖场景）
+          const existingIndex = state.resources.findIndex((r) => r.id === newResource.id);
+          if (existingIndex >= 0) {
+            // 更新现有资源
+            const updatedResources = [...state.resources];
+            updatedResources[existingIndex] = newResource;
+            return { resources: updatedResources };
+          }
+          // 添加新资源
+          return { resources: [...state.resources, newResource] };
+        });
         return result.data;
       }
       return null;
@@ -337,7 +347,15 @@ export const useDraftStore = create<DraftState>((set, get) => ({
 
   getResourcesByType: (type: ResourceType) => {
     const { resources } = get();
-    return resources.filter((r) => r.type === type);
+    const filtered = resources.filter((r) => r.type === type);
+
+    // 某些类型按文件名排序
+    const sortByNameTypes: ResourceType[] = ['scene_new', 'scene_hd', 'lipsync', 'scene_source'];
+    if (sortByNameTypes.includes(type)) {
+      return filtered.sort((a, b) => a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true }));
+    }
+
+    return filtered;
   },
 }));
 

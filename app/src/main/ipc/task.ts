@@ -123,12 +123,13 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
 
   onProgress(95);
 
-  // Save generated image
-  const filesDir = storage.getFilesPath(draftId);
-  await fs.mkdir(filesDir, { recursive: true });
+  // 使用新的命名规范保存生成的图片
+  const sequenceNumber = await storage.getNextSequenceNumber(draftId, 'new_character');
+  const filePath = storage.getResourceFilePath(draftId, 'new_character', '.png', sequenceNumber);
 
-  const fileName = `generated_${uuidv4().slice(0, 8)}.png`;
-  const filePath = path.join(filesDir, fileName);
+  // 确保目录存在
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+
   await fs.writeFile(filePath, result.imageData);
   console.log('[TaskHandler] Image saved:', filePath);
 
@@ -136,7 +137,7 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
   const newResource = await storage.resource.add(draftId, {
     type: 'new_character',
     filePath,
-    fileName,
+    fileName: path.basename(filePath),
     fileSize: result.imageData.length,
     mimeType: 'image/png',
     metadata: {
@@ -171,9 +172,11 @@ const splitVideoHandler: TaskHandler = async (task, onProgress) => {
 
   onProgress(5);
 
-  // Prepare output directory
-  const filesDir = storage.getFilesPath(draftId);
-  const outputDir = path.join(filesDir, `split_${uuidv4().slice(0, 8)}`);
+  // 使用新的命名规范获取输出目录（分镜源视频文件夹）
+  const outputDir = storage.getResourceFolderPath(draftId, 'scene_source');
+  if (!outputDir) {
+    throw new Error('Failed to get output directory for scene_source');
+  }
   await fs.mkdir(outputDir, { recursive: true });
 
   console.log('[TaskHandler] Output directory:', outputDir);
@@ -200,16 +203,35 @@ const splitVideoHandler: TaskHandler = async (task, onProgress) => {
   // Create resource records for each split video
   const outputResourceIds: string[] = [];
 
-  for (const scene of result.scenes) {
-    // Get file stats
-    const stats = await fs.stat(scene.filePath);
-    const fileName = path.basename(scene.filePath);
+  for (let i = 0; i < result.scenes.length; i++) {
+    const scene = result.scenes[i];
+    const sequenceNumber = i + 1;
+
+    // 使用新的命名规范重命名文件
+    const ext = path.extname(scene.filePath);
+    const newFileName = `${sequenceNumber.toString().padStart(3, '0')}${ext}`;
+    const newFilePath = path.join(outputDir, newFileName);
+
+    // 如果文件名不同，重命名文件
+    if (scene.filePath !== newFilePath) {
+      try {
+        await fs.rename(scene.filePath, newFilePath);
+        console.log(`[TaskHandler] Renamed: ${path.basename(scene.filePath)} -> ${newFileName}`);
+      } catch (err) {
+        console.error(`[TaskHandler] Failed to rename file:`, err);
+        // 如果重命名失败，使用原文件路径
+      }
+    }
+
+    // 获取最终的文件路径
+    const finalFilePath = await fs.stat(newFilePath).then(() => newFilePath).catch(() => scene.filePath);
+    const stats = await fs.stat(finalFilePath);
 
     // Create resource record as 'scene_source' type
     const newResource = await storage.resource.add(draftId, {
       type: 'scene_source',
-      filePath: scene.filePath,
-      fileName,
+      filePath: finalFilePath,
+      fileName: path.basename(finalFilePath),
       fileSize: stats.size,
       mimeType: 'video/mp4',
       metadata: {
@@ -222,7 +244,7 @@ const splitVideoHandler: TaskHandler = async (task, onProgress) => {
       } as VideoMetadata,
     });
 
-    console.log(`[TaskHandler] Created scene resource: ${newResource.id} (${fileName})`);
+    console.log(`[TaskHandler] Created scene resource: ${newResource.id} (${path.basename(finalFilePath)})`);
     outputResourceIds.push(newResource.id);
   }
 

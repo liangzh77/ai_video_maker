@@ -127,11 +127,14 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   };
 
   // Build local file URL - need triple slash for Windows paths
+  // Add cache busting parameter using resource id and createdAt to force reload on content change
   const getLocalFileUrl = (filePath: string) => {
     // On Windows, paths start with drive letter like C:\
     // URL format should be: local-file:///C:/path/to/file
     const normalizedPath = filePath.replace(/\\/g, '/');
-    return `local-file:///${normalizedPath}`;
+    // 使用资源 ID 和创建时间作为缓存破坏参数，确保文件更新后重新加载
+    const cacheBuster = `${resource.id}_${new Date(resource.createdAt).getTime()}`;
+    return `local-file:///${normalizedPath}?v=${cacheBuster}`;
   };
 
   const getThumbnail = () => {

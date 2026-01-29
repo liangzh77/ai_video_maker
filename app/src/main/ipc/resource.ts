@@ -154,9 +154,27 @@ async function createResourceFromFile(
   const ext = path.extname(originalFileName);
   const mimeType = getMimeType(sourcePath);
 
-  // 使用新的命名规范获取文件路径
-  const sequenceNumber = await storage.getNextSequenceNumber(draftId, type);
-  const destPath = storage.getResourceFilePath(draftId, type, ext, sequenceNumber);
+  console.log('[createResourceFromFile] Starting:', { draftId, type, sourcePath, originalFileName });
+
+  // 某些资源类型保留原有文件名（仅限 isFolder=true 的类型）
+  const keepOriginalNameTypes: ResourceType[] = ['scene_new', 'scene_hd', 'lipsync'];
+  let destPath: string;
+
+  if (keepOriginalNameTypes.includes(type)) {
+    // 保留原有文件名
+    const folderPath = storage.getResourceFolderPath(draftId, type);
+    console.log('[createResourceFromFile] Using original name, folderPath:', folderPath);
+    if (!folderPath) {
+      throw new Error(`Cannot get folder path for type: ${type}`);
+    }
+    destPath = path.join(folderPath, originalFileName);
+    console.log('[createResourceFromFile] destPath with original name:', destPath);
+  } else {
+    // 使用新的命名规范获取文件路径
+    const sequenceNumber = await storage.getNextSequenceNumber(draftId, type);
+    destPath = storage.getResourceFilePath(draftId, type, ext, sequenceNumber);
+    console.log('[createResourceFromFile] destPath with sequence:', destPath);
+  }
 
   // 确保目录存在
   await fs.mkdir(path.dirname(destPath), { recursive: true });
@@ -167,10 +185,28 @@ async function createResourceFromFile(
   // Extract metadata from copied file
   const metadata = await extractMetadata(destPath, type);
 
+  // 检查是否已存在相同路径的资源（用于覆盖场景）
+  const existingResources = await storage.resource.list(draftId, type);
+  const normalizedDestPath = path.normalize(destPath);
+  const existingResource = existingResources.find(
+    (r) => path.normalize(r.filePath) === normalizedDestPath
+  );
+
+  if (existingResource) {
+    // 更新现有资源
+    console.log('[createResourceFromFile] Updating existing resource:', existingResource.id);
+    const updated = await storage.resource.update(draftId, existingResource.id, {
+      fileSize: stats.size,
+      metadata,
+    });
+    return updated || existingResource;
+  }
+
+  // 创建新资源
   return await storage.resource.add(draftId, {
     type,
     filePath: destPath,
-    fileName: path.basename(destPath),  // 使用新文件名
+    fileName: path.basename(destPath),
     fileSize: stats.size,
     mimeType,
     metadata,
