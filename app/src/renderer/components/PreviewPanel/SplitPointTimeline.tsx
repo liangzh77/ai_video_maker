@@ -171,13 +171,20 @@ const SplitPointTimeline: React.FC<SplitPointTimelineProps> = ({
         </div>
       </div>
 
-      {/* Selected point info */}
-      {selectedPoint && (
-        <div className={styles.pointInfo}>
-          已选择: {formatTime(selectedPoint.time)} | 帧 {selectedPoint.frame} |{' '}
-          {selectedPoint.isAutoDetected ? '自动检测' : '手动添加'}
-        </div>
-      )}
+      {/* Current position info - always visible */}
+      <div className={styles.pointInfo}>
+        {formatTime(currentTime)} | 帧 {Math.round(currentTime * fps)}
+        {(() => {
+          // 检查当前帧是否和某个分割点的帧数完全相等
+          const currentFrame = Math.round(currentTime * fps);
+          const sortedPoints = [...splitPoints].sort((a, b) => a.time - b.time);
+          const matchIndex = sortedPoints.findIndex(p => p.frame === currentFrame);
+          if (matchIndex !== -1) {
+            return ` | 分割点 #${matchIndex + 1}`;
+          }
+          return null;
+        })()}
+      </div>
     </div>
   );
 };
