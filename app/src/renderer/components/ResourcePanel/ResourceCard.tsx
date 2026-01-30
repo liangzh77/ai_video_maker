@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined } from '@ant-design/icons';
 import { App } from 'antd';
 import type { Resource } from '@shared/types';
 import { isVideoMetadata } from '@shared/types';
@@ -119,8 +119,8 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   onDragEnd,
 }) => {
   const { selectedResourceId, selectResource, deleteResource, getSelectedResource } = useDraftStore();
-  const { setShouldAutoPlay } = usePlaybackStore();
-  const { getLinkedId } = useSceneLinkStore();
+  const { isPlaying, setShouldAutoPlay } = usePlaybackStore();
+  const { getLinkedId, setLink } = useSceneLinkStore();
   const { message } = App.useApp();
   const isSelected = selectedResourceId === resource.id;
   const isVideo = resource.mimeType.startsWith('video/');
@@ -146,9 +146,38 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
     return false;
   })();
 
+  // 检查是否可以显示关联按钮（当选中的是另一类型的资源时）
+  const canShowLinkButton = (() => {
+    if (!selectedResource || isSelected) return false;
+
+    // 当选中 scene_source 时，scene_new 区域的卡片显示关联按钮
+    if (selectedResource.type === 'scene_source' && resource.type === 'scene_new') {
+      return true;
+    }
+    // 当选中 scene_new 时，scene_source 区域的卡片显示关联按钮
+    if (selectedResource.type === 'scene_new' && resource.type === 'scene_source') {
+      return true;
+    }
+    return false;
+  })();
+
+  const handleLinkClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!selectedResource) return;
+
+    // 根据当前资源类型设置关联
+    if (resource.type === 'scene_source' && selectedResource.type === 'scene_new') {
+      setLink(resource.id, selectedResource.id);
+      message.success('已关联');
+    } else if (resource.type === 'scene_new' && selectedResource.type === 'scene_source') {
+      setLink(selectedResource.id, resource.id);
+      message.success('已关联');
+    }
+  };
+
   const handleClick = () => {
-    // 如果是支持连续播放的视频类型，点击时触发自动播放
-    if (supportsContinuousPlay) {
+    // 如果是支持连续播放的视频类型，且当前正在播放，点击时触发自动播放
+    if (supportsContinuousPlay && isPlaying) {
       setShouldAutoPlay(true);
     }
     selectResource(resource.id);
@@ -237,6 +266,12 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
         <button className={styles.deleteButton} onClick={handleDelete}>
           <CloseOutlined />
         </button>
+
+        {canShowLinkButton && (
+          <button className={styles.linkButton} onClick={handleLinkClick} title="关联到选中的视频">
+            <LinkOutlined />
+          </button>
+        )}
 
         {badge && (
           <span className={`${styles.badge} ${styles[badgeType]}`}>

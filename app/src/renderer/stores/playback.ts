@@ -8,8 +8,14 @@ interface PlaybackState {
   // 是否启用自动播放（下一个选中的视频自动播放）
   shouldAutoPlay: boolean;
 
+  // 当前是否正在播放
+  isPlaying: boolean;
+
   // 设置自动播放标志
   setShouldAutoPlay: (value: boolean) => void;
+
+  // 设置播放状态
+  setIsPlaying: (value: boolean) => void;
 
   // 检查资源类型是否支持连续播放
   isContinuousPlayType: (type: string) => boolean;
@@ -17,9 +23,14 @@ interface PlaybackState {
 
 export const usePlaybackStore = create<PlaybackState>((set) => ({
   shouldAutoPlay: false,
+  isPlaying: false,
 
   setShouldAutoPlay: (value: boolean) => {
     set({ shouldAutoPlay: value });
+  },
+
+  setIsPlaying: (value: boolean) => {
+    set({ isPlaying: value });
   },
 
   isContinuousPlayType: (type: string) => {

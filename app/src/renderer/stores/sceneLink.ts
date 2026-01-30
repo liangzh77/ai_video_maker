@@ -38,6 +38,9 @@ interface SceneLinkState {
   // 清除所有关联
   clearLinks: () => void;
 
+  // 设置单个关联（用于手动关联）
+  setLink: (sourceId: string, newId: string) => void;
+
   // 设置自定义排序
   setCustomOrder: (type: SortableType, orderedIds: string[]) => void;
 
@@ -101,6 +104,35 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     set({
       sourceToNewMap: new Map(),
       newToSourceMap: new Map(),
+    });
+  },
+
+  setLink: (sourceId: string, newId: string) => {
+    const { sourceToNewMap, newToSourceMap } = get();
+
+    // 创建新的 Map
+    const newSourceToNewMap = new Map(sourceToNewMap);
+    const newNewToSourceMap = new Map(newToSourceMap);
+
+    // 先清除旧的关联
+    // 如果 sourceId 之前有关联，清除旧的 newId 的反向映射
+    const oldNewId = newSourceToNewMap.get(sourceId);
+    if (oldNewId) {
+      newNewToSourceMap.delete(oldNewId);
+    }
+    // 如果 newId 之前有关联，清除旧的 sourceId 的正向映射
+    const oldSourceId = newNewToSourceMap.get(newId);
+    if (oldSourceId) {
+      newSourceToNewMap.delete(oldSourceId);
+    }
+
+    // 设置新的关联
+    newSourceToNewMap.set(sourceId, newId);
+    newNewToSourceMap.set(newId, sourceId);
+
+    set({
+      sourceToNewMap: newSourceToNewMap,
+      newToSourceMap: newNewToSourceMap,
     });
   },
 

@@ -9,6 +9,7 @@ import {
   CameraOutlined,
 } from '@ant-design/icons';
 import type { Resource, VideoMetadata } from '@shared/types';
+import { usePlaybackStore } from '../../stores/playback';
 import SplitPointTimeline from './SplitPointTimeline';
 import styles from './VideoPlayer.module.css';
 
@@ -48,6 +49,9 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   const lastSeekTimeRef = useRef(0);
   const isSeekingRef = useRef(false);
 
+  // 同步播放状态到 store
+  const { setIsPlaying: setStoreIsPlaying } = usePlaybackStore();
+
   // 状态
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -66,6 +70,11 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     isSeekingRef.current = false;
     wasPlayingRef.current = false;
   }, [src]);
+
+  // 同步 isPlaying 状态到 store
+  useEffect(() => {
+    setStoreIsPlaying(isPlaying);
+  }, [isPlaying, setStoreIsPlaying]);
 
   // Handle autoPlay when video is ready
   useEffect(() => {
