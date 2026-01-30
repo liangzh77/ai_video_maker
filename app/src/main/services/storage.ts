@@ -72,7 +72,7 @@ const RESOURCE_PATH_CONFIG: Record<ResourceType, ResourcePathConfig> = {
   'scene_new': { isFolder: true, name: '分镜新视频' },
   'scene_hd': { isFolder: true, name: '高清分镜新视频' },
   'lipsync': { isFolder: true, name: '对口型新视频' },
-  'synthesized': { isFolder: false, name: '合成新视频' },
+  'synthesized': { isFolder: true, name: '合成新视频' },
 };
 
 /**

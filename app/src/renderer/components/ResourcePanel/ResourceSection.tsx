@@ -1,12 +1,13 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Empty, App, Popconfirm, Tooltip } from 'antd';
-import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import type { Resource, ResourceType, UpscaleConfig } from '@shared/types';
+import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined, ThunderboltOutlined, MergeCellsOutlined } from '@ant-design/icons';
+import type { Resource, ResourceType, UpscaleConfig, SynthesizeConfig } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import { useSceneLinkStore, SORTABLE_TYPES, type SortableType } from '../../stores/sceneLink';
 import ResourceCard from './ResourceCard';
 import PromptCard from './PromptCard';
 import UpscaleDialog from './UpscaleDialog';
+import SynthesizeDialog from './SynthesizeDialog';
 import styles from './ResourceSection.module.css';
 
 // Custom MIME type for frame data transfer (must match VideoPlayer)
@@ -64,6 +65,10 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [isUpscaling, setIsUpscaling] = useState(false);
   const [upscaleProgress, setUpscaleProgress] = useState(0);
   const [upscaleTaskId, setUpscaleTaskId] = useState<string | null>(null);
+  const [synthesizeDialogOpen, setSynthesizeDialogOpen] = useState(false);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [synthesizeProgress, setSynthesizeProgress] = useState(0);
+  const [synthesizeTaskId, setSynthesizeTaskId] = useState<string | null>(null);
   const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType, loadResources } = useDraftStore();
   const { batchLink, getCustomOrder, setCustomOrder, moveOrder, moveToEnd, customOrder } = useSceneLinkStore();
   const { message } = App.useApp();
@@ -76,6 +81,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const canBatchLink = type === 'scene_new';
   // 只有 scene_new 才显示高清化按钮
   const canUpscale = type === 'scene_new' && resources.length > 0;
+  // 只有 lipsync 才显示合成按钮
+  const canSynthesize = type === 'lipsync' && resources.length > 0;
   // 是否支持拖动排序
   const isSortable = SORTABLE_TYPES.includes(type as SortableType);
 
@@ -137,6 +144,49 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       unsubCompleted();
     };
   }, [upscaleTaskId, selectedDraftId, loadResources, message]);
+
+  // 监听合成任务进度和完成事件
+  useEffect(() => {
+    if (!synthesizeTaskId) return;
+
+    const handleProgress = (_event: any, data: { taskId: string; progress: number; status: string; error?: string }) => {
+      if (data.taskId === synthesizeTaskId) {
+        setSynthesizeProgress(data.progress);
+
+        // 如果任务失败
+        if (data.status === 'failed') {
+          setIsSynthesizing(false);
+          setSynthesizeTaskId(null);
+          setSynthesizeDialogOpen(false);
+          message.error(`合成任务失败: ${data.error || '未知错误'}`);
+          console.error('[Synthesize] Task failed:', data.error);
+        }
+      }
+    };
+
+    const handleCompleted = (_event: any, data: { taskId: string; outputResourceIds: string[] }) => {
+      if (data.taskId === synthesizeTaskId) {
+        setSynthesizeProgress(100);
+        setIsSynthesizing(false);
+        setSynthesizeTaskId(null);
+        setSynthesizeDialogOpen(false);
+        message.success('视频合成完成');
+
+        // 刷新资源列表
+        if (selectedDraftId) {
+          loadResources(selectedDraftId);
+        }
+      }
+    };
+
+    const unsubProgress = window.api.on('task:progress', handleProgress);
+    const unsubCompleted = window.api.on('task:completed', handleCompleted);
+
+    return () => {
+      unsubProgress();
+      unsubCompleted();
+    };
+  }, [synthesizeTaskId, selectedDraftId, loadResources, message]);
 
   // 获取排序后的资源列表
   // 注意：依赖 customOrder 状态而不只是 getCustomOrder 函数，确保状态变化时重新计算
@@ -239,6 +289,39 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       message.error('启动高清化任务失败');
       setIsUpscaling(false);
       setUpscaleDialogOpen(false);
+    }
+  };
+
+  const handleSynthesize = async (config: SynthesizeConfig) => {
+    if (!selectedDraftId || resources.length === 0) return;
+
+    // 开始处理，保持对话框打开显示进度
+    setIsSynthesizing(true);
+    setSynthesizeProgress(0);
+
+    try {
+      // 获取排序后的资源 ID 列表
+      const videoIds = sortedResources.map((r) => r.id);
+
+      const result = await window.api.task.synthesizeVideo({
+        draftId: selectedDraftId,
+        videoResourceIds: videoIds,
+        config,
+      });
+
+      if (result.success && result.data) {
+        // 保存任务 ID 用于监听进度
+        setSynthesizeTaskId(result.data.id);
+      } else {
+        message.error(result.error || '启动合成任务失败');
+        setIsSynthesizing(false);
+        setSynthesizeDialogOpen(false);
+      }
+    } catch (error) {
+      console.error('Failed to start synthesize task:', error);
+      message.error('启动合成任务失败');
+      setIsSynthesizing(false);
+      setSynthesizeDialogOpen(false);
     }
   };
 
@@ -535,6 +618,17 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
             </button>
           </Tooltip>
         )}
+        {canSynthesize && (
+          <Tooltip title="合成所有对口型视频">
+            <button
+              className={`${styles.addButton} ${styles.synthesizeButton}`}
+              onClick={() => setSynthesizeDialogOpen(true)}
+              disabled={isSynthesizing}
+            >
+              <MergeCellsOutlined />
+            </button>
+          </Tooltip>
+        )}
         {canClear && (
           <Popconfirm
             title="确认清除"
@@ -629,6 +723,20 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           }
         }}
         onOk={handleUpscale}
+      />
+
+      {/* 合成设置对话框 */}
+      <SynthesizeDialog
+        open={synthesizeDialogOpen}
+        videoCount={resources.length}
+        isProcessing={isSynthesizing}
+        progress={synthesizeProgress}
+        onCancel={() => {
+          if (!isSynthesizing) {
+            setSynthesizeDialogOpen(false);
+          }
+        }}
+        onOk={handleSynthesize}
       />
     </div>
   );

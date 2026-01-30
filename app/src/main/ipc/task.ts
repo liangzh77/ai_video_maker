@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import { getAvailableModels, createDoubaoServiceWithModel } from '../services/doubao-api';
-import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler } from '../services/python-bridge';
+import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer } from '../services/python-bridge';
 import storage from '../services/storage';
 import appConfigService from '../services/config';
 import type {
@@ -18,6 +18,7 @@ import type {
   GenerateConfig,
   SplitConfig,
   UpscaleConfig,
+  SynthesizeConfig,
   SplitPoint,
   AnalyzeResult,
   Resource,
@@ -71,6 +72,12 @@ interface TaskUpscaleVideosRequest {
   draftId: string;
   sourceVideoIds: string[];
   config: UpscaleConfig;
+}
+
+interface TaskSynthesizeVideoRequest {
+  draftId: string;
+  videoResourceIds: string[];
+  config: SynthesizeConfig;
 }
 
 // ============================================
@@ -249,6 +256,94 @@ const upscaleVideoHandler: TaskHandler = async (task, onProgress) => {
 };
 
 /**
+ * Video synthesize task handler - combine multiple videos into one
+ */
+const synthesizeVideoHandler: TaskHandler = async (task, onProgress) => {
+  const { draftId, inputResourceIds, config } = task;
+  const synthesizeConfig = config as SynthesizeConfig;
+
+  console.log('[TaskHandler] Start processing video synthesize task:', task.id);
+  console.log('[TaskHandler] Input videos:', inputResourceIds.length);
+
+  // 获取所有源视频的文件路径
+  const videoPaths: string[] = [];
+  let totalDuration = 0;
+
+  for (const videoId of inputResourceIds) {
+    const resource = await storage.resource.get(draftId, videoId);
+    if (!resource) {
+      console.error(`[TaskHandler] Source video not found: ${videoId}`);
+      continue;
+    }
+    videoPaths.push(resource.filePath);
+    totalDuration += (resource.metadata as VideoMetadata).duration || 0;
+  }
+
+  if (videoPaths.length === 0) {
+    throw new Error('No valid input videos');
+  }
+
+  // 获取输出目录
+  const outputDir = storage.getResourceFolderPath(draftId, 'synthesized');
+  if (!outputDir) {
+    throw new Error('Failed to get output directory for synthesized');
+  }
+  await fs.mkdir(outputDir, { recursive: true });
+
+  // 生成输出文件名（使用时间戳）
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const outputFileName = `synthesized_${timestamp}.mp4`;
+  const outputPath = path.join(outputDir, outputFileName);
+
+  // Load app config for Python path
+  const appConfig = await appConfigService.load();
+
+  onProgress(5);
+
+  try {
+    const result = await runVideoSynthesizer(
+      videoPaths,
+      outputPath,
+      synthesizeConfig,
+      (progress) => {
+        // 映射进度：5% - 95%
+        const mappedProgress = 5 + Math.floor(progress * 0.9);
+        onProgress(mappedProgress);
+      },
+      appConfig
+    );
+
+    // 获取文件信息
+    const stats = await fs.stat(outputPath);
+
+    // 创建资源记录
+    const newResource = await storage.resource.add(draftId, {
+      type: 'synthesized',
+      filePath: outputPath,
+      fileName: outputFileName,
+      fileSize: stats.size,
+      mimeType: 'video/mp4',
+      metadata: {
+        duration: result.duration || totalDuration,
+        width: result.width,
+        height: result.height,
+        fps: result.fps,
+        codec: 'h264',
+        hasAudio: true,
+      } as VideoMetadata,
+    });
+
+    console.log(`[TaskHandler] Created synthesized resource: ${newResource.id}`);
+    onProgress(100);
+
+    return [newResource.id];
+  } catch (error) {
+    console.error('[TaskHandler] Failed to synthesize videos:', error);
+    throw error;
+  }
+};
+
+/**
  * Video split task handler
  */
 const splitVideoHandler: TaskHandler = async (task, onProgress) => {
@@ -364,6 +459,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
   taskQueue.registerHandler('generate', generateImageHandler);
   taskQueue.registerHandler('split', splitVideoHandler);
   taskQueue.registerHandler('upscale', upscaleVideoHandler);
+  taskQueue.registerHandler('synthesize', synthesizeVideoHandler);
 
   // Set task update callback (persist to storage)
   taskQueue.setUpdateCallback(async (task) => {
@@ -740,6 +836,61 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return { success: true, data: task };
       } catch (error) {
         console.error('[TaskIPC] Failed to create upscale videos task:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'PYTHON_TOOL_ERROR',
+        };
+      }
+    }
+  );
+
+  // Synthesize videos task
+  ipcMain.handle(
+    TASK_CHANNELS.SYNTHESIZE_VIDEO,
+    async (_, request: TaskSynthesizeVideoRequest): Promise<OperationResult<ProcessingTask>> => {
+      console.log('[TaskIPC] Received synthesize videos request:', request);
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Verify source videos exist
+        if (!request.videoResourceIds || request.videoResourceIds.length === 0) {
+          return { success: false, error: 'No source videos provided' };
+        }
+
+        for (const videoId of request.videoResourceIds) {
+          const video = await storage.resource.get(request.draftId, videoId);
+          if (!video) {
+            return { success: false, error: `RESOURCE_NOT_FOUND: Video ${videoId} not found` };
+          }
+        }
+
+        // Add task to queue
+        const task = taskQueue.addTask(
+          request.draftId,
+          'synthesize',
+          request.videoResourceIds,
+          request.config
+        );
+
+        console.log('[TaskIPC] Synthesize task created:', task.id);
+
+        // Persist task
+        await storage.task.add(request.draftId, {
+          type: task.type,
+          status: task.status,
+          progress: task.progress,
+          inputResourceIds: task.inputResourceIds,
+          outputResourceIds: task.outputResourceIds,
+          config: task.config,
+        });
+
+        return { success: true, data: task };
+      } catch (error) {
+        console.error('[TaskIPC] Failed to create synthesize videos task:', error);
         return {
           success: false,
           error: error instanceof Error ? error.message : 'PYTHON_TOOL_ERROR',

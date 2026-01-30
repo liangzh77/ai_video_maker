@@ -70,6 +70,21 @@
   cursor: not-allowed;
 }
 
+.synthesizeButton {
+  margin-left: 0;
+}
+
+.synthesizeButton:hover {
+  border-color: var(--color-info, #1890ff);
+  color: var(--color-info, #1890ff);
+  background-color: rgba(24, 144, 255, 0.05);
+}
+
+.synthesizeButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .clearButton {
   margin-left: 0;
 }

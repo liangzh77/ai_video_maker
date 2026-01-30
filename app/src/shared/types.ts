@@ -159,6 +159,11 @@ export interface GenerateConfig {
 
 export interface SynthesizeConfig {
   outputFormat: 'mp4' | 'mov';
+  targetWidth: number;
+  targetHeight: number;
+  targetFps: number;
+  preset: string;
+  crf: number;
   transitionType?: 'none' | 'fade' | 'crossfade';
   transitionDuration?: number;  // seconds
 }

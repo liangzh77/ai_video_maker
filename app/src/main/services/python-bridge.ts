@@ -1,7 +1,7 @@
 import { PythonShell, Options } from 'python-shell';
 import * as path from 'path';
 import { app } from 'electron';
-import type { AppConfig, SplitConfig, UpscaleConfig } from '@shared/types';
+import type { AppConfig, SplitConfig, UpscaleConfig, SynthesizeConfig } from '@shared/types';
 
 // ============================================
 // Types
@@ -22,6 +22,14 @@ export interface UpscaleResult {
   width: number;
   height: number;
   fps: number;
+}
+
+export interface SynthesizeResult {
+  outputPath: string;
+  width: number;
+  height: number;
+  fps: number;
+  duration: number;
 }
 
 export interface AnalyzeSceneResult {
@@ -401,6 +409,119 @@ export async function runVideoUpscaler(
 }
 
 // ============================================
+// Video Synthesizer
+// ============================================
+
+export async function runVideoSynthesizer(
+  videoPaths: string[],
+  outputPath: string,
+  config: Partial<SynthesizeConfig> = {},
+  onProgress?: (progress: number) => void,
+  appConfig?: AppConfig
+): Promise<SynthesizeResult> {
+  const toolsPath = getToolsPath();
+  const scriptPath = path.join(toolsPath, 'video_synthesizer.py');
+
+  const args = [...videoPaths, '-o', outputPath];
+
+  if (config.targetWidth) {
+    args.push('-w', String(config.targetWidth));
+  }
+  if (config.targetHeight) {
+    args.push('-H', String(config.targetHeight));
+  }
+  if (config.targetFps) {
+    args.push('-f', String(config.targetFps));
+  }
+  if (config.preset) {
+    args.push('--preset', config.preset);
+  }
+  if (config.crf !== undefined) {
+    args.push('--crf', String(config.crf));
+  }
+
+  const options: Options = {
+    mode: 'text',
+    pythonPath: getPythonPath(appConfig),
+    args,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: 'utf-8',
+    },
+  };
+
+  return new Promise((resolve, reject) => {
+    console.log('[VideoSynthesizer] Starting with script:', scriptPath);
+    console.log('[VideoSynthesizer] Video paths:', videoPaths);
+    console.log('[VideoSynthesizer] Output path:', outputPath);
+    console.log('[VideoSynthesizer] Args:', args);
+    console.log('[VideoSynthesizer] Python path:', options.pythonPath);
+
+    const shell = new PythonShell(scriptPath, options);
+    let resultWidth = config.targetWidth || 1920;
+    let resultHeight = config.targetHeight || 1080;
+    let resultFps = config.targetFps || 30;
+    let resultDuration = 0;
+    let stderrOutput: string[] = [];
+    let hasError = false;
+
+    shell.on('message', (message: string) => {
+      console.log('[VideoSynthesizer]', message);
+
+      // Parse progress
+      const progress = parseProgress(message);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
+
+      // Parse output info
+      const resMatch = message.match(/输出分辨率[:：]\s*(\d+)x(\d+)/i) ||
+                       message.match(/Output resolution:\s*(\d+)x(\d+)/i);
+      if (resMatch) {
+        resultWidth = parseInt(resMatch[1], 10);
+        resultHeight = parseInt(resMatch[2], 10);
+      }
+
+      const fpsMatch = message.match(/输出帧率[:：]\s*([\d.]+)/i) ||
+                       message.match(/Output FPS:\s*([\d.]+)/i);
+      if (fpsMatch) {
+        resultFps = parseFloat(fpsMatch[1]);
+      }
+
+      const durationMatch = message.match(/总时长[:：]\s*([\d.]+)/i) ||
+                            message.match(/Total duration:\s*([\d.]+)/i);
+      if (durationMatch) {
+        resultDuration = parseFloat(durationMatch[1]);
+      }
+    });
+
+    shell.on('stderr', (stderr: string) => {
+      console.log('[VideoSynthesizer stderr]', stderr);
+      stderrOutput.push(stderr);
+    });
+
+    shell.on('error', (err: Error) => {
+      hasError = true;
+      const errorDetails = stderrOutput.length > 0 ? `\n${stderrOutput.join('\n')}` : '';
+      reject(new Error(`Video synthesizer failed: ${err.message}${errorDetails}`));
+    });
+
+    shell.on('close', () => {
+      if (!hasError) {
+        resolve({
+          outputPath,
+          width: resultWidth,
+          height: resultHeight,
+          fps: resultFps,
+          duration: resultDuration,
+        });
+      }
+    });
+  });
+}
+
+// ============================================
 // Exports
 // ============================================
 
@@ -408,6 +529,7 @@ export const pythonBridge = {
   analyzeVideo: runVideoAnalyzer,
   splitVideo: runVideoSplitter,
   upscaleVideo: runVideoUpscaler,
+  synthesizeVideo: runVideoSynthesizer,
 };
 
 export default pythonBridge;
