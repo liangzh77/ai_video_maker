@@ -58,8 +58,9 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [isClearing, setIsClearing] = useState(false);
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
+  const [dragOverEndZone, setDragOverEndZone] = useState(false);
   const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType } = useDraftStore();
-  const { batchLink, getCustomOrder, setCustomOrder, swapOrder } = useSceneLinkStore();
+  const { batchLink, getCustomOrder, setCustomOrder, moveOrder, moveToEnd, customOrder } = useSceneLinkStore();
   const { message } = App.useApp();
 
   const canDrop = !!acceptFormats && acceptFormats.length > 0;
@@ -89,16 +90,17 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   }, [isSortable, type, resources, getCustomOrder, setCustomOrder]);
 
   // 获取排序后的资源列表
+  // 注意：依赖 customOrder 状态而不只是 getCustomOrder 函数，确保状态变化时重新计算
   const sortedResources = useMemo(() => {
     if (!isSortable) return resources;
 
-    const customOrder = getCustomOrder(type as SortableType);
-    if (!customOrder) return resources;
+    const order = customOrder.get(type as SortableType);
+    if (!order) return resources;
 
     // 根据自定义排序重新排列资源
     const resourceMap = new Map(resources.map((r) => [r.id, r]));
     const sorted: Resource[] = [];
-    for (const id of customOrder) {
+    for (const id of order) {
       const resource = resourceMap.get(id);
       if (resource) {
         sorted.push(resource);
@@ -106,12 +108,12 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     }
     // 添加不在排序中的资源（理论上不应该发生）
     for (const resource of resources) {
-      if (!customOrder.includes(resource.id)) {
+      if (!order.includes(resource.id)) {
         sorted.push(resource);
       }
     }
     return sorted;
-  }, [isSortable, type, resources, getCustomOrder]);
+  }, [isSortable, type, resources, customOrder]);
 
   const handleClearAll = async () => {
     setIsClearing(true);
@@ -219,13 +221,109 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     if (!fromId || !isSortable || fromId === targetId) return;
 
-    swapOrder(type as SortableType, fromId, targetId);
-  }, [draggingCardId, isSortable, type, swapOrder]);
+    // 确保 customOrder 已初始化（防止 moveOrder 因为 customOrder 不存在而失败）
+    const currentOrder = getCustomOrder(type as SortableType);
+    if (!currentOrder) {
+      // 初始化排序并执行移动
+      const resourceIds = resources.map((r) => r.id);
+      const fromIndex = resourceIds.indexOf(fromId);
+      const toIndex = resourceIds.indexOf(targetId);
+      if (fromIndex !== -1 && toIndex !== -1) {
+        // 移动到目标位置前面：先移除，再插入
+        const newOrder = [...resourceIds];
+        newOrder.splice(fromIndex, 1);
+        const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+        newOrder.splice(insertIndex, 0, fromId);
+        setCustomOrder(type as SortableType, newOrder);
+      }
+      return;
+    }
+
+    moveOrder(type as SortableType, fromId, targetId);
+  }, [draggingCardId, isSortable, type, moveOrder, getCustomOrder, setCustomOrder, resources]);
 
   const handleCardDragEnd = useCallback(() => {
     setDragOverCardId(null);
     setDraggingCardId(null);
+    setDragOverEndZone(false);
   }, []);
+
+  // 处理拖拽到末尾占位区域
+  const handleEndZoneDragOver = useCallback((e: React.DragEvent) => {
+    if (!draggingCardId || !isSortable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverEndZone(true);
+  }, [draggingCardId, isSortable]);
+
+  const handleEndZoneDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverEndZone(false);
+  }, []);
+
+  const handleEndZoneDrop = useCallback((e: React.DragEvent) => {
+    if (!draggingCardId || !isSortable) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const fromId = draggingCardId;
+    setDragOverCardId(null);
+    setDraggingCardId(null);
+    setDragOverEndZone(false);
+
+    // 确保 customOrder 已初始化
+    const currentOrder = getCustomOrder(type as SortableType);
+    if (!currentOrder) {
+      const resourceIds = resources.map((r) => r.id);
+      const fromIndex = resourceIds.indexOf(fromId);
+      if (fromIndex !== -1 && fromIndex !== resourceIds.length - 1) {
+        const newOrder = [...resourceIds];
+        newOrder.splice(fromIndex, 1);
+        newOrder.push(fromId);
+        setCustomOrder(type as SortableType, newOrder);
+      }
+      return;
+    }
+
+    moveToEnd(type as SortableType, fromId);
+  }, [draggingCardId, isSortable, type, moveToEnd, getCustomOrder, setCustomOrder, resources]);
+
+  // 处理拖拽到 grid 空白区域（最后一个卡片右边）
+  const handleGridDragOver = useCallback((e: React.DragEvent) => {
+    // 只有在拖动卡片时才允许 drop
+    if (!draggingCardId || !isSortable) return;
+    e.preventDefault();
+  }, [draggingCardId, isSortable]);
+
+  const handleGridDrop = useCallback((e: React.DragEvent) => {
+    // 只处理卡片拖拽（不是文件拖入）
+    if (!draggingCardId || !isSortable) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const fromId = draggingCardId;
+    setDragOverCardId(null);
+    setDraggingCardId(null);
+
+    // 确保 customOrder 已初始化
+    const currentOrder = getCustomOrder(type as SortableType);
+    if (!currentOrder) {
+      // 初始化排序并移动到末尾
+      const resourceIds = resources.map((r) => r.id);
+      const fromIndex = resourceIds.indexOf(fromId);
+      if (fromIndex !== -1 && fromIndex !== resourceIds.length - 1) {
+        const newOrder = [...resourceIds];
+        newOrder.splice(fromIndex, 1);
+        newOrder.push(fromId);
+        setCustomOrder(type as SortableType, newOrder);
+      }
+      return;
+    }
+
+    moveToEnd(type as SortableType, fromId);
+  }, [draggingCardId, isSortable, type, moveToEnd, getCustomOrder, setCustomOrder, resources]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -386,7 +484,11 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
             )}
           </div>
         ) : (
-          <div className={styles.grid}>
+          <div
+            className={styles.grid}
+            onDragOver={handleGridDragOver}
+            onDrop={handleGridDrop}
+          >
             {sortedResources.map((resource) =>
               isText ? (
                 <PromptCard key={resource.id} resource={resource} />
@@ -406,6 +508,17 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
                   onDragEnd={handleCardDragEnd}
                 />
               )
+            )}
+            {/* 拖拽时显示末尾拖放区域 */}
+            {draggingCardId && isSortable && (
+              <div
+                className={`${styles.dropEndZone} ${dragOverEndZone ? styles.dragOver : ''}`}
+                onDragOver={handleEndZoneDragOver}
+                onDragLeave={handleEndZoneDragLeave}
+                onDrop={handleEndZoneDrop}
+              >
+                末尾
+              </div>
             )}
           </div>
         )}

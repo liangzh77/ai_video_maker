@@ -145,3 +145,25 @@
 .dragOver .dropText {
   color: var(--color-primary);
 }
+
+/* 拖拽到末尾的占位区域 */
+.dropEndZone {
+  min-width: 60px;
+  min-height: 80px;
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-quaternary);
+  font-size: 12px;
+  transition: all 0.2s ease;
+  background-color: transparent;
+}
+
+.dropEndZone:hover,
+.dropEndZone.dragOver {
+  border-color: var(--color-primary);
+  background-color: rgba(0, 122, 255, 0.05);
+  color: var(--color-primary);
+}

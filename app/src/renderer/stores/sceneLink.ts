@@ -10,7 +10,7 @@ import { create } from 'zustand';
  */
 
 // 支持拖动排序的资源类型
-export const SORTABLE_TYPES = ['scene_source', 'scene_new'] as const;
+export const SORTABLE_TYPES = ['scene_source', 'scene_new', 'scene_hd', 'lipsync'] as const;
 export type SortableType = typeof SORTABLE_TYPES[number];
 
 interface SceneLinkState {
@@ -47,8 +47,11 @@ interface SceneLinkState {
   // 清除自定义排序
   clearCustomOrder: (type?: SortableType) => void;
 
-  // 交换两个资源的顺序
-  swapOrder: (type: SortableType, fromId: string, toId: string) => void;
+  // 移动资源到目标位置前面
+  moveOrder: (type: SortableType, fromId: string, toId: string) => void;
+
+  // 移动资源到末尾
+  moveToEnd: (type: SortableType, fromId: string) => void;
 }
 
 export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
@@ -122,7 +125,7 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     }
   },
 
-  swapOrder: (type: SortableType, fromId: string, toId: string) => {
+  moveOrder: (type: SortableType, fromId: string, toId: string) => {
     const { customOrder } = get();
     const currentOrder = customOrder.get(type);
     if (!currentOrder) return;
@@ -131,10 +134,34 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     const toIndex = currentOrder.indexOf(toId);
     if (fromIndex === -1 || toIndex === -1) return;
 
-    // 交换位置
+    // 移动到目标位置前面：先移除，再插入
     const newOrder = [...currentOrder];
-    newOrder[fromIndex] = toId;
-    newOrder[toIndex] = fromId;
+    newOrder.splice(fromIndex, 1); // 移除被拖拽的元素
+
+    // 计算插入位置：如果原位置在目标前面，目标索引需要减1
+    const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+    newOrder.splice(insertIndex, 0, fromId); // 插入到目标位置前面
+
+    const newCustomOrder = new Map(customOrder);
+    newCustomOrder.set(type, newOrder);
+    set({ customOrder: newCustomOrder });
+  },
+
+  moveToEnd: (type: SortableType, fromId: string) => {
+    const { customOrder } = get();
+    const currentOrder = customOrder.get(type);
+    if (!currentOrder) return;
+
+    const fromIndex = currentOrder.indexOf(fromId);
+    if (fromIndex === -1) return;
+
+    // 已经在末尾，不需要移动
+    if (fromIndex === currentOrder.length - 1) return;
+
+    // 移动到末尾：先移除，再添加到末尾
+    const newOrder = [...currentOrder];
+    newOrder.splice(fromIndex, 1);
+    newOrder.push(fromId);
 
     const newCustomOrder = new Map(customOrder);
     newCustomOrder.set(type, newOrder);
