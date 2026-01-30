@@ -36,8 +36,8 @@ export interface ElectronAPI {
     }) => Promise<any>;
     upscaleVideo: (params: {
       draftId: string;
-      videoResourceIds: string[];
-      config?: any;
+      sourceVideoIds: string[];
+      config: any;
     }) => Promise<any>;
     generateImage: (params: {
       draftId: string;

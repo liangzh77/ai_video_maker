@@ -322,17 +322,20 @@ export async function runVideoUpscaler(
 
   const args = [videoPath, '-o', outputPath];
 
-  if (config.targetWidth && config.targetHeight) {
-    args.push('-r', `${config.targetWidth}x${config.targetHeight}`);
+  if (config.targetWidth) {
+    args.push('-w', String(config.targetWidth));
+  }
+  if (config.targetHeight) {
+    args.push('-H', String(config.targetHeight));
   }
   if (config.targetFps) {
     args.push('-f', String(config.targetFps));
   }
   if (config.preset) {
-    args.push('-p', config.preset);
+    args.push('--preset', config.preset);
   }
   if (config.crf !== undefined) {
-    args.push('-c', String(config.crf));
+    args.push('--crf', String(config.crf));
   }
   if (config.interpolateFrames) {
     args.push('--interpolate');

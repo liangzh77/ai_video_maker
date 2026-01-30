@@ -106,7 +106,7 @@ class VideoUpscaler:
             video_path
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8', errors='replace')
         data = json.loads(result.stdout)
 
         video_stream = data["streams"][0]
@@ -135,7 +135,7 @@ class VideoUpscaler:
             "-of", "json",
             video_path
         ]
-        audio_result = subprocess.run(audio_cmd, capture_output=True, text=True)
+        audio_result = subprocess.run(audio_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
         audio_data = json.loads(audio_result.stdout)
         has_audio = len(audio_data.get("streams", [])) > 0
 
@@ -164,7 +164,7 @@ class VideoUpscaler:
         try:
             result = subprocess.run(
                 ["ffmpeg", "-hide_banner", "-encoders"],
-                capture_output=True, text=True, check=True
+                capture_output=True, text=True, check=True, encoding='utf-8', errors='replace'
             )
             encoders = result.stdout
 
@@ -312,6 +312,8 @@ class VideoUpscaler:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding='utf-8',
+            errors='replace',
         )
 
         # 解析进度

@@ -55,6 +55,21 @@
   background-color: rgba(82, 196, 26, 0.05);
 }
 
+.upscaleButton {
+  margin-left: 0;
+}
+
+.upscaleButton:hover {
+  border-color: var(--color-warning, #faad14);
+  color: var(--color-warning, #faad14);
+  background-color: rgba(250, 173, 20, 0.05);
+}
+
+.upscaleButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .clearButton {
   margin-left: 0;
 }

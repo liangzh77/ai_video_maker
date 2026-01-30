@@ -32,7 +32,7 @@ export interface ElectronAPI {
     analyzeVideo: (params: { draftId: string; sourceVideoId: string; config?: any }) => Promise<any>;
     splitVideo: (params: { draftId: string; sourceVideoId: string; config?: any }) => Promise<any>;
     splitVideoWithPoints: (params: { draftId: string; sourceVideoId: string; splitPoints: any[] }) => Promise<any>;
-    upscaleVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
+    upscaleVideo: (params: { draftId: string; sourceVideoIds: string[]; config: any }) => Promise<any>;
     generateImage: (params: { draftId: string; sourceImageId: string; promptResourceId: string; modelEndpoint: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;

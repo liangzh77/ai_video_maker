@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import { getAvailableModels, createDoubaoServiceWithModel } from '../services/doubao-api';
-import { runVideoSplitter, runVideoAnalyzer } from '../services/python-bridge';
+import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler } from '../services/python-bridge';
 import storage from '../services/storage';
 import appConfigService from '../services/config';
 import type {
@@ -17,6 +17,7 @@ import type {
   OperationResult,
   GenerateConfig,
   SplitConfig,
+  UpscaleConfig,
   SplitPoint,
   AnalyzeResult,
   Resource,
@@ -64,6 +65,12 @@ interface TaskSplitVideoWithPointsRequest {
   draftId: string;
   sourceVideoId: string;
   splitPoints: SplitPoint[];
+}
+
+interface TaskUpscaleVideosRequest {
+  draftId: string;
+  sourceVideoIds: string[];
+  config: UpscaleConfig;
 }
 
 // ============================================
@@ -151,6 +158,94 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
   onProgress(100);
 
   return [newResource.id];
+};
+
+/**
+ * Video upscale task handler
+ */
+const upscaleVideoHandler: TaskHandler = async (task, onProgress) => {
+  const { draftId, inputResourceIds, config } = task;
+  const upscaleConfig = config as UpscaleConfig;
+
+  console.log('[TaskHandler] Start processing video upscale task:', task.id);
+  console.log('[TaskHandler] Input videos:', inputResourceIds.length);
+
+  const outputResourceIds: string[] = [];
+  const totalVideos = inputResourceIds.length;
+
+  // 获取输出目录
+  const outputDir = storage.getResourceFolderPath(draftId, 'scene_hd');
+  if (!outputDir) {
+    throw new Error('Failed to get output directory for scene_hd');
+  }
+  await fs.mkdir(outputDir, { recursive: true });
+
+  // Load app config for Python path
+  const appConfig = await appConfigService.load();
+
+  for (let i = 0; i < inputResourceIds.length; i++) {
+    const sourceVideoId = inputResourceIds[i];
+    const sourceResource = await storage.resource.get(draftId, sourceVideoId);
+    if (!sourceResource) {
+      console.error(`[TaskHandler] Source video not found: ${sourceVideoId}`);
+      continue;
+    }
+
+    console.log(`[TaskHandler] Processing video ${i + 1}/${totalVideos}: ${sourceResource.fileName}`);
+
+    // 生成输出文件名（保持原序号）
+    const sequenceNumber = i + 1;
+    const outputFileName = `${sequenceNumber.toString().padStart(3, '0')}.mp4`;
+    const outputPath = path.join(outputDir, outputFileName);
+
+    // 计算进度：每个视频占用 (100 / totalVideos) 的进度
+    const baseProgress = (i / totalVideos) * 100;
+    const videoProgress = 100 / totalVideos;
+
+    try {
+      const result = await runVideoUpscaler(
+        sourceResource.filePath,
+        outputPath,
+        upscaleConfig,
+        (progress) => {
+          const overallProgress = Math.floor(baseProgress + (progress / 100) * videoProgress);
+          onProgress(overallProgress);
+        },
+        appConfig
+      );
+
+      // 获取文件信息
+      const stats = await fs.stat(outputPath);
+
+      // 创建资源记录
+      const newResource = await storage.resource.add(draftId, {
+        type: 'scene_hd',
+        filePath: outputPath,
+        fileName: outputFileName,
+        fileSize: stats.size,
+        mimeType: 'video/mp4',
+        metadata: {
+          duration: (sourceResource.metadata as VideoMetadata).duration || 0,
+          width: result.width,
+          height: result.height,
+          fps: result.fps,
+          codec: 'h264',
+          hasAudio: (sourceResource.metadata as VideoMetadata).hasAudio || false,
+        } as VideoMetadata,
+      });
+
+      console.log(`[TaskHandler] Created HD resource: ${newResource.id} (${outputFileName})`);
+      outputResourceIds.push(newResource.id);
+    } catch (error) {
+      console.error(`[TaskHandler] Failed to upscale video ${sourceResource.fileName}:`, error);
+      // 继续处理下一个视频
+    }
+  }
+
+  console.log('[TaskHandler] All HD videos created:', outputResourceIds.length);
+  onProgress(100);
+
+  return outputResourceIds;
 };
 
 /**
@@ -268,6 +363,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
   // Register task handlers to queue
   taskQueue.registerHandler('generate', generateImageHandler);
   taskQueue.registerHandler('split', splitVideoHandler);
+  taskQueue.registerHandler('upscale', upscaleVideoHandler);
 
   // Set task update callback (persist to storage)
   taskQueue.setUpdateCallback(async (task) => {
@@ -589,6 +685,61 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return { success: true, data: task };
       } catch (error) {
         console.error('[TaskIPC] Failed to create split with points task:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'PYTHON_TOOL_ERROR',
+        };
+      }
+    }
+  );
+
+  // Upscale videos task
+  ipcMain.handle(
+    TASK_CHANNELS.UPSCALE_VIDEO,
+    async (_, request: TaskUpscaleVideosRequest): Promise<OperationResult<ProcessingTask>> => {
+      console.log('[TaskIPC] Received upscale videos request:', request);
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Verify source videos exist
+        if (!request.sourceVideoIds || request.sourceVideoIds.length === 0) {
+          return { success: false, error: 'No source videos provided' };
+        }
+
+        for (const videoId of request.sourceVideoIds) {
+          const video = await storage.resource.get(request.draftId, videoId);
+          if (!video) {
+            return { success: false, error: `RESOURCE_NOT_FOUND: Video ${videoId} not found` };
+          }
+        }
+
+        // Add task to queue
+        const task = taskQueue.addTask(
+          request.draftId,
+          'upscale',
+          request.sourceVideoIds,
+          request.config
+        );
+
+        console.log('[TaskIPC] Upscale task created:', task.id);
+
+        // Persist task
+        await storage.task.add(request.draftId, {
+          type: task.type,
+          status: task.status,
+          progress: task.progress,
+          inputResourceIds: task.inputResourceIds,
+          outputResourceIds: task.outputResourceIds,
+          config: task.config,
+        });
+
+        return { success: true, data: task };
+      } catch (error) {
+        console.error('[TaskIPC] Failed to create upscale videos task:', error);
         return {
           success: false,
           error: error instanceof Error ? error.message : 'PYTHON_TOOL_ERROR',

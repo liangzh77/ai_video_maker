@@ -28,35 +28,57 @@ const VideoThumbnail: React.FC<{ src: string; alt: string }> = ({ src, alt }) =>
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const retryCountRef = useRef(0);
+  const maxRetries = 3;
+  const retryDelayMs = 500;
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     let isMounted = true;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    console.log('[VideoThumbnail] Starting to load video:', src);
+    const loadVideo = () => {
+      if (!isMounted) return;
 
-    // Reset state
-    setIsLoaded(false);
-    setHasError(false);
+      // Reset state
+      setIsLoaded(false);
+      setHasError(false);
+
+      // Clear and reload
+      video.pause();
+      video.removeAttribute('src');
+      video.src = src;
+      video.load();
+    };
 
     const handleLoadedMetadata = () => {
       if (!isMounted) return;
-      console.log('[VideoThumbnail] loadedmetadata event, seeking to 0.1s');
       video.currentTime = 0.1;
     };
 
     const handleSeeked = () => {
       if (!isMounted) return;
-      console.log('[VideoThumbnail] seeked event, video loaded successfully');
+      retryCountRef.current = 0; // Reset retry count on success
       setIsLoaded(true);
     };
 
     const handleError = () => {
       if (!isMounted) return;
-      console.error('[VideoThumbnail] Failed to load video:', src, 'error:', video.error);
-      setHasError(true);
+      console.error('[VideoThumbnail] Failed to load video:', src, 'retry:', retryCountRef.current);
+
+      // Retry loading if we haven't exceeded max retries
+      if (retryCountRef.current < maxRetries) {
+        retryCountRef.current++;
+        retryTimeout = setTimeout(() => {
+          if (isMounted) {
+            loadVideo();
+          }
+        }, retryDelayMs * retryCountRef.current);
+      } else {
+        setHasError(true);
+      }
     };
 
     // Register listeners BEFORE setting src
@@ -64,12 +86,17 @@ const VideoThumbnail: React.FC<{ src: string; alt: string }> = ({ src, alt }) =>
     video.addEventListener('seeked', handleSeeked);
     video.addEventListener('error', handleError);
 
-    // Now set src and trigger load
-    video.src = src;
-    video.load();
+    // Reset retry count for new src
+    retryCountRef.current = 0;
+
+    // Initial load with a small delay to ensure file is ready
+    retryTimeout = setTimeout(loadVideo, 100);
 
     return () => {
       isMounted = false;
+      if (retryTimeout) {
+        clearTimeout(retryTimeout);
+      }
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
       video.removeEventListener('seeked', handleSeeked);
       video.removeEventListener('error', handleError);
@@ -226,6 +253,7 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
     if (isVideo) {
       return (
         <VideoThumbnail
+          key={resource.id}
           src={getLocalFileUrl(resource.filePath)}
           alt={resource.fileName}
         />

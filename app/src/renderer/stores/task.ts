@@ -27,7 +27,7 @@ interface TaskState {
   // Actions
   loadTasks: (draftId: string) => Promise<void>;
   splitVideo: (draftId: string, sourceVideoId: string, config?: object) => Promise<ProcessingTask | null>;
-  upscaleVideo: (draftId: string, videoResourceIds: string[], config?: object) => Promise<ProcessingTask | null>;
+  upscaleVideo: (draftId: string, sourceVideoIds: string[], config: object) => Promise<ProcessingTask | null>;
   generateImage: (draftId: string, sourceImageId: string, promptResourceId: string) => Promise<ProcessingTask | null>;
   synthesizeVideo: (draftId: string, videoResourceIds: string[], config?: object) => Promise<ProcessingTask | null>;
   cancelTask: (taskId: string) => Promise<boolean>;
@@ -88,11 +88,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
   },
 
-  upscaleVideo: async (draftId: string, videoResourceIds: string[], config?: object) => {
+  upscaleVideo: async (draftId: string, sourceVideoIds: string[], config: object) => {
     try {
       const result: OperationResult<ProcessingTask> = await window.api.task.upscaleVideo({
         draftId,
-        videoResourceIds,
+        sourceVideoIds,
         config,
       });
       if (result.success && result.data) {

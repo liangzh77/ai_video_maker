@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Empty, App, Popconfirm, Tooltip } from 'antd';
-import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined } from '@ant-design/icons';
-import type { Resource, ResourceType } from '@shared/types';
+import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import type { Resource, ResourceType, UpscaleConfig } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import { useSceneLinkStore, SORTABLE_TYPES, type SortableType } from '../../stores/sceneLink';
 import ResourceCard from './ResourceCard';
 import PromptCard from './PromptCard';
+import UpscaleDialog from './UpscaleDialog';
 import styles from './ResourceSection.module.css';
 
 // Custom MIME type for frame data transfer (must match VideoPlayer)
@@ -59,7 +60,11 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
   const [dragOverEndZone, setDragOverEndZone] = useState(false);
-  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType } = useDraftStore();
+  const [upscaleDialogOpen, setUpscaleDialogOpen] = useState(false);
+  const [isUpscaling, setIsUpscaling] = useState(false);
+  const [upscaleProgress, setUpscaleProgress] = useState(0);
+  const [upscaleTaskId, setUpscaleTaskId] = useState<string | null>(null);
+  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType, loadResources } = useDraftStore();
   const { batchLink, getCustomOrder, setCustomOrder, moveOrder, moveToEnd, customOrder } = useSceneLinkStore();
   const { message } = App.useApp();
 
@@ -69,6 +74,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const canClear = clearableTypes.includes(type) && resources.length > 0;
   // 只有 scene_new 才显示批量关联按钮
   const canBatchLink = type === 'scene_new';
+  // 只有 scene_new 才显示高清化按钮
+  const canUpscale = type === 'scene_new' && resources.length > 0;
   // 是否支持拖动排序
   const isSortable = SORTABLE_TYPES.includes(type as SortableType);
 
@@ -88,6 +95,48 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       setCustomOrder(type as SortableType, newOrder);
     }
   }, [isSortable, type, resources, getCustomOrder, setCustomOrder]);
+
+  // 监听任务进度和完成事件
+  useEffect(() => {
+    if (!upscaleTaskId) return;
+
+    const handleProgress = (_event: any, data: { taskId: string; progress: number; status: string }) => {
+      if (data.taskId === upscaleTaskId) {
+        setUpscaleProgress(data.progress);
+
+        // 如果任务失败
+        if (data.status === 'failed') {
+          setIsUpscaling(false);
+          setUpscaleTaskId(null);
+          setUpscaleDialogOpen(false);
+          message.error('高清化任务失败');
+        }
+      }
+    };
+
+    const handleCompleted = (_event: any, data: { taskId: string; outputResourceIds: string[] }) => {
+      if (data.taskId === upscaleTaskId) {
+        setUpscaleProgress(100);
+        setIsUpscaling(false);
+        setUpscaleTaskId(null);
+        setUpscaleDialogOpen(false);
+        message.success(`高清化完成，生成了 ${data.outputResourceIds.length} 个视频`);
+
+        // 刷新资源列表
+        if (selectedDraftId) {
+          loadResources(selectedDraftId);
+        }
+      }
+    };
+
+    const unsubProgress = window.api.on('task:progress', handleProgress);
+    const unsubCompleted = window.api.on('task:completed', handleCompleted);
+
+    return () => {
+      unsubProgress();
+      unsubCompleted();
+    };
+  }, [upscaleTaskId, selectedDraftId, loadResources, message]);
 
   // 获取排序后的资源列表
   // 注意：依赖 customOrder 状态而不只是 getCustomOrder 函数，确保状态变化时重新计算
@@ -158,6 +207,39 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     const linkedCount = Math.min(sortedSourceIds.length, sortedNewIds.length);
     message.success(`已关联 ${linkedCount} 对分镜视频`);
+  };
+
+  const handleUpscale = async (config: UpscaleConfig) => {
+    if (!selectedDraftId || resources.length === 0) return;
+
+    // 开始处理，保持对话框打开显示进度
+    setIsUpscaling(true);
+    setUpscaleProgress(0);
+
+    try {
+      // 获取排序后的资源 ID 列表
+      const videoIds = sortedResources.map((r) => r.id);
+
+      const result = await window.api.task.upscaleVideo({
+        draftId: selectedDraftId,
+        sourceVideoIds: videoIds,
+        config,
+      });
+
+      if (result.success && result.data) {
+        // 保存任务 ID 用于监听进度
+        setUpscaleTaskId(result.data.id);
+      } else {
+        message.error(result.error || '启动高清化任务失败');
+        setIsUpscaling(false);
+        setUpscaleDialogOpen(false);
+      }
+    } catch (error) {
+      console.error('Failed to start upscale task:', error);
+      message.error('启动高清化任务失败');
+      setIsUpscaling(false);
+      setUpscaleDialogOpen(false);
+    }
   };
 
   const handleAddPrompt = async () => {
@@ -442,6 +524,17 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
             </button>
           </Tooltip>
         )}
+        {canUpscale && (
+          <Tooltip title="高清化所有分镜新视频">
+            <button
+              className={`${styles.addButton} ${styles.upscaleButton}`}
+              onClick={() => setUpscaleDialogOpen(true)}
+              disabled={isUpscaling}
+            >
+              <ThunderboltOutlined />
+            </button>
+          </Tooltip>
+        )}
         {canClear && (
           <Popconfirm
             title="确认清除"
@@ -523,6 +616,20 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           </div>
         )}
       </div>
+
+      {/* 高清化设置对话框 */}
+      <UpscaleDialog
+        open={upscaleDialogOpen}
+        videoCount={resources.length}
+        isProcessing={isUpscaling}
+        progress={upscaleProgress}
+        onCancel={() => {
+          if (!isUpscaling) {
+            setUpscaleDialogOpen(false);
+          }
+        }}
+        onOk={handleUpscale}
+      />
     </div>
   );
 };

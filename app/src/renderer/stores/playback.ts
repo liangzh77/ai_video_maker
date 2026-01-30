@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
-// 支持连续播放的资源类型
-export const CONTINUOUS_PLAY_TYPES = ['scene_source', 'scene_new'] as const;
+// 支持连续播放和空格键播放/暂停的资源类型
+export const CONTINUOUS_PLAY_TYPES = ['scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized'] as const;
 export type ContinuousPlayType = (typeof CONTINUOUS_PLAY_TYPES)[number];
 
 interface PlaybackState {
