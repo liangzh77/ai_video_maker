@@ -9,10 +9,9 @@ from pathlib import Path
 from typing import Optional, List, Tuple, Literal
 from dataclasses import dataclass
 
-# 添加 PySceneDetect submodule 到路径
-SUBMODULES_PATH = Path(__file__).parent.parent / "submodules" / "PySceneDetect"
-if SUBMODULES_PATH.exists():
-    sys.path.insert(0, str(SUBMODULES_PATH))
+# 导入路径设置模块（设置 FFmpeg 和 PySceneDetect 路径）
+from path_setup import setup_scenedetect_path
+setup_scenedetect_path()
 
 from scenedetect import (
     open_video,
@@ -410,7 +409,8 @@ def detect_scenes(
 
 
 # 命令行接口
-if __name__ == "__main__":
+def cli_main():
+    """命令行入口"""
     import argparse
 
     parser = argparse.ArgumentParser(description="视频自动切分工具")
@@ -533,3 +533,7 @@ if __name__ == "__main__":
             for i, (scene, filepath) in enumerate(zip(result.scenes, result.output_files)):
                 print(f"Scene {i+1}: {scene.start_time:.2f}s - {scene.end_time:.2f}s -> {filepath}")
             print(f"Total files: {len(result.output_files)}")
+
+
+if __name__ == "__main__":
+    cli_main()

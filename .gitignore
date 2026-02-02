@@ -45,3 +45,13 @@ storage/
 # Test coverage
 coverage/
 .nyc_output/
+
+# Binary files (FFmpeg, etc.)
+bin/
+
+# PyInstaller output
+tools/dist/
+tools/build/
+
+# Windows null device
+nul

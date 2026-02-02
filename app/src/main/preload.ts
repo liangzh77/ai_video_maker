@@ -41,6 +41,9 @@ export interface ElectronAPI {
   config: {
     get: () => Promise<any>;
     set: (params: { key: string; value: any }) => Promise<any>;
+    getWorkspace: () => Promise<{ path: string; isDefault: boolean }>;
+    setWorkspace: (params: { path: string }) => Promise<any>;
+    selectWorkspace: () => Promise<any>;
   };
   on: (channel: string, callback: (event: IpcRendererEvent, ...args: any[]) => void) => () => void;
   off: (channel: string, callback: (...args: any[]) => void) => void;
@@ -88,6 +91,9 @@ const api: ElectronAPI = {
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (params) => ipcRenderer.invoke('config:set', params),
+    getWorkspace: () => ipcRenderer.invoke('config:getWorkspace'),
+    setWorkspace: (params) => ipcRenderer.invoke('config:setWorkspace', params),
+    selectWorkspace: () => ipcRenderer.invoke('config:selectWorkspace'),
   },
   on: (channel, callback) => {
     ipcRenderer.on(channel, callback);

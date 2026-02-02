@@ -1,4 +1,4 @@
-import { PythonShell, Options } from 'python-shell';
+import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { app } from 'electron';
 import type { AppConfig, SplitConfig, UpscaleConfig, SynthesizeConfig } from '@shared/types';
@@ -48,17 +48,114 @@ export interface AnalyzeSceneResult {
 // Path Utilities
 // ============================================
 
+function getVideoToolsPath(): string {
+  if (app.isPackaged) {
+    // 打包后，video_tools.exe 在 resources/tools 目录
+    return path.join(process.resourcesPath, 'tools', 'video_tools.exe');
+  }
+  // 开发模式下，使用打包好的 exe
+  return path.join(process.cwd(), '..', 'tools', 'dist', 'video_tools', 'video_tools.exe');
+}
+
+// 检查是否应该使用 exe 模式
+function shouldUseExe(): boolean {
+  // 如果打包了，总是使用 exe
+  if (app.isPackaged) {
+    return true;
+  }
+  // 开发模式下，强制使用 Python 脚本（便于调试和热更新）
+  return false;
+}
+
+// 获取 Python 脚本路径（开发模式回退）
 function getToolsPath(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'tools');
   }
-  // 开发模式下，tools 目录在 app 的父目录（项目根目录）
-  // process.cwd() 在 app/ 目录，所以需要向上一级
   return path.join(process.cwd(), '..', 'tools');
 }
 
 function getPythonPath(config?: AppConfig): string {
   return config?.pythonPath || 'python';
+}
+
+// ============================================
+// Process Runner
+// ============================================
+
+interface RunProcessOptions {
+  command: string;
+  args: string[];
+  onStdoutLine?: (line: string) => void;
+  onStderrLine?: (line: string) => void;
+}
+
+function runProcess(options: RunProcessOptions): Promise<void> {
+  return new Promise((resolve, reject) => {
+    console.log(`[Process] Running: ${options.command} ${options.args.join(' ')}`);
+
+    const proc = spawn(options.command, options.args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      // 设置 Python UTF-8 环境变量
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',  // Python 3.7+ UTF-8 模式
+        PYTHONLEGACYWINDOWSSTDIO: '0',  // 禁用旧版 Windows stdio
+      },
+      // Windows 下不使用 shell，避免编码问题
+      shell: false,
+      // Windows 下隐藏控制台窗口
+      windowsHide: true,
+    });
+
+    // 按行处理 stdout（Buffer 可能跨行，需要缓冲）
+    let stdoutBuffer = '';
+    proc.stdout.on('data', (data: Buffer) => {
+      stdoutBuffer += data.toString('utf8');
+      const lines = stdoutBuffer.split(/\r?\n/);
+      // 保留最后一个不完整的行
+      stdoutBuffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.trim() && options.onStdoutLine) {
+          options.onStdoutLine(line);
+        }
+      }
+    });
+
+    // 按行处理 stderr
+    let stderrBuffer = '';
+    proc.stderr.on('data', (data: Buffer) => {
+      stderrBuffer += data.toString('utf8');
+      const lines = stderrBuffer.split(/\r?\n/);
+      stderrBuffer = lines.pop() || '';
+      for (const line of lines) {
+        if (line.trim() && options.onStderrLine) {
+          options.onStderrLine(line);
+        }
+      }
+    });
+
+    proc.on('error', (err: Error) => {
+      reject(new Error(`Process failed to start: ${err.message}`));
+    });
+
+    proc.on('close', (code: number | null) => {
+      // 处理剩余的缓冲数据
+      if (stdoutBuffer.trim() && options.onStdoutLine) {
+        options.onStdoutLine(stdoutBuffer);
+      }
+      if (stderrBuffer.trim() && options.onStderrLine) {
+        options.onStderrLine(stderrBuffer);
+      }
+
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Process exited with code ${code}`));
+      }
+    });
+  });
 }
 
 // ============================================
@@ -93,19 +190,28 @@ export async function runVideoSplitter(
   onProgress?: (progress: number) => void,
   appConfig?: AppConfig
 ): Promise<SplitResult> {
-  const toolsPath = getToolsPath();
-  const scriptPath = path.join(toolsPath, 'video_splitter.py');
+  const scenes: SplitResult['scenes'] = [];
+  let outputDirResult = outputDir;
 
-  const args = [videoPath, '-o', outputDir];
+  const useExe = shouldUseExe();
+
+  let command: string;
+  let args: string[];
+
+  if (useExe) {
+    command = getVideoToolsPath();
+    args = ['split', videoPath, '-o', outputDir];
+  } else {
+    command = getPythonPath(appConfig);
+    args = [path.join(getToolsPath(), 'video_splitter.py'), videoPath, '-o', outputDir];
+  }
 
   // 如果有自定义分割点，使用它们而不是自动检测参数
   if (config.customPoints && config.customPoints.length > 0) {
-    // 提取分割点时间并转为 JSON
     const pointTimes = config.customPoints.map((p) => p.time);
     args.push('--points', JSON.stringify(pointTimes));
     console.log('[VideoSplitter] Using custom points:', pointTimes.length);
   } else {
-    // 使用自动检测参数
     if (config.detectorType) {
       args.push('-d', config.detectorType);
     }
@@ -117,28 +223,13 @@ export async function runVideoSplitter(
     }
   }
 
-  const options: Options = {
-    mode: 'text',
-    pythonPath: getPythonPath(appConfig),
+  console.log('[VideoSplitter] Starting with command:', command);
+  console.log('[VideoSplitter] Args:', args);
+
+  await runProcess({
+    command,
     args,
-    // 确保 Windows 上正确处理中文编码
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      PYTHONIOENCODING: 'utf-8',
-    },
-  };
-
-  return new Promise((resolve, reject) => {
-    console.log('[VideoSplitter] Starting with script:', scriptPath);
-    console.log('[VideoSplitter] Args:', args);
-    console.log('[VideoSplitter] Python path:', options.pythonPath);
-
-    const shell = new PythonShell(scriptPath, options);
-    const scenes: SplitResult['scenes'] = [];
-    let outputDirResult = outputDir;
-
-    shell.on('message', (message: string) => {
+    onStdoutLine: (message: string) => {
       console.log('[VideoSplitter] stdout:', message);
 
       // Parse progress
@@ -165,28 +256,19 @@ export async function runVideoSplitter(
       if (outputMatch) {
         outputDirResult = outputMatch[1].trim();
       }
-    });
-
-    shell.on('stderr', (stderr: string) => {
+    },
+    onStderrLine: (stderr: string) => {
       console.log('[VideoSplitter stderr]', stderr);
-    });
-
-    shell.on('error', (err: Error) => {
-      reject(new Error(`Video splitter failed: ${err.message}`));
-    });
-
-    shell.on('close', () => {
-      console.log('[VideoSplitter] Process closed. Total scenes parsed:', scenes.length);
-      console.log('[VideoSplitter] Output dir:', outputDirResult);
-      if (scenes.length > 0) {
-        console.log('[VideoSplitter] First scene:', JSON.stringify(scenes[0]));
-      }
-      resolve({
-        outputDir: outputDirResult,
-        scenes,
-      });
-    });
+    },
   });
+
+  console.log('[VideoSplitter] Process closed. Total scenes parsed:', scenes.length);
+  console.log('[VideoSplitter] Output dir:', outputDirResult);
+
+  return {
+    outputDir: outputDirResult,
+    scenes,
+  };
 }
 
 // ============================================
@@ -199,11 +281,22 @@ export async function runVideoAnalyzer(
   onProgress?: (progress: number) => void,
   appConfig?: AppConfig
 ): Promise<AnalyzeSceneResult> {
-  const toolsPath = getToolsPath();
-  const scriptPath = path.join(toolsPath, 'video_splitter.py');
+  const scenes: AnalyzeSceneResult['scenes'] = [];
+  let fps = 30;
+  let duration = 0;
 
-  // 使用 --detect-only 参数只检测场景，不切分
-  const args = [videoPath, '--detect-only'];
+  const useExe = shouldUseExe();
+
+  let command: string;
+  let args: string[];
+
+  if (useExe) {
+    command = getVideoToolsPath();
+    args = ['split', videoPath, '--detect-only'];
+  } else {
+    command = getPythonPath(appConfig);
+    args = [path.join(getToolsPath(), 'video_splitter.py'), videoPath, '--detect-only'];
+  }
 
   if (config.detectorType) {
     args.push('-d', config.detectorType);
@@ -215,27 +308,13 @@ export async function runVideoAnalyzer(
     args.push('-m', String(config.minSceneLen));
   }
 
-  const options: Options = {
-    mode: 'text',
-    pythonPath: getPythonPath(appConfig),
+  console.log('[VideoAnalyzer] Starting with command:', command);
+  console.log('[VideoAnalyzer] Args:', args);
+
+  await runProcess({
+    command,
     args,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      PYTHONIOENCODING: 'utf-8',
-    },
-  };
-
-  return new Promise((resolve, reject) => {
-    console.log('[VideoAnalyzer] Starting with script:', scriptPath);
-    console.log('[VideoAnalyzer] Args:', args);
-
-    const shell = new PythonShell(scriptPath, options);
-    const scenes: AnalyzeSceneResult['scenes'] = [];
-    let fps = 30;
-    let duration = 0;
-
-    shell.on('message', (message: string) => {
+    onStdoutLine: (message: string) => {
       console.log('[VideoAnalyzer] stdout:', message);
 
       // Parse progress
@@ -244,15 +323,13 @@ export async function runVideoAnalyzer(
         onProgress(progress);
       }
 
-      // Parse scene info: "Scene 1: 0.00s - 5.00s (frame 0 - 150)"
-      // 或者现有格式: "Scene 1: 0.00s - 5.00s -> filepath"
+      // Parse scene info: "Scene 1: 0.00s - 5.00s"
       const sceneMatch = message.match(
         /Scene\s+(\d+):\s*([\d.]+)s\s*-\s*([\d.]+)s/i
       );
       if (sceneMatch) {
         const startTime = parseFloat(sceneMatch[2]);
         const endTime = parseFloat(sceneMatch[3]);
-        // 从时间和 fps 计算帧号
         scenes.push({
           index: parseInt(sceneMatch[1], 10),
           startTime,
@@ -273,45 +350,31 @@ export async function runVideoAnalyzer(
       if (durationMatch) {
         duration = parseFloat(durationMatch[1]);
       }
-
-      // Parse total scenes info for duration estimation
-      const totalMatch = message.match(/Total files:\s*(\d+)/i);
-      if (totalMatch && scenes.length > 0) {
-        // 使用最后一个场景的结束时间作为视频时长
-        duration = scenes[scenes.length - 1].endTime;
-      }
-    });
-
-    shell.on('stderr', (stderr: string) => {
+    },
+    onStderrLine: (stderr: string) => {
       console.log('[VideoAnalyzer stderr]', stderr);
-    });
-
-    shell.on('error', (err: Error) => {
-      reject(new Error(`Video analyzer failed: ${err.message}`));
-    });
-
-    shell.on('close', () => {
-      console.log('[VideoAnalyzer] Process closed. Total scenes:', scenes.length);
-
-      // 如果检测到场景，使用最后一个场景的结束时间作为时长
-      if (scenes.length > 0 && duration === 0) {
-        duration = scenes[scenes.length - 1].endTime;
-      }
-
-      // 重新计算帧号（使用最终的 fps）
-      const scenesWithFrames = scenes.map((scene) => ({
-        ...scene,
-        startFrame: Math.round(scene.startTime * fps),
-        endFrame: Math.round(scene.endTime * fps),
-      }));
-
-      resolve({
-        scenes: scenesWithFrames,
-        fps,
-        duration,
-      });
-    });
+    },
   });
+
+  console.log('[VideoAnalyzer] Process closed. Total scenes:', scenes.length);
+
+  // 如果检测到场景，使用最后一个场景的结束时间作为时长
+  if (scenes.length > 0 && duration === 0) {
+    duration = scenes[scenes.length - 1].endTime;
+  }
+
+  // 重新计算帧号（使用最终的 fps）
+  const scenesWithFrames = scenes.map((scene) => ({
+    ...scene,
+    startFrame: Math.round(scene.startTime * fps),
+    endFrame: Math.round(scene.endTime * fps),
+  }));
+
+  return {
+    scenes: scenesWithFrames,
+    fps,
+    duration,
+  };
 }
 
 // ============================================
@@ -325,10 +388,22 @@ export async function runVideoUpscaler(
   onProgress?: (progress: number) => void,
   appConfig?: AppConfig
 ): Promise<UpscaleResult> {
-  const toolsPath = getToolsPath();
-  const scriptPath = path.join(toolsPath, 'video_upscaler.py');
+  let resultWidth = config.targetWidth || 1920;
+  let resultHeight = config.targetHeight || 1080;
+  let resultFps = config.targetFps || 30;
 
-  const args = [videoPath, '-o', outputPath];
+  const useExe = shouldUseExe();
+
+  let command: string;
+  let args: string[];
+
+  if (useExe) {
+    command = getVideoToolsPath();
+    args = ['upscale', videoPath, '-o', outputPath];
+  } else {
+    command = getPythonPath(appConfig);
+    args = [path.join(getToolsPath(), 'video_upscaler.py'), videoPath, '-o', outputPath];
+  }
 
   if (config.targetWidth) {
     args.push('-w', String(config.targetWidth));
@@ -349,25 +424,10 @@ export async function runVideoUpscaler(
     args.push('--interpolate');
   }
 
-  const options: Options = {
-    mode: 'text',
-    pythonPath: getPythonPath(appConfig),
+  await runProcess({
+    command,
     args,
-    // 确保 Windows 上正确处理中文编码
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      PYTHONIOENCODING: 'utf-8',
-    },
-  };
-
-  return new Promise((resolve, reject) => {
-    const shell = new PythonShell(scriptPath, options);
-    let resultWidth = config.targetWidth || 1920;
-    let resultHeight = config.targetHeight || 1080;
-    let resultFps = config.targetFps || 30;
-
-    shell.on('message', (message: string) => {
+    onStdoutLine: (message: string) => {
       console.log('[VideoUpscaler]', message);
 
       // Parse progress
@@ -377,35 +437,30 @@ export async function runVideoUpscaler(
       }
 
       // Parse output info
-      const resMatch = message.match(/Output resolution:\s*(\d+)x(\d+)/i);
+      const resMatch = message.match(/Output resolution:\s*(\d+)x(\d+)/i) ||
+                       message.match(/输出分辨率[:：]\s*(\d+)x(\d+)/);
       if (resMatch) {
         resultWidth = parseInt(resMatch[1], 10);
         resultHeight = parseInt(resMatch[2], 10);
       }
 
-      const fpsMatch = message.match(/Output FPS:\s*([\d.]+)/i);
+      const fpsMatch = message.match(/Output FPS:\s*([\d.]+)/i) ||
+                       message.match(/输出帧率[:：]\s*([\d.]+)/);
       if (fpsMatch) {
         resultFps = parseFloat(fpsMatch[1]);
       }
-    });
-
-    shell.on('stderr', (stderr: string) => {
+    },
+    onStderrLine: (stderr: string) => {
       console.log('[VideoUpscaler stderr]', stderr);
-    });
-
-    shell.on('error', (err: Error) => {
-      reject(new Error(`Video upscaler failed: ${err.message}`));
-    });
-
-    shell.on('close', () => {
-      resolve({
-        outputPath,
-        width: resultWidth,
-        height: resultHeight,
-        fps: resultFps,
-      });
-    });
+    },
   });
+
+  return {
+    outputPath,
+    width: resultWidth,
+    height: resultHeight,
+    fps: resultFps,
+  };
 }
 
 // ============================================
@@ -419,10 +474,23 @@ export async function runVideoSynthesizer(
   onProgress?: (progress: number) => void,
   appConfig?: AppConfig
 ): Promise<SynthesizeResult> {
-  const toolsPath = getToolsPath();
-  const scriptPath = path.join(toolsPath, 'video_synthesizer.py');
+  let resultWidth = config.targetWidth || 1920;
+  let resultHeight = config.targetHeight || 1080;
+  let resultFps = config.targetFps || 30;
+  let resultDuration = 0;
 
-  const args = [...videoPaths, '-o', outputPath];
+  const useExe = shouldUseExe();
+
+  let command: string;
+  let args: string[];
+
+  if (useExe) {
+    command = getVideoToolsPath();
+    args = ['synthesize', ...videoPaths, '-o', outputPath];
+  } else {
+    command = getPythonPath(appConfig);
+    args = [path.join(getToolsPath(), 'video_synthesizer.py'), ...videoPaths, '-o', outputPath];
+  }
 
   if (config.targetWidth) {
     args.push('-w', String(config.targetWidth));
@@ -440,33 +508,15 @@ export async function runVideoSynthesizer(
     args.push('--crf', String(config.crf));
   }
 
-  const options: Options = {
-    mode: 'text',
-    pythonPath: getPythonPath(appConfig),
+  console.log('[VideoSynthesizer] Starting with command:', command);
+  console.log('[VideoSynthesizer] Video paths:', videoPaths);
+  console.log('[VideoSynthesizer] Output path:', outputPath);
+  console.log('[VideoSynthesizer] Args:', args);
+
+  await runProcess({
+    command,
     args,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      PYTHONIOENCODING: 'utf-8',
-    },
-  };
-
-  return new Promise((resolve, reject) => {
-    console.log('[VideoSynthesizer] Starting with script:', scriptPath);
-    console.log('[VideoSynthesizer] Video paths:', videoPaths);
-    console.log('[VideoSynthesizer] Output path:', outputPath);
-    console.log('[VideoSynthesizer] Args:', args);
-    console.log('[VideoSynthesizer] Python path:', options.pythonPath);
-
-    const shell = new PythonShell(scriptPath, options);
-    let resultWidth = config.targetWidth || 1920;
-    let resultHeight = config.targetHeight || 1080;
-    let resultFps = config.targetFps || 30;
-    let resultDuration = 0;
-    let stderrOutput: string[] = [];
-    let hasError = false;
-
-    shell.on('message', (message: string) => {
+    onStdoutLine: (message: string) => {
       console.log('[VideoSynthesizer]', message);
 
       // Parse progress
@@ -494,31 +544,19 @@ export async function runVideoSynthesizer(
       if (durationMatch) {
         resultDuration = parseFloat(durationMatch[1]);
       }
-    });
-
-    shell.on('stderr', (stderr: string) => {
+    },
+    onStderrLine: (stderr: string) => {
       console.log('[VideoSynthesizer stderr]', stderr);
-      stderrOutput.push(stderr);
-    });
-
-    shell.on('error', (err: Error) => {
-      hasError = true;
-      const errorDetails = stderrOutput.length > 0 ? `\n${stderrOutput.join('\n')}` : '';
-      reject(new Error(`Video synthesizer failed: ${err.message}${errorDetails}`));
-    });
-
-    shell.on('close', () => {
-      if (!hasError) {
-        resolve({
-          outputPath,
-          width: resultWidth,
-          height: resultHeight,
-          fps: resultFps,
-          duration: resultDuration,
-        });
-      }
-    });
+    },
   });
+
+  return {
+    outputPath,
+    width: resultWidth,
+    height: resultHeight,
+    fps: resultFps,
+    duration: resultDuration,
+  };
 }
 
 // ============================================

@@ -63,6 +63,9 @@ export const TASK_EVENTS = {
 export const CONFIG_CHANNELS = {
   GET: 'config:get',
   SET: 'config:set',
+  GET_WORKSPACE: 'config:getWorkspace',
+  SET_WORKSPACE: 'config:setWorkspace',
+  SELECT_WORKSPACE: 'config:selectWorkspace',
 } as const;
 
 // ============================================

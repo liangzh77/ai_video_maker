@@ -3,17 +3,66 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import type { Draft, Resource, ResourceType, ProcessingTask } from '@shared/types';
+import { loadConfig, saveConfig } from './config';
 
 // ============================================
 // Storage Paths
 // ============================================
 
-function getStorageRoot(): string {
-  // Use app data directory in production, local directory in development
+/** 当前工作目录路径（运行时缓存） */
+let currentStorageRoot: string | null = null;
+
+/** 获取默认工作目录路径 */
+export function getDefaultStorageRoot(): string {
   if (app.isPackaged) {
     return path.join(app.getPath('userData'), 'storage');
   }
   return path.join(process.cwd(), 'storage');
+}
+
+/** 获取当前工作目录路径 */
+function getStorageRoot(): string {
+  if (currentStorageRoot) {
+    return currentStorageRoot;
+  }
+  return getDefaultStorageRoot();
+}
+
+/** 设置工作目录路径（运行时修改） */
+export async function setStorageRoot(newPath: string): Promise<void> {
+  // 确保目录存在
+  await fs.mkdir(newPath, { recursive: true });
+  currentStorageRoot = newPath;
+  console.log('[Storage] Storage root changed to:', newPath);
+}
+
+/** 从配置加载工作目录 */
+export async function loadStorageRootFromConfig(): Promise<void> {
+  try {
+    const config = await loadConfig();
+    if (config.workspacePath) {
+      // 验证路径是否存在
+      try {
+        await fs.access(config.workspacePath);
+        currentStorageRoot = config.workspacePath;
+        console.log('[Storage] Loaded storage root from config:', currentStorageRoot);
+      } catch {
+        // 路径不存在，使用默认值
+        console.warn('[Storage] Configured workspace path does not exist, using default');
+        currentStorageRoot = getDefaultStorageRoot();
+      }
+    }
+  } catch (err) {
+    console.warn('[Storage] Failed to load config, using default storage root:', err);
+  }
+}
+
+/** 保存工作目录到配置 */
+export async function saveStorageRootToConfig(newPath: string): Promise<void> {
+  const config = await loadConfig();
+  config.workspacePath = newPath;
+  await saveConfig(config);
+  await setStorageRoot(newPath);
 }
 
 function getDraftPath(draftId: string): string {
@@ -170,8 +219,12 @@ async function writeJson<T>(filePath: string, data: T): Promise<void> {
 // ============================================
 
 export async function initStorage(): Promise<void> {
+  // 先从配置加载工作目录
+  await loadStorageRootFromConfig();
+
   const storageRoot = getStorageRoot();
   await fs.mkdir(storageRoot, { recursive: true });
+  console.log('[Storage] Initialized with root:', storageRoot);
 }
 
 // ============================================
@@ -571,6 +624,9 @@ async function cleanupEmptyFolders(dirPath: string): Promise<void> {
 export const storage = {
   init: initStorage,
   getStorageRoot,
+  getDefaultStorageRoot,
+  setStorageRoot,
+  saveStorageRootToConfig,
   getDraftPath,
   getThumbnailsPath,
   getFilesPath,

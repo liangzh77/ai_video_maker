@@ -23,6 +23,7 @@ import storage from './services/storage';
 import registerDraftHandlers from './ipc/draft';
 import registerResourceHandlers from './ipc/resource';
 import registerTaskHandlers from './ipc/task';
+import registerConfigHandlers from './ipc/config';
 
 /**
  * 将 Node.js Readable 流安全转换为 Web ReadableStream
@@ -184,6 +185,7 @@ app.whenReady().then(async () => {
   // Register IPC handlers
   registerDraftHandlers();
   registerResourceHandlers();
+  registerConfigHandlers();
 
   // Set app user model id for Windows
   app.setAppUserModelId('com.ai-video-maker.app');

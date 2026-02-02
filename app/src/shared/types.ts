@@ -178,6 +178,8 @@ export interface SynthesizeConfig {
 // ============================================
 
 export interface AppConfig {
+  /** 工作目录路径，用于存储所有草稿数据 */
+  workspacePath?: string;
   doubao: {
     apiKey: string;
     baseUrl: string;

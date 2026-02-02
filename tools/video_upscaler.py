@@ -3,6 +3,11 @@
 基于 FFmpeg 实现视频分辨率和帧率提升，支持硬件加速
 """
 
+# 导入路径设置模块（设置 FFmpeg 路径）
+import path_setup  # noqa: F401
+
+import sys
+
 import os
 import json
 import subprocess
@@ -517,7 +522,8 @@ def get_video_info(video_path: str) -> VideoInfo:
 
 
 # 命令行接口
-if __name__ == "__main__":
+def cli_main():
+    """命令行入口"""
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -613,3 +619,7 @@ if __name__ == "__main__":
             print(f"  硬件加速: {'是' if result.hardware_accelerated else '否'}")
             print(f"  输出分辨率: {result.output_info.width}x{result.output_info.height}")
             print(f"  输出帧率: {result.output_info.fps:.2f} fps")
+
+
+if __name__ == "__main__":
+    cli_main()
