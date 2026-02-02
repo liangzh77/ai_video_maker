@@ -41,6 +41,7 @@ export const TASK_CHANNELS = {
   ANALYZE_VIDEO: 'task:analyzeVideo',           // 分析视频（只检测分割点）
   SPLIT_VIDEO: 'task:splitVideo',
   SPLIT_VIDEO_WITH_POINTS: 'task:splitVideoWithPoints', // 使用自定义分割点切分
+  RESPLIT_SCENE: 'task:resplitScene',           // 重新切分单个分镜（调整边界）
   UPSCALE_VIDEO: 'task:upscaleVideo',
   GENERATE_IMAGE: 'task:generateImage',
   SYNTHESIZE_VIDEO: 'task:synthesizeVideo',

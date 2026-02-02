@@ -32,6 +32,7 @@ export interface ElectronAPI {
     analyzeVideo: (params: { draftId: string; sourceVideoId: string; config?: any }) => Promise<any>;
     splitVideo: (params: { draftId: string; sourceVideoId: string; config?: any }) => Promise<any>;
     splitVideoWithPoints: (params: { draftId: string; sourceVideoId: string; splitPoints: any[] }) => Promise<any>;
+    resplitScene: (params: { draftId: string; sceneResourceId: string; newStartTime: number; newEndTime: number }) => Promise<any>;
     upscaleVideo: (params: { draftId: string; sourceVideoIds: string[]; config: any }) => Promise<any>;
     generateImage: (params: { draftId: string; sourceImageId: string; promptResourceId: string; modelEndpoint: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
@@ -78,6 +79,7 @@ const api: ElectronAPI = {
     analyzeVideo: (params) => ipcRenderer.invoke('task:analyzeVideo', params),
     splitVideo: (params) => ipcRenderer.invoke('task:splitVideo', params),
     splitVideoWithPoints: (params) => ipcRenderer.invoke('task:splitVideoWithPoints', params),
+    resplitScene: (params) => ipcRenderer.invoke('task:resplitScene', params),
     upscaleVideo: (params) => ipcRenderer.invoke('task:upscaleVideo', params),
     generateImage: (params) => ipcRenderer.invoke('task:generateImage', params),
     synthesizeVideo: (params) => ipcRenderer.invoke('task:synthesizeVideo', params),

@@ -1,0 +1,205 @@
+.container {
+  position: relative;
+  padding: 8px 0;
+}
+
+/* 边界时间线（上方，用于设置开始和结束位置） */
+.boundaryTimeline {
+  position: relative;
+  height: 40px;
+  background-color: #2a2a2a;
+  border-radius: 6px 6px 0 0;
+  overflow: visible;
+}
+
+/* 播放时间线（下方，用于跳转和预览） */
+.seekTimeline {
+  position: relative;
+  height: 20px;
+  background-color: #1a1a1a;
+  border-radius: 0 0 6px 6px;
+  cursor: pointer;
+  margin-top: 1px;
+}
+
+/* 有效区域背景（当前分镜区域） */
+.activeRegion {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background-color: rgba(82, 196, 26, 0.2);
+  pointer-events: none;
+}
+
+/* 播放位置指示器 - 边界时间线 */
+.playhead {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background-color: #ff4d4f;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* 播放位置指示器 - 播放时间线（可拖拽） */
+.seekPlayhead {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background-color: #ff4d4f;
+  cursor: ew-resize;
+  z-index: 10;
+}
+
+.seekPlayhead::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -5px;
+  width: 12px;
+  height: 12px;
+  background-color: #ff4d4f;
+  border-radius: 50%;
+}
+
+/* 参考线（前一个分镜结束、后一个分镜开始） */
+.referenceLine {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.referenceLine.prev {
+  background-color: rgba(250, 173, 20, 0.6);
+}
+
+.referenceLine.next {
+  background-color: rgba(24, 144, 255, 0.6);
+}
+
+.referenceLine::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -4px;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.referenceLine.prev::before {
+  background-color: rgba(250, 173, 20, 0.6);
+}
+
+.referenceLine.next::before {
+  background-color: rgba(24, 144, 255, 0.6);
+}
+
+/* 边界标记（可拖拽） */
+.boundaryMarker {
+  position: absolute;
+  top: -4px;
+  width: 8px;
+  height: calc(100% + 8px);
+  background-color: #52c41a;
+  cursor: ew-resize;
+  z-index: 20;
+  transition: background-color 0.15s, transform 0.1s;
+  border-radius: 4px;
+}
+
+.boundaryMarker:hover {
+  background-color: #73d13d;
+  transform: scaleX(1.2);
+}
+
+.boundaryMarker.dragging {
+  background-color: #95de64;
+  transform: scaleX(1.3);
+}
+
+.boundaryMarker.snapping {
+  background-color: #faad14;
+}
+
+.boundaryMarker::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 20px;
+  background-color: rgba(255, 255, 255, 0.8);
+  border-radius: 1px;
+}
+
+/* 吸附提示线 */
+.snapIndicator {
+  position: absolute;
+  top: -8px;
+  width: 2px;
+  height: calc(100% + 16px);
+  background-color: #faad14;
+  pointer-events: none;
+  z-index: 15;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.snapIndicator.visible {
+  opacity: 1;
+}
+
+/* 时间显示 */
+.timeDisplay {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.timeInfo {
+  display: flex;
+  gap: 16px;
+}
+
+.timeLabel {
+  color: var(--color-text-tertiary);
+}
+
+.timeValue {
+  color: #52c41a;
+  font-family: monospace;
+}
+
+.timeValue.start {
+  color: #52c41a;
+}
+
+.timeValue.end {
+  color: #52c41a;
+}
+
+.timeValue.current {
+  color: #ff4d4f;
+}
+
+.durationValue {
+  color: var(--color-text-primary);
+  font-family: monospace;
+}
+
+/* 帮助提示 */
+.hint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  margin-top: 4px;
+}

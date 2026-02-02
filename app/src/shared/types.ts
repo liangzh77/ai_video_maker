@@ -66,6 +66,11 @@ export interface VideoMetadata {
   fps: number;
   codec: string;
   hasAudio: boolean;
+  // 分镜源视频特有字段（用于边界编辑）
+  sourceVideoId?: string;   // 源视频的资源 ID
+  startTime?: number;       // 在源视频中的开始时间（秒）
+  endTime?: number;         // 在源视频中的结束时间（秒）
+  sceneIndex?: number;      // 分镜序号（1-based，用于确定前后关系）
 }
 
 export interface ImageMetadata {

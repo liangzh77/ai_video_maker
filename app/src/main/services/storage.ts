@@ -352,7 +352,7 @@ export async function deleteResource(draftId: string, resourceId: string): Promi
 
 function getSplitPointsPath(draftId: string, _videoId: string): string {
   // 使用固定的文件名，存储在 files 目录下
-  return path.join(getFilesPath(draftId), '源视频分割点.txt');
+  return path.join(getFilesPath(draftId), '分割点.txt');
 }
 
 interface SplitPointsFile {
@@ -485,6 +485,9 @@ async function getAllFilesRecursive(dirPath: string): Promise<string[]> {
   return files;
 }
 
+// 不应被清理的特殊文件名（如分割点文件）
+const PROTECTED_FILES = ['分割点.txt'];
+
 /**
  * 清理草稿中未被引用的文件
  * 扫描 files 目录，删除不在 resources.json 中引用的文件
@@ -506,6 +509,12 @@ export async function cleanupOrphanedFiles(draftId: string): Promise<number> {
 
   for (const filePath of allFiles) {
     const normalizedPath = path.normalize(filePath);
+    const fileName = path.basename(filePath);
+
+    // 跳过受保护的文件（如分割点文件）
+    if (PROTECTED_FILES.includes(fileName)) {
+      continue;
+    }
 
     // 如果文件不在引用列表中，删除它
     if (!referencedPaths.has(normalizedPath)) {

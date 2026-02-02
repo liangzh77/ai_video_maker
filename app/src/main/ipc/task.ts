@@ -6,6 +6,10 @@ import { ipcMain, BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import { getAvailableModels, createDoubaoServiceWithModel } from '../services/doubao-api';
@@ -78,6 +82,13 @@ interface TaskSynthesizeVideoRequest {
   draftId: string;
   videoResourceIds: string[];
   config: SynthesizeConfig;
+}
+
+interface TaskResplitSceneRequest {
+  draftId: string;
+  sceneResourceId: string;
+  newStartTime: number;
+  newEndTime: number;
 }
 
 // ============================================
@@ -367,6 +378,28 @@ const splitVideoHandler: TaskHandler = async (task, onProgress) => {
   if (!outputDir) {
     throw new Error('Failed to get output directory for scene_source');
   }
+
+  // 清空现有的分镜源视频：先删除数据库记录，再删除文件
+  const existingSceneResources = await storage.resource.list(draftId, 'scene_source');
+  for (const resource of existingSceneResources) {
+    await storage.resource.delete(draftId, resource.id);
+  }
+  if (existingSceneResources.length > 0) {
+    console.log(`[TaskHandler] Deleted ${existingSceneResources.length} existing scene_source records`);
+  }
+
+  // 清空分镜源视频文件夹
+  try {
+    const existingFiles = await fs.readdir(outputDir);
+    for (const file of existingFiles) {
+      const filePath = path.join(outputDir, file);
+      await fs.unlink(filePath);
+    }
+    console.log(`[TaskHandler] Cleared ${existingFiles.length} existing files from scene_source folder`);
+  } catch {
+    // 文件夹不存在，忽略
+  }
+
   await fs.mkdir(outputDir, { recursive: true });
 
   console.log('[TaskHandler] Output directory:', outputDir);
@@ -431,6 +464,11 @@ const splitVideoHandler: TaskHandler = async (task, onProgress) => {
         fps: (sourceResource.metadata as VideoMetadata).fps || 30,
         codec: 'h264',
         hasAudio: true,
+        // 分镜源视频边界编辑所需的信息
+        sourceVideoId: sourceVideoId,
+        startTime: scene.startTime,
+        endTime: scene.endTime,
+        sceneIndex: sequenceNumber,
       } as VideoMetadata,
     });
 
@@ -894,6 +932,91 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'PYTHON_TOOL_ERROR',
+        };
+      }
+    }
+  );
+
+  // Resplit scene (adjust boundaries)
+  ipcMain.handle(
+    TASK_CHANNELS.RESPLIT_SCENE,
+    async (_, request: TaskResplitSceneRequest): Promise<OperationResult> => {
+      console.log('[TaskIPC] Received resplit scene request:', request);
+      try {
+        const { draftId, sceneResourceId, newStartTime, newEndTime } = request;
+
+        // 验证草稿存在
+        const draft = await storage.draft.get(draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // 获取分镜资源
+        const sceneResource = await storage.resource.get(draftId, sceneResourceId);
+        if (!sceneResource) {
+          return { success: false, error: 'RESOURCE_NOT_FOUND: Scene resource not found' };
+        }
+
+        const sceneMeta = sceneResource.metadata as VideoMetadata;
+        if (!sceneMeta.sourceVideoId) {
+          return { success: false, error: 'NO_SOURCE_VIDEO: Scene has no source video reference' };
+        }
+
+        // 获取源视频资源
+        const sourceVideoResource = await storage.resource.get(draftId, sceneMeta.sourceVideoId);
+        if (!sourceVideoResource) {
+          return { success: false, error: 'SOURCE_VIDEO_NOT_FOUND: Source video not found' };
+        }
+
+        // 验证时间范围
+        if (newStartTime < 0 || newEndTime <= newStartTime) {
+          return { success: false, error: 'INVALID_TIME_RANGE: Invalid start/end time' };
+        }
+
+        const newDuration = newEndTime - newStartTime;
+        console.log(`[TaskIPC] Resplitting scene: ${newStartTime}s - ${newEndTime}s (${newDuration}s)`);
+
+        // 创建临时输出文件
+        const tempOutputPath = sceneResource.filePath + '.temp.mp4';
+
+        // 使用 FFmpeg 重新切分
+        // 为了确保精确的开始时间，使用重新编码方式
+        // -ss 在 -i 之后可以实现精确 seek（但较慢）
+        // -t 指定时长
+        // 使用重新编码而不是 -c copy，因为流复制会 seek 到关键帧导致时间不精确
+        const ffmpegCmd = `ffmpeg -y -i "${sourceVideoResource.filePath}" -ss ${newStartTime} -t ${newDuration} -c:v libx264 -preset fast -crf 18 -c:a aac -avoid_negative_ts make_zero "${tempOutputPath}"`;
+
+        console.log('[TaskIPC] FFmpeg command:', ffmpegCmd);
+
+        await execAsync(ffmpegCmd);
+
+        // 替换原文件
+        await fs.unlink(sceneResource.filePath);
+        await fs.rename(tempOutputPath, sceneResource.filePath);
+
+        // 获取新文件大小
+        const stats = await fs.stat(sceneResource.filePath);
+
+        // 更新资源 metadata
+        const updatedMetadata: VideoMetadata = {
+          ...sceneMeta,
+          duration: newDuration,
+          startTime: newStartTime,
+          endTime: newEndTime,
+        };
+
+        await storage.resource.update(draftId, sceneResourceId, {
+          fileSize: stats.size,
+          metadata: updatedMetadata,
+        });
+
+        console.log('[TaskIPC] Scene resplit completed');
+        return { success: true };
+      } catch (error) {
+        console.error('[TaskIPC] Failed to resplit scene:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'RESPLIT_ERROR',
         };
       }
     }

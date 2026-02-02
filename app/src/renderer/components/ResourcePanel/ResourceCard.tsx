@@ -227,14 +227,13 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   };
 
   // Build local file URL - need triple slash for Windows paths
-  // Add cache busting parameter using resource id and createdAt to force reload on content change
+  // Add cache busting parameter using fileSize to force reload on content change
   const getLocalFileUrl = (filePath: string) => {
     // On Windows, paths start with drive letter like C:\
     // URL format should be: local-file:///C:/path/to/file
     const normalizedPath = filePath.replace(/\\/g, '/');
-    // 使用资源 ID 和创建时间作为缓存破坏参数，确保文件更新后重新加载
-    const cacheBuster = `${resource.id}_${new Date(resource.createdAt).getTime()}`;
-    return `local-file:///${normalizedPath}?v=${cacheBuster}`;
+    // 使用资源文件大小作为缓存破坏参数，确保文件更新后重新加载（如 resplit 后）
+    return `local-file:///${normalizedPath}?v=${resource.fileSize}`;
   };
 
   const getThumbnail = () => {
@@ -251,9 +250,11 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
 
     // For video, show first frame as thumbnail
     if (isVideo) {
+      // 使用 fileSize 和 duration 作为 key，确保视频更新后重新加载缩略图
+      const videoDuration = isVideoMetadata(resource.metadata) ? resource.metadata.duration : 0;
       return (
         <VideoThumbnail
-          key={resource.id}
+          key={`${resource.id}_${resource.fileSize}_${videoDuration}`}
           src={getLocalFileUrl(resource.filePath)}
           alt={resource.fileName}
         />

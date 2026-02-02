@@ -9,7 +9,7 @@ import {
   CameraOutlined,
 } from '@ant-design/icons';
 import type { Resource, VideoMetadata } from '@shared/types';
-import { usePlaybackStore } from '../../stores/playback';
+import { usePlaybackStore, type PlayerType } from '../../stores/playback';
 import SplitPointTimeline from './SplitPointTimeline';
 import styles from './VideoPlayer.module.css';
 
@@ -23,6 +23,8 @@ interface VideoPlayerProps {
   onTimeUpdate?: (time: number) => void;
   onEnded?: () => void;
   autoPlay?: boolean;
+  // 播放器类型，用于互斥播放控制
+  playerType?: PlayerType;
 }
 
 // 暴露给父组件的方法
@@ -40,6 +42,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   onTimeUpdate,
   onEnded,
   autoPlay = false,
+  playerType = 'preview',
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -49,8 +52,8 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   const lastSeekTimeRef = useRef(0);
   const isSeekingRef = useRef(false);
 
-  // 同步播放状态到 store
-  const { setIsPlaying: setStoreIsPlaying } = usePlaybackStore();
+  // 全局播放状态管理
+  const { startPlaying, stopPlaying, pauseRequestId, activePlayerType } = usePlaybackStore();
 
   // 状态
   const [isPlaying, setIsPlaying] = useState(false);
@@ -83,10 +86,22 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     wasPlayingRef.current = false;
   }, [src, autoPlay]);
 
-  // 同步 isPlaying 状态到 store
+  // 监听其他播放器开始播放时，暂停当前播放器
+  const prevPauseRequestIdRef = useRef(pauseRequestId);
   useEffect(() => {
-    setStoreIsPlaying(isPlaying);
-  }, [isPlaying, setStoreIsPlaying]);
+    // pauseRequestId 变化意味着有其他播放器开始播放
+    if (pauseRequestId !== prevPauseRequestIdRef.current) {
+      prevPauseRequestIdRef.current = pauseRequestId;
+      // 如果当前不是活跃播放器，暂停视频
+      if (activePlayerType !== playerType && isPlaying) {
+        const video = videoRef.current;
+        if (video) {
+          video.pause();
+          setIsPlaying(false);
+        }
+      }
+    }
+  }, [pauseRequestId, activePlayerType, playerType, isPlaying]);
 
   // Handle autoPlay when video is ready
   useEffect(() => {
@@ -97,10 +112,12 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       // 使用 ref 中保存的意图
       if (pendingAutoPlayRef.current) {
         pendingAutoPlayRef.current = false; // 先重置，避免重复触发
+        startPlaying(playerType);
         video.play().then(() => {
           setIsPlaying(true);
         }).catch((err) => {
           console.warn('AutoPlay failed:', err);
+          stopPlaying(playerType);
         });
       }
     };
@@ -114,7 +131,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         video.removeEventListener('canplay', handleCanPlayForAutoPlay);
       };
     }
-  }, [src]);
+  }, [src, playerType, startPlaying, stopPlaying]);
 
   // Setup video event listeners
   useEffect(() => {
@@ -135,6 +152,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
 
     const handleEnded = () => {
       setIsPlaying(false);
+      stopPlaying(playerType);
       onEnded?.();
     };
 
@@ -145,6 +163,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       }
       setHasError(true);
       setIsPlaying(false);
+      stopPlaying(playerType);
     };
 
     const handleCanPlay = () => {
@@ -169,7 +188,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       video.removeEventListener('error', handleError);
       video.removeEventListener('canplay', handleCanPlay);
     };
-  }, [src]);
+  }, [src, playerType, stopPlaying, onEnded, onTimeUpdate]);
 
   const togglePlay = useCallback(async () => {
     const video = videoRef.current;
@@ -178,15 +197,19 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     if (isPlaying) {
       video.pause();
       setIsPlaying(false);
+      stopPlaying(playerType);
     } else {
       try {
+        // 通知全局 store 开始播放，这会让其他播放器暂停
+        startPlaying(playerType);
         await video.play();
         setIsPlaying(true);
       } catch (err) {
         setHasError(true);
+        stopPlaying(playerType);
       }
     }
-  }, [isPlaying, hasError]);
+  }, [isPlaying, hasError, playerType, startPlaying, stopPlaying]);
 
   // 暴露方法给父组件
   useImperativeHandle(ref, () => ({

@@ -681,7 +681,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
                 <PromptCard key={resource.id} resource={resource} />
               ) : (
                 <ResourceCard
-                  key={resource.id}
+                  key={`${resource.id}_${resource.fileSize}_${(resource.metadata as any)?.duration ?? ''}`}
                   resource={resource}
                   badge={badge}
                   badgeType={badgeType}

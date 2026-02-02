@@ -56,9 +56,13 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
     return () => clearInterval(timer);
   }, [isSplitting]);
 
+  // 跟踪是否已刷新过资源（删除旧分镜后刷新一次）
+  const hasRefreshedRef = React.useRef(false);
+
   // Listen for task progress events
   useEffect(() => {
     if (!isSplitting) return;
+    hasRefreshedRef.current = false;
 
     const handleProgress = (_: any, event: { taskId: string; progress: number; status: string; error?: string }) => {
       console.log('[SplitVideoDialog] Progress event:', event);
@@ -77,6 +81,11 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
           setStatusText('准备中...');
         } else if (event.progress < 90) {
           setStatusText('分割中...');
+          // 进度到 10% 时，旧资源已删除，刷新资源列表以清除旧卡片
+          if (event.progress >= 10 && !hasRefreshedRef.current && selectedDraftId) {
+            hasRefreshedRef.current = true;
+            loadResources(selectedDraftId);
+          }
         } else {
           setStatusText('保存中...');
         }
