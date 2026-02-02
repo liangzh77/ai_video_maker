@@ -46,7 +46,7 @@
 }
 
 .linkButton {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .linkButton:hover {

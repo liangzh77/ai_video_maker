@@ -61,15 +61,27 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   const [showControls, setShowControls] = useState(true);
   const [hasError, setHasError] = useState(false);
 
+  // 用于保存自动播放意图的 ref（只在 src 变化时捕获，不受 autoPlay 后续变化影响）
+  const pendingAutoPlayRef = useRef(false);
+  // 保存上一次的 src，用于检测 src 是否真的变化了
+  const prevSrcRef = useRef(src);
+
   // Reset state when src changes
   useEffect(() => {
+    // 只在 src 真的变化时才捕获 autoPlay 意图
+    if (prevSrcRef.current !== src) {
+      prevSrcRef.current = src;
+      // 在 src 变化的那一刻捕获 autoPlay 意图
+      pendingAutoPlayRef.current = autoPlay;
+    }
+
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
     setHasError(false);
     isSeekingRef.current = false;
     wasPlayingRef.current = false;
-  }, [src]);
+  }, [src, autoPlay]);
 
   // 同步 isPlaying 状态到 store
   useEffect(() => {
@@ -79,14 +91,18 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   // Handle autoPlay when video is ready
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !autoPlay) return;
+    if (!video) return;
 
     const handleCanPlayForAutoPlay = () => {
-      video.play().then(() => {
-        setIsPlaying(true);
-      }).catch((err) => {
-        console.warn('AutoPlay failed:', err);
-      });
+      // 使用 ref 中保存的意图
+      if (pendingAutoPlayRef.current) {
+        pendingAutoPlayRef.current = false; // 先重置，避免重复触发
+        video.play().then(() => {
+          setIsPlaying(true);
+        }).catch((err) => {
+          console.warn('AutoPlay failed:', err);
+        });
+      }
     };
 
     // If video is already ready, play immediately
@@ -98,7 +114,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         video.removeEventListener('canplay', handleCanPlayForAutoPlay);
       };
     }
-  }, [src, autoPlay]);
+  }, [src]);
 
   // Setup video event listeners
   useEffect(() => {
@@ -140,6 +156,11 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     video.addEventListener('ended', handleEnded);
     video.addEventListener('error', handleError);
     video.addEventListener('canplay', handleCanPlay);
+
+    // 如果视频已经加载了 metadata（比如已缓存），直接获取 duration
+    if (video.readyState >= 1 && video.duration > 0) {
+      setDuration(video.duration);
+    }
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
