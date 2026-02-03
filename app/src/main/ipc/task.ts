@@ -12,7 +12,7 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
-import { getAvailableModels, createDoubaoServiceWithModel } from '../services/doubao-api';
+import imageApi from '../services/image-api';
 import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, getFFmpegPath } from '../services/python-bridge';
 import storage from '../services/storage';
 import appConfigService from '../services/config';
@@ -134,15 +134,15 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
 
   onProgress(5);
 
-  // Call Doubao API with specified model endpoint
-  const modelEndpoint = generateConfig.modelEndpoint;
-  if (!modelEndpoint) {
+  // Call image API with specified model (supports multiple providers)
+  const modelId = generateConfig.modelEndpoint;
+  if (!modelId) {
     throw new Error('Model not specified');
   }
-  console.log('[TaskHandler] Using model:', modelEndpoint);
+  console.log('[TaskHandler] Using model:', modelId);
 
-  const doubaoService = await createDoubaoServiceWithModel(modelEndpoint);
-  const result = await doubaoService.imageToImage(
+  const result = await imageApi.imageToImage(
+    modelId,
     sourceResource.filePath,
     prompt,
     (progress) => {
@@ -524,10 +524,10 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
     mainWindowRef?.webContents.send(TASK_EVENTS.COMPLETED, event);
   });
 
-  // Get available models
+  // Get available models (from all providers)
   ipcMain.handle(TASK_CHANNELS.GET_MODELS, async () => {
     console.log('[TaskIPC] Getting model list');
-    const models = getAvailableModels();
+    const models = imageApi.getAvailableModels();
     console.log('[TaskIPC] Available models:', models);
     return models;
   });
