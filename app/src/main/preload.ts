@@ -36,6 +36,7 @@ export interface ElectronAPI {
     upscaleVideo: (params: { draftId: string; sourceVideoIds: string[]; config: any }) => Promise<any>;
     generateImage: (params: { draftId: string; sourceImageId: string; promptResourceId: string; modelEndpoint: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
+    extractAudio: (params: { draftId: string; videoResourceId: string }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
   };
   config: {
@@ -86,6 +87,7 @@ const api: ElectronAPI = {
     upscaleVideo: (params) => ipcRenderer.invoke('task:upscaleVideo', params),
     generateImage: (params) => ipcRenderer.invoke('task:generateImage', params),
     synthesizeVideo: (params) => ipcRenderer.invoke('task:synthesizeVideo', params),
+    extractAudio: (params) => ipcRenderer.invoke('task:extractAudio', params),
     cancel: (params) => ipcRenderer.invoke('task:cancel', params),
   },
   config: {

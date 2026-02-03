@@ -75,6 +75,26 @@ function getToolsPath(): string {
   return path.join(process.cwd(), '..', 'tools');
 }
 
+// 获取 FFmpeg 可执行文件路径
+export function getFFmpegPath(): string {
+  if (app.isPackaged) {
+    // 打包后，ffmpeg.exe 在 resources/tools 目录
+    return path.join(process.resourcesPath, 'tools', 'ffmpeg.exe');
+  }
+  // 开发模式下，使用 bin 目录中的 ffmpeg
+  return path.join(process.cwd(), '..', 'bin', 'ffmpeg.exe');
+}
+
+// 获取 FFprobe 可执行文件路径
+export function getFFprobePath(): string {
+  if (app.isPackaged) {
+    // 打包后，ffprobe.exe 在 resources/tools 目录
+    return path.join(process.resourcesPath, 'tools', 'ffprobe.exe');
+  }
+  // 开发模式下，使用 bin 目录中的 ffprobe
+  return path.join(process.cwd(), '..', 'bin', 'ffprobe.exe');
+}
+
 function getPythonPath(config?: AppConfig): string {
   return config?.pythonPath || 'python';
 }

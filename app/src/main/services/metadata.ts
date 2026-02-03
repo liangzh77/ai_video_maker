@@ -3,6 +3,7 @@ import * as fs from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { ResourceType, ResourceMetadata, VideoMetadata, ImageMetadata, TextMetadata } from '@shared/types';
+import { getFFmpegPath, getFFprobePath } from './python-bridge';
 
 const execAsync = promisify(exec);
 
@@ -77,8 +78,9 @@ interface FFProbeResult {
 
 async function extractVideoMetadata(filePath: string): Promise<VideoMetadata> {
   try {
+    const ffprobePath = getFFprobePath();
     const { stdout } = await execAsync(
-      `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`,
+      `"${ffprobePath}" -v quiet -print_format json -show_format -show_streams "${filePath}"`,
       { encoding: 'utf-8' }
     );
 
@@ -128,8 +130,9 @@ async function extractImageMetadata(filePath: string): Promise<ImageMetadata> {
 
   // Try to get dimensions using FFprobe (works for most formats)
   try {
+    const ffprobePath = getFFprobePath();
     const { stdout } = await execAsync(
-      `ffprobe -v quiet -print_format json -show_streams "${filePath}"`,
+      `"${ffprobePath}" -v quiet -print_format json -show_streams "${filePath}"`,
       { encoding: 'utf-8' }
     );
 
@@ -211,8 +214,9 @@ export async function captureVideoFrame(
   outputPath: string
 ): Promise<void> {
   // Use FFmpeg to capture a frame at the specified timestamp
+  const ffmpegPath = getFFmpegPath();
   await execAsync(
-    `ffmpeg -y -ss ${timestamp} -i "${videoPath}" -frames:v 1 -q:v 2 "${outputPath}"`,
+    `"${ffmpegPath}" -y -ss ${timestamp} -i "${videoPath}" -frames:v 1 -q:v 2 "${outputPath}"`,
     { encoding: 'utf-8' }
   );
 }

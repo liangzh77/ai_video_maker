@@ -10,7 +10,17 @@ import { app } from 'electron';
 import config from './config';
 
 // Load environment variables from app directory
-const envPath = path.join(process.cwd(), '.env.local');
+// 打包后从 exe 所在目录读取，开发模式从 app 目录读取
+function getEnvPath(): string {
+  if (app.isPackaged) {
+    // 打包后，从 exe 所在目录读取（Windows: 安装目录）
+    return path.join(path.dirname(app.getPath('exe')), '.env.local');
+  }
+  // 开发模式，从 app 目录读取
+  return path.join(process.cwd(), '.env.local');
+}
+
+const envPath = getEnvPath();
 const result = dotenv.config({ path: envPath });
 if (!result.error) {
   console.log('[DoubaoAPI] Loaded .env.local from:', envPath);

@@ -2,7 +2,7 @@
  * Task IPC Handlers
  * Handle background tasks (image generation, video processing, etc.)
  */
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain, BrowserWindow, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,7 +13,7 @@ const execAsync = promisify(exec);
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import { getAvailableModels, createDoubaoServiceWithModel } from '../services/doubao-api';
-import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer } from '../services/python-bridge';
+import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, getFFmpegPath } from '../services/python-bridge';
 import storage from '../services/storage';
 import appConfigService from '../services/config';
 import type {
@@ -89,6 +89,11 @@ interface TaskResplitSceneRequest {
   sceneResourceId: string;
   newStartTime: number;
   newEndTime: number;
+}
+
+interface TaskExtractAudioRequest {
+  draftId: string;
+  videoResourceId: string;
 }
 
 // ============================================
@@ -984,8 +989,10 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         // -ss 在 -i 之后可以实现精确 seek（但较慢）
         // -t 指定时长
         // 使用重新编码而不是 -c copy，因为流复制会 seek 到关键帧导致时间不精确
-        const ffmpegCmd = `ffmpeg -y -i "${sourceVideoResource.filePath}" -ss ${newStartTime} -t ${newDuration} -c:v libx264 -preset fast -crf 18 -c:a aac -avoid_negative_ts make_zero "${tempOutputPath}"`;
+        const ffmpegPath = getFFmpegPath();
+        const ffmpegCmd = `"${ffmpegPath}" -y -i "${sourceVideoResource.filePath}" -ss ${newStartTime} -t ${newDuration} -c:v libx264 -preset fast -crf 18 -c:a aac -avoid_negative_ts make_zero "${tempOutputPath}"`;
 
+        console.log('[TaskIPC] FFmpeg path:', ffmpegPath);
         console.log('[TaskIPC] FFmpeg command:', ffmpegCmd);
 
         await execAsync(ffmpegCmd);
@@ -1017,6 +1024,81 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'RESPLIT_ERROR',
+        };
+      }
+    }
+  );
+
+  // Extract audio from video
+  ipcMain.handle(
+    TASK_CHANNELS.EXTRACT_AUDIO,
+    async (_, request: TaskExtractAudioRequest): Promise<OperationResult<{ filePath: string }>> => {
+      console.log('[TaskIPC] Received extract audio request:', request);
+      try {
+        const { draftId, videoResourceId } = request;
+
+        // 验证草稿存在
+        const draft = await storage.draft.get(draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // 获取视频资源
+        const videoResource = await storage.resource.get(draftId, videoResourceId);
+        if (!videoResource) {
+          return { success: false, error: 'RESOURCE_NOT_FOUND: Video resource not found' };
+        }
+
+        // 检查是否有音频
+        const videoMeta = videoResource.metadata as VideoMetadata;
+        if (!videoMeta.hasAudio) {
+          return { success: false, error: 'NO_AUDIO: Video has no audio track' };
+        }
+
+        // 生成默认文件名
+        const videoFileName = path.basename(videoResource.fileName, path.extname(videoResource.fileName));
+        const defaultName = `${videoFileName}_audio.mp3`;
+
+        // 打开保存对话框
+        const result = await dialog.showSaveDialog(mainWindowRef!, {
+          title: '保存音频',
+          defaultPath: defaultName,
+          filters: [
+            { name: 'MP3 Audio', extensions: ['mp3'] },
+            { name: 'AAC Audio', extensions: ['aac'] },
+            { name: 'WAV Audio', extensions: ['wav'] },
+          ],
+        });
+
+        if (result.canceled || !result.filePath) {
+          return { success: false, error: 'CANCELLED: User cancelled save dialog' };
+        }
+
+        const outputPath = result.filePath;
+        const ext = path.extname(outputPath).toLowerCase();
+
+        // 根据扩展名选择编码器
+        let audioCodec = 'libmp3lame';
+        if (ext === '.aac') {
+          audioCodec = 'aac';
+        } else if (ext === '.wav') {
+          audioCodec = 'pcm_s16le';
+        }
+
+        // 使用 FFmpeg 提取音频
+        const ffmpegPath = getFFmpegPath();
+        const ffmpegCmd = `"${ffmpegPath}" -y -i "${videoResource.filePath}" -vn -acodec ${audioCodec} "${outputPath}"`;
+
+        console.log('[TaskIPC] FFmpeg command:', ffmpegCmd);
+        await execAsync(ffmpegCmd);
+
+        console.log('[TaskIPC] Audio extracted to:', outputPath);
+        return { success: true, data: { filePath: outputPath } };
+      } catch (error) {
+        console.error('[TaskIPC] Failed to extract audio:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'EXTRACT_AUDIO_ERROR',
         };
       }
     }

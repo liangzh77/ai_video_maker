@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Button, Tooltip, Space, App } from 'antd';
-import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined, EditOutlined, LinkOutlined } from '@ant-design/icons';
+import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined, EditOutlined, LinkOutlined, SoundOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
 import { useSplitPointsStore } from '../../stores/splitPoints';
 import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
@@ -259,6 +259,30 @@ const PreviewPanel: React.FC = () => {
     }
   }, [selectedDraftId, selectedResourceId, selectedResource, getResourcesByType, loadResources, message]);
 
+  // 处理提取音频
+  const handleExtractAudio = useCallback(async () => {
+    if (!selectedDraftId || !selectedResourceId) return;
+
+    try {
+      const result = await window.api.task.extractAudio({
+        draftId: selectedDraftId,
+        videoResourceId: selectedResourceId,
+      });
+
+      if (!result.success) {
+        if (result.error === 'CANCELLED: User cancelled save dialog') {
+          // 用户取消，不显示错误
+          return;
+        }
+        throw new Error(result.error || 'Extract audio failed');
+      }
+
+      message.success('音频已保存');
+    } catch (error) {
+      message.error('提取音频失败: ' + (error instanceof Error ? error.message : '未知错误'));
+    }
+  }, [selectedDraftId, selectedResourceId, message]);
+
   // Check if split points are for current video
   const hasSplitPoints = splitPoints.length > 0 && videoId === selectedResourceId;
 
@@ -294,6 +318,10 @@ const PreviewPanel: React.FC = () => {
   // 检查分镜是否缺少源视频关联（需要手动关联）
   const sceneMeta = isSceneSource ? (selectedResource.metadata as VideoMetadata) : null;
   const needsSourceLink = isSceneSource && !sceneMeta?.sourceVideoId;
+
+  // 检查视频是否有音频（用于显示保存音频按钮）
+  const videoMeta = isVideo && isVideoMetadata(selectedResource.metadata) ? selectedResource.metadata : null;
+  const hasAudio = videoMeta?.hasAudio;
 
   return (
     <div className={styles.panel}>
@@ -345,6 +373,15 @@ const PreviewPanel: React.FC = () => {
                 type="text"
                 icon={<EditOutlined />}
                 onClick={() => setBoundaryEditorVisible(true)}
+              />
+            </Tooltip>
+          )}
+          {isVideo && hasAudio && (
+            <Tooltip title="保存音频">
+              <Button
+                type="text"
+                icon={<SoundOutlined />}
+                onClick={handleExtractAudio}
               />
             </Tooltip>
           )}
