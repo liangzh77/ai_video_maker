@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Button, Tooltip, Space, App } from 'antd';
-import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined, EditOutlined, LinkOutlined, SoundOutlined } from '@ant-design/icons';
+import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined, EditOutlined, LinkOutlined, SoundOutlined, PlaySquareOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
 import { useSplitPointsStore } from '../../stores/splitPoints';
 import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
@@ -15,6 +15,7 @@ import SplitVideoDialog from './SplitVideoDialog';
 import AnalyzeVideoDialog from './AnalyzeVideoDialog';
 import SplitPointEditorDialog from './SplitPointEditorDialog';
 import SceneBoundaryEditorDialog from './SceneBoundaryEditorDialog';
+import DualVideoPlayerDialog from './DualVideoPlayerDialog';
 import styles from './PreviewPanel.module.css';
 
 const PreviewPanel: React.FC = () => {
@@ -22,12 +23,13 @@ const PreviewPanel: React.FC = () => {
   const { selectedDraftId, selectedResourceId, getSelectedResource, openResourceFolder, selectResource, getResourcesByType, loadResources } = useDraftStore();
   const { splitPoints, videoId, loadSplitPoints, clearPoints } = useSplitPointsStore();
   const { shouldAutoPlay, setShouldAutoPlay, activePlayerType } = usePlaybackStore();
-  const { getCustomOrder } = useSceneLinkStore();
+  const { getCustomOrder, getLinkedId } = useSceneLinkStore();
   const selectedResource = getSelectedResource();
   const [splitDialogVisible, setSplitDialogVisible] = useState(false);
   const [analyzeDialogVisible, setAnalyzeDialogVisible] = useState(false);
   const [editorDialogVisible, setEditorDialogVisible] = useState(false);
   const [boundaryEditorVisible, setBoundaryEditorVisible] = useState(false);
+  const [dualPlayerVisible, setDualPlayerVisible] = useState(false);
   const videoPlayerRef = useRef<VideoPlayerRef>(null);
 
   // 获取按自定义排序的资源列表
@@ -153,6 +155,11 @@ const PreviewPanel: React.FC = () => {
   // 全局空格键播放/暂停（仅对支持连续播放的视频类型生效）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 如果对话框打开，不响应空格键（由对话框自己处理）
+      if (dualPlayerVisible || boundaryEditorVisible || editorDialogVisible) {
+        return;
+      }
+
       // 忽略输入框中的空格键
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
@@ -177,7 +184,7 @@ const PreviewPanel: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [selectedResource]);
+  }, [selectedResource, dualPlayerVisible, boundaryEditorVisible, editorDialogVisible]);
 
   // Auto-load split points when selecting a source video
   useEffect(() => {
@@ -294,6 +301,45 @@ const PreviewPanel: React.FC = () => {
     return `local-file:///${normalizedPath}${cacheKey}`;
   };
 
+  // 获取关联的视频资源（用于双视频对比播放）
+  // 注意：useMemo 必须在 early return 之前调用
+  const linkedVideoResource = useMemo(() => {
+    if (!selectedResource) return null;
+    const isSceneSourceType = selectedResource.type === 'scene_source';
+    const isSceneNewType = selectedResource.type === 'scene_new';
+    if (!isSceneSourceType && !isSceneNewType) return null;
+
+    const linkedId = getLinkedId(
+      selectedResource.id,
+      isSceneSourceType ? 'scene_source' : 'scene_new'
+    );
+    if (!linkedId) return null;
+
+    // 从对应类型中查找关联资源
+    const linkedType = isSceneSourceType ? 'scene_new' : 'scene_source';
+    const linkedResources = getResourcesByType(linkedType);
+    return linkedResources.find(r => r.id === linkedId) || null;
+  }, [selectedResource, getLinkedId, getResourcesByType]);
+
+  // 准备双视频播放所需的资源
+  const dualPlayerResources = useMemo(() => {
+    if (!linkedVideoResource || !selectedResource) return null;
+
+    const isSceneSourceType = selectedResource.type === 'scene_source';
+    // 确保 sourceResource 是 scene_source，newResource 是 scene_new
+    if (isSceneSourceType) {
+      return {
+        sourceResource: selectedResource,
+        newResource: linkedVideoResource,
+      };
+    } else {
+      return {
+        sourceResource: linkedVideoResource,
+        newResource: selectedResource,
+      };
+    }
+  }, [selectedResource, linkedVideoResource]);
+
   if (!selectedResourceId || !selectedResource) {
     return (
       <div className={styles.panel}>
@@ -310,6 +356,7 @@ const PreviewPanel: React.FC = () => {
   const isText = isTextMetadata(selectedResource.metadata);
   const isSourceVideo = selectedResource.type === 'source_video';
   const isSceneSource = selectedResource.type === 'scene_source';
+  const isSceneNew = selectedResource.type === 'scene_new';
 
   // 获取分镜相关资源（仅当选中分镜源视频时）
   const sceneRelated = isSceneSource ? getSceneRelatedResources(selectedResource) : null;
@@ -382,6 +429,19 @@ const PreviewPanel: React.FC = () => {
                 type="text"
                 icon={<SoundOutlined />}
                 onClick={handleExtractAudio}
+              />
+            </Tooltip>
+          )}
+          {dualPlayerResources && (
+            <Tooltip title="对比播放（源/新）">
+              <Button
+                type="text"
+                icon={<PlaySquareOutlined />}
+                onClick={() => {
+                  // 先暂停主视频播放器
+                  videoPlayerRef.current?.pause();
+                  setDualPlayerVisible(true);
+                }}
               />
             </Tooltip>
           )}
@@ -459,6 +519,16 @@ const PreviewPanel: React.FC = () => {
           nextSceneResource={sceneRelated.nextScene || undefined}
           onClose={() => setBoundaryEditorVisible(false)}
           onConfirm={handleResplitScene}
+        />
+      )}
+
+      {/* Dual Video Player Dialog */}
+      {dualPlayerResources && (
+        <DualVideoPlayerDialog
+          visible={dualPlayerVisible}
+          sourceResource={dualPlayerResources.sourceResource}
+          newResource={dualPlayerResources.newResource}
+          onClose={() => setDualPlayerVisible(false)}
         />
       )}
     </div>

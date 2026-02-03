@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Empty, App, Popconfirm, Tooltip } from 'antd';
-import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined, ThunderboltOutlined, MergeCellsOutlined } from '@ant-design/icons';
+import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined, ThunderboltOutlined, MergeCellsOutlined, HolderOutlined } from '@ant-design/icons';
 import type { Resource, ResourceType, UpscaleConfig, SynthesizeConfig } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import { useSceneLinkStore, SORTABLE_TYPES, type SortableType } from '../../stores/sceneLink';
@@ -22,6 +22,14 @@ interface ResourceSectionProps {
   badgeType?: 'default' | 'success' | 'warning';
   isText?: boolean;
   isLarge?: boolean;
+  // Section 拖拽排序相关
+  isDragging?: boolean;
+  isDragOver?: boolean;
+  onSectionDragStart?: (e: React.DragEvent) => void;
+  onSectionDragOver?: (e: React.DragEvent) => void;
+  onSectionDragLeave?: (e: React.DragEvent) => void;
+  onSectionDrop?: (e: React.DragEvent) => void;
+  onSectionDragEnd?: () => void;
 }
 
 // File type validation
@@ -55,8 +63,15 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   badgeType = 'default',
   isText = false,
   isLarge = false,
+  isDragging = false,
+  isDragOver = false,
+  onSectionDragStart,
+  onSectionDragOver,
+  onSectionDragLeave,
+  onSectionDrop,
+  onSectionDragEnd,
 }) => {
-  const [isDragOver, setIsDragOver] = useState(false);
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
@@ -495,14 +510,14 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     e.stopPropagation();
     // 只有文件拖入时才高亮区域，卡片排序时不高亮
     if (canDrop && !draggingCardId) {
-      setIsDragOver(true);
+      setIsFileDragOver(true);
     }
   }, [canDrop, draggingCardId]);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragOver(false);
+    setIsFileDragOver(false);
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -513,7 +528,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragOver(false);
+    setIsFileDragOver(false);
 
     if (!canDrop || !selectedDraftId) return;
 
@@ -587,12 +602,33 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     styles.content,
     isLarge ? styles.large : '',
     canDrop ? styles.droppable : '',
-    isDragOver ? styles.dragOver : '',
+    isFileDragOver ? styles.dragOver : '',
+  ].filter(Boolean).join(' ');
+
+  // Section 容器的样式类
+  const sectionClasses = [
+    styles.section,
+    isDragging ? styles.sectionDragging : '',
+    isDragOver ? styles.sectionDragOver : '',
   ].filter(Boolean).join(' ');
 
   return (
-    <div className={styles.section}>
+    <div
+      className={sectionClasses}
+      onDragOver={onSectionDragOver}
+      onDragLeave={onSectionDragLeave}
+      onDrop={onSectionDrop}
+    >
       <div className={styles.header}>
+        {/* 拖拽把手 */}
+        <div
+          className={styles.dragHandle}
+          draggable
+          onDragStart={onSectionDragStart}
+          onDragEnd={onSectionDragEnd}
+        >
+          <HolderOutlined />
+        </div>
         <h3 className={styles.title}>{title}</h3>
         <span className={styles.count}>{resources.length}</span>
         {isText && (
@@ -660,7 +696,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
               <div className={styles.dropHint}>
                 <InboxOutlined className={styles.dropIcon} />
                 <p className={styles.dropText}>
-                  {isDragOver ? '松开以添加文件' : '拖拽文件到此处'}
+                  {isFileDragOver ? '松开以添加文件' : '拖拽文件到此处'}
                 </p>
               </div>
             ) : (

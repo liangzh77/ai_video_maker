@@ -30,6 +30,7 @@ interface VideoPlayerProps {
 // 暴露给父组件的方法
 export interface VideoPlayerRef {
   togglePlay: () => void;
+  pause: () => void;
 }
 
 // 节流间隔（毫秒）
@@ -212,9 +213,20 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   }, [isPlaying, hasError, playerType, startPlaying, stopPlaying]);
 
   // 暴露方法给父组件
+  // 暂停播放
+  const pause = useCallback(() => {
+    const video = videoRef.current;
+    if (video && !video.paused) {
+      video.pause();
+      setIsPlaying(false);
+      stopPlaying();
+    }
+  }, [stopPlaying]);
+
   useImperativeHandle(ref, () => ({
     togglePlay,
-  }), [togglePlay]);
+    pause,
+  }), [togglePlay, pause]);
 
   // 空格键播放/暂停
   useEffect(() => {

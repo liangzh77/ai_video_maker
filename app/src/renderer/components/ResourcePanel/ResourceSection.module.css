@@ -1,5 +1,25 @@
 .section {
   margin-bottom: var(--spacing-lg);
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+/* Section 拖拽中状态 */
+.section.sectionDragging {
+  opacity: 0.5;
+}
+
+/* Section 拖拽悬停状态 */
+.section.sectionDragOver {
+  transform: translateY(4px);
+}
+
+.section.sectionDragOver::before {
+  content: '';
+  display: block;
+  height: 3px;
+  background-color: var(--color-primary);
+  border-radius: 2px;
+  margin-bottom: var(--spacing-sm);
 }
 
 .header {
@@ -7,6 +27,27 @@
   align-items: center;
   gap: var(--spacing-sm);
   margin-bottom: var(--spacing-md);
+}
+
+/* 拖拽把手 */
+.dragHandle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-quaternary);
+  cursor: grab;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+
+.dragHandle:hover {
+  color: var(--color-text-secondary);
+}
+
+.dragHandle:active {
+  cursor: grabbing;
 }
 
 .title {
