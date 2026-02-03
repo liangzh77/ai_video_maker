@@ -9,6 +9,12 @@
   "files": [
     "out/**/*"
   ],
+  "extraFiles": [
+    {
+      "from": ".env.local",
+      "to": "."
+    }
+  ],
   "extraResources": [
     {
       "from": "../tools/dist/video_tools",
