@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Input, Dropdown, Modal, message } from 'antd';
+import { Input, InputNumber, Dropdown, Modal, message } from 'antd';
 import type { MenuProps } from 'antd';
-import { MoreOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { MoreOutlined, EditOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
 import type { Draft } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import styles from './DraftItem.module.css';
@@ -12,9 +12,12 @@ interface DraftItemProps {
 }
 
 const DraftItem: React.FC<DraftItemProps> = ({ draft, isSelected }) => {
-  const { selectDraft, updateDraft, deleteDraft, resources } = useDraftStore();
+  const { selectDraft, updateDraft, deleteDraft, copyDraft, resources } = useDraftStore();
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(draft.name);
+  const [copyDialogVisible, setCopyDialogVisible] = useState(false);
+  const [copyCount, setCopyCount] = useState(1);
+  const [isCopying, setIsCopying] = useState(false);
 
   const handleClick = () => {
     if (!isEditing) {
@@ -47,6 +50,29 @@ const DraftItem: React.FC<DraftItemProps> = ({ draft, isSelected }) => {
     });
   };
 
+  const handleCopy = async () => {
+    if (copyCount < 1 || copyCount > 20) {
+      message.error('复制份数必须在 1-20 之间');
+      return;
+    }
+
+    setIsCopying(true);
+    try {
+      const copiedDrafts = await copyDraft(draft.id, copyCount);
+      if (copiedDrafts) {
+        message.success(`已复制 ${copiedDrafts.length} 份草稿`);
+        setCopyDialogVisible(false);
+        setCopyCount(1);
+      } else {
+        message.error('复制失败');
+      }
+    } catch {
+      message.error('复制失败');
+    } finally {
+      setIsCopying(false);
+    }
+  };
+
   const menuItems: MenuProps['items'] = [
     {
       key: 'rename',
@@ -62,6 +88,15 @@ const DraftItem: React.FC<DraftItemProps> = ({ draft, isSelected }) => {
       },
     },
     {
+      key: 'copy',
+      icon: <CopyOutlined />,
+      label: '复制',
+      onClick: (e) => {
+        e.domEvent.stopPropagation();
+        setCopyDialogVisible(true);
+      },
+    },
+    {
       type: 'divider',
     },
     {
@@ -69,7 +104,10 @@ const DraftItem: React.FC<DraftItemProps> = ({ draft, isSelected }) => {
       icon: <DeleteOutlined />,
       label: '删除',
       danger: true,
-      onClick: handleDelete,
+      onClick: (e) => {
+        e.domEvent.stopPropagation();
+        handleDelete();
+      },
     },
   ];
 
@@ -86,43 +124,84 @@ const DraftItem: React.FC<DraftItemProps> = ({ draft, isSelected }) => {
   const resourceCount = isSelected ? resources.length : 0;
 
   return (
-    <div
-      className={`${styles.item} ${isSelected ? styles.selected : ''}`}
-      onClick={handleClick}
-    >
-      <div className={styles.content}>
-        {isEditing ? (
-          <Input
-            value={editName}
-            onChange={(e) => setEditName(e.target.value)}
-            onBlur={handleRename}
-            onPressEnter={handleRename}
-            autoFocus
-            size="small"
-            className={styles.input}
-            onClick={(e) => e.stopPropagation()}
-          />
-        ) : (
-          <div className={styles.name}>{draft.name}</div>
-        )}
-
-        <div className={styles.meta}>
-          <span className={styles.date}>{formatDate(draft.updatedAt)}</span>
-          {resourceCount > 0 && (
-            <span className={styles.count}>{resourceCount} 项</span>
+    <>
+      <div
+        className={`${styles.item} ${isSelected ? styles.selected : ''}`}
+        onClick={handleClick}
+      >
+        <div className={styles.content}>
+          {isEditing ? (
+            <Input
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onBlur={handleRename}
+              onPressEnter={handleRename}
+              autoFocus
+              size="small"
+              className={styles.input}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <div className={styles.name}>{draft.name}</div>
           )}
+
+          <div className={styles.meta}>
+            <span className={styles.date}>{formatDate(draft.updatedAt)}</span>
+            {resourceCount > 0 && (
+              <span className={styles.count}>{resourceCount} 项</span>
+            )}
+          </div>
         </div>
+
+        <Dropdown menu={{ items: menuItems }} trigger={['click']}>
+          <button
+            className={styles.menuButton}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MoreOutlined />
+          </button>
+        </Dropdown>
       </div>
 
-      <Dropdown menu={{ items: menuItems }} trigger={['click']}>
-        <button
-          className={styles.menuButton}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <MoreOutlined />
-        </button>
-      </Dropdown>
-    </div>
+      {/* 复制对话框 */}
+      <Modal
+        title="复制草稿"
+        open={copyDialogVisible}
+        onOk={handleCopy}
+        onCancel={() => {
+          setCopyDialogVisible(false);
+          setCopyCount(1);
+        }}
+        okText="复制"
+        cancelText="取消"
+        confirmLoading={isCopying}
+        width={360}
+      >
+        <div style={{ padding: '16px 0' }}>
+          <p style={{ marginBottom: 12 }}>
+            将"{draft.name}"复制 {copyCount} 份
+          </p>
+          <p style={{ marginBottom: 16, color: 'var(--color-text-secondary)', fontSize: 13 }}>
+            新草稿命名格式：{draft.name}-1, {draft.name}-2 ...
+            <br />
+            <span style={{ fontSize: 12 }}>（如有重名将自动调整编号）</span>
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span>复制份数：</span>
+            <InputNumber
+              min={1}
+              max={20}
+              value={copyCount}
+              onChange={(value) => setCopyCount(value || 1)}
+              style={{ width: 80 }}
+            />
+            <span style={{ color: 'var(--color-text-tertiary)', fontSize: 12 }}>
+              （最多 20 份）
+            </span>
+          </div>
+        </div>
+      </Modal>
+    </>
   );
 };
 

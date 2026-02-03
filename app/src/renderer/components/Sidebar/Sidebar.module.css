@@ -19,14 +19,17 @@
 }
 
 .workspaceSection {
+  display: flex;
+  gap: 8px;
   margin-bottom: var(--spacing-md);
 }
 
 .workspaceButton {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  min-width: 0;
   padding: 8px 12px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
@@ -39,6 +42,27 @@
 .workspaceButton:hover {
   background: var(--color-bg-tertiary);
   border-color: var(--color-primary);
+}
+
+.refreshButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  transition: all 0.2s ease;
+}
+
+.refreshButton:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
 }
 
 .workspaceIcon {
@@ -63,6 +87,44 @@
   border-radius: var(--radius-md);
   height: 40px;
   font-weight: 500;
+}
+
+.sortSection {
+  display: flex;
+  gap: 8px;
+  margin-bottom: var(--spacing-md);
+}
+
+.sortButton {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  transition: all 0.2s ease;
+}
+
+.sortButton:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.sortButtonActive {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.sortButtonActive:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
 .content {

@@ -31,6 +31,11 @@ interface DraftDeleteRequest {
   id: string;
 }
 
+interface DraftCopyRequest {
+  id: string;
+  count: number;  // 复制份数
+}
+
 // ============================================
 // IPC Handlers
 // ============================================
@@ -154,6 +159,65 @@ export function registerDraftHandlers(): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to delete draft',
+        };
+      }
+    }
+  );
+
+  // Copy draft
+  ipcMain.handle(
+    DRAFT_CHANNELS.COPY,
+    async (_, request: DraftCopyRequest): Promise<OperationResult<Draft[]>> => {
+      try {
+        const existing = await storage.draft.get(request.id);
+        if (!existing) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        if (request.count < 1 || request.count > 20) {
+          return { success: false, error: 'Copy count must be between 1 and 20' };
+        }
+
+        // 获取所有草稿，找出已存在的同名后缀数字
+        const allDrafts = await storage.draft.list();
+        const baseName = existing.name;
+        const existingNames = new Set(allDrafts.map(d => d.name));
+
+        // 找出所有 baseName-数字 格式的草稿中最大的数字
+        const pattern = new RegExp(`^${baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(\\d+)$`);
+        let maxNumber = 0;
+        for (const draft of allDrafts) {
+          const match = draft.name.match(pattern);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (num > maxNumber) {
+              maxNumber = num;
+            }
+          }
+        }
+
+        // 从 maxNumber + 1 开始编号，跳过已存在的名称
+        const copiedDrafts: Draft[] = [];
+        let nextNumber = maxNumber + 1;
+        for (let i = 0; i < request.count; i++) {
+          // 找到下一个不重复的名称
+          let newName = `${baseName}-${nextNumber}`;
+          while (existingNames.has(newName)) {
+            nextNumber++;
+            newName = `${baseName}-${nextNumber}`;
+          }
+          existingNames.add(newName); // 防止本次复制中重复
+
+          const newDraft = await storage.draft.copy(request.id, newName);
+          copiedDrafts.push(newDraft);
+          nextNumber++;
+        }
+
+        return { success: true, data: copiedDrafts };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to copy draft',
         };
       }
     }

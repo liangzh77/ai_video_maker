@@ -10,6 +10,7 @@ export const DRAFT_CHANNELS = {
   CREATE: 'draft:create',
   UPDATE: 'draft:update',
   DELETE: 'draft:delete',
+  COPY: 'draft:copy',                   // 复制草稿
   CLEANUP_FILES: 'draft:cleanupFiles',  // 清理未被引用的文件
 } as const;
 

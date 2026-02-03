@@ -318,6 +318,77 @@ export async function deleteDraft(id: string): Promise<boolean> {
   }
 }
 
+/**
+ * 复制草稿
+ * @param sourceId 源草稿 ID
+ * @param newName 新草稿名称
+ * @returns 新创建的草稿
+ */
+export async function copyDraft(sourceId: string, newName: string): Promise<Draft> {
+  const sourceDraft = await getDraft(sourceId);
+  if (!sourceDraft) {
+    throw new Error('Source draft not found');
+  }
+
+  const newId = uuidv4();
+  const now = new Date().toISOString();
+  const sourcePath = getDraftPath(sourceId);
+  const targetPath = getDraftPath(newId);
+
+  // 递归复制整个草稿文件夹
+  await copyDirectory(sourcePath, targetPath);
+
+  // 更新新草稿的 meta.json
+  const newDraft: Draft = {
+    id: newId,
+    name: newName,
+    createdAt: now,
+    updatedAt: now,
+    storagePath: newId,
+  };
+  await writeJson(getMetaPath(newId), newDraft);
+
+  // 更新 resources.json 中的路径引用
+  const resourcesPath = getResourcesPath(newId);
+  const data = await readJson<{ resources: Resource[] }>(resourcesPath, { resources: [] });
+
+  // 更新每个资源的路径（将旧的 draftId 替换为新的）
+  data.resources = data.resources.map(resource => ({
+    ...resource,
+    id: uuidv4(), // 为资源生成新 ID
+    draftId: newId,
+    filePath: resource.filePath.replace(sourceId, newId),
+    thumbnailPath: resource.thumbnailPath?.replace(sourceId, newId),
+    createdAt: now,
+  }));
+  await writeJson(resourcesPath, data);
+
+  // 清空 tasks.json（任务不需要复制）
+  await writeJson(getTasksPath(newId), { tasks: [] });
+
+  console.log('[Storage] Copied draft:', sourceId, '->', newId);
+  return newDraft;
+}
+
+/**
+ * 递归复制目录
+ */
+async function copyDirectory(src: string, dest: string): Promise<void> {
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirectory(srcPath, destPath);
+    } else {
+      await fs.copyFile(srcPath, destPath);
+    }
+  }
+}
+
 // ============================================
 // Resource CRUD Operations
 // ============================================
@@ -640,6 +711,7 @@ export const storage = {
     create: createDraft,
     update: updateDraft,
     delete: deleteDraft,
+    copy: copyDraft,
   },
   resource: {
     list: listResources,

@@ -3,11 +3,12 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 // Type definitions for the exposed API
 export interface ElectronAPI {
   draft: {
-    list: (params?: { page?: number; pageSize?: number }) => Promise<any>;
+    list: (params?: { page?: number; pageSize?: number; sortBy?: 'name' | 'updatedAt'; sortOrder?: 'asc' | 'desc' }) => Promise<any>;
     get: (params: { id: string }) => Promise<any>;
     create: (params: { name: string }) => Promise<any>;
     update: (params: { id: string; name?: string }) => Promise<any>;
     delete: (params: { id: string }) => Promise<any>;
+    copy: (params: { id: string; count: number }) => Promise<any>;
     cleanupFiles: (params: { draftId: string }) => Promise<any>;
   };
   resource: {
@@ -59,6 +60,7 @@ const api: ElectronAPI = {
     create: (params) => ipcRenderer.invoke('draft:create', params),
     update: (params) => ipcRenderer.invoke('draft:update', params),
     delete: (params) => ipcRenderer.invoke('draft:delete', params),
+    copy: (params) => ipcRenderer.invoke('draft:copy', params),
     cleanupFiles: (params) => ipcRenderer.invoke('draft:cleanupFiles', params),
   },
   resource: {

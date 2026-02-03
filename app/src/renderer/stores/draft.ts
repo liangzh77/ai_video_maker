@@ -5,6 +5,31 @@ import type { Draft, Resource, ResourceType, OperationResult } from '@shared/typ
 // Types
 // ============================================
 
+export type DraftSortBy = 'name' | 'updatedAt';
+export type DraftSortOrder = 'asc' | 'desc';
+
+// 从 localStorage 读取排序设置
+const SORT_STORAGE_KEY = 'draft-sort-preference';
+function loadSortPreference(): { sortBy: DraftSortBy; sortOrder: DraftSortOrder } {
+  try {
+    const saved = localStorage.getItem(SORT_STORAGE_KEY);
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch {
+    // ignore
+  }
+  return { sortBy: 'updatedAt', sortOrder: 'desc' };
+}
+
+function saveSortPreference(sortBy: DraftSortBy, sortOrder: DraftSortOrder): void {
+  try {
+    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ sortBy, sortOrder }));
+  } catch {
+    // ignore
+  }
+}
+
 interface DraftState {
   // State
   drafts: Draft[];
@@ -13,6 +38,8 @@ interface DraftState {
   selectedResourceId: string | null;
   isLoading: boolean;
   error: string | null;
+  sortBy: DraftSortBy;
+  sortOrder: DraftSortOrder;
 
   // Draft Actions
   loadDrafts: () => Promise<void>;
@@ -20,6 +47,8 @@ interface DraftState {
   createDraft: (name: string) => Promise<Draft | null>;
   updateDraft: (id: string, name: string) => Promise<Draft | null>;
   deleteDraft: (id: string) => Promise<boolean>;
+  copyDraft: (id: string, count: number) => Promise<Draft[] | null>;
+  setSortBy: (sortBy: DraftSortBy) => Promise<void>;
 
   // Resource Actions
   loadResources: (draftId: string) => Promise<void>;
@@ -42,6 +71,8 @@ interface DraftState {
 // Store Implementation
 // ============================================
 
+const initialSort = loadSortPreference();
+
 export const useDraftStore = create<DraftState>((set, get) => ({
   // Initial State
   drafts: [],
@@ -50,16 +81,36 @@ export const useDraftStore = create<DraftState>((set, get) => ({
   selectedResourceId: null,
   isLoading: false,
   error: null,
+  sortBy: initialSort.sortBy,
+  sortOrder: initialSort.sortOrder,
 
   // Draft Actions
   loadDrafts: async () => {
+    const { sortBy, sortOrder } = get();
     set({ isLoading: true, error: null });
     try {
-      const result = await window.api.draft.list({ page: 1, pageSize: 100 });
+      const result = await window.api.draft.list({ page: 1, pageSize: 100, sortBy, sortOrder });
       set({ drafts: result.items || [], isLoading: false });
     } catch (err) {
       set({ error: (err as Error).message, isLoading: false });
     }
+  },
+
+  setSortBy: async (newSortBy: DraftSortBy) => {
+    const { sortBy: currentSortBy, sortOrder: currentSortOrder } = get();
+    let newSortOrder: DraftSortOrder;
+
+    if (newSortBy === currentSortBy) {
+      // 点击同一排序方式，切换顺序
+      newSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+      // 切换排序方式，使用默认顺序
+      newSortOrder = newSortBy === 'name' ? 'asc' : 'desc';
+    }
+
+    set({ sortBy: newSortBy, sortOrder: newSortOrder });
+    saveSortPreference(newSortBy, newSortOrder);
+    await get().loadDrafts();
   },
 
   selectDraft: async (id: string | null) => {
@@ -129,6 +180,22 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       return false;
     } catch {
       return false;
+    }
+  },
+
+  copyDraft: async (id: string, count: number) => {
+    try {
+      const result: OperationResult<Draft[]> = await window.api.draft.copy({ id, count });
+      if (result.success && result.data) {
+        // 将新复制的草稿添加到列表开头
+        set((state) => ({
+          drafts: [...result.data!, ...state.drafts],
+        }));
+        return result.data;
+      }
+      return null;
+    } catch {
+      return null;
     }
   },
 

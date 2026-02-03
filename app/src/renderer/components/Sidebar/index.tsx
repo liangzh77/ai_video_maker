@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Tooltip, App } from 'antd';
-import { PlusOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined } from '@ant-design/icons';
 import DraftList from './DraftList';
-import { useDraftStore } from '../../stores/draft';
+import { useDraftStore, type DraftSortBy } from '../../stores/draft';
 import styles from './Sidebar.module.css';
 
 interface WorkspaceInfo {
@@ -12,7 +12,7 @@ interface WorkspaceInfo {
 
 const Sidebar: React.FC = () => {
   const { message } = App.useApp();
-  const { createDraft, selectDraft, loadDrafts } = useDraftStore();
+  const { createDraft, selectDraft, loadDrafts, sortBy, sortOrder, setSortBy } = useDraftStore();
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
 
   // 加载工作目录信息
@@ -67,6 +67,12 @@ const Sidebar: React.FC = () => {
     return '.../' + parts.slice(-2).join('/');
   };
 
+  // 获取排序图标
+  const getSortIcon = (type: DraftSortBy) => {
+    if (sortBy !== type) return null;
+    return sortOrder === 'asc' ? <SortAscendingOutlined /> : <SortDescendingOutlined />;
+  };
+
   return (
     <div className={styles.sidebar}>
       <div className={styles.header}>
@@ -86,6 +92,18 @@ const Sidebar: React.FC = () => {
             </span>
           </button>
         </Tooltip>
+        <Tooltip title="刷新工作目录" placement="right">
+          <button
+            className={styles.refreshButton}
+            onClick={async () => {
+              await loadWorkspace();
+              await loadDrafts();
+              message.success('已刷新');
+            }}
+          >
+            <ReloadOutlined />
+          </button>
+        </Tooltip>
       </div>
 
       <div className={styles.actions}>
@@ -98,6 +116,29 @@ const Sidebar: React.FC = () => {
         >
           新建草稿
         </Button>
+      </div>
+
+      {/* 排序选择 */}
+      <div className={styles.sortSection}>
+        <Tooltip title={`按时间排序${sortBy === 'updatedAt' ? (sortOrder === 'desc' ? '（最新在前）' : '（最旧在前）') : ''}`}>
+          <button
+            className={`${styles.sortButton} ${sortBy === 'updatedAt' ? styles.sortButtonActive : ''}`}
+            onClick={() => setSortBy('updatedAt')}
+          >
+            <ClockCircleOutlined />
+            <span>时间</span>
+            {getSortIcon('updatedAt')}
+          </button>
+        </Tooltip>
+        <Tooltip title={`按名称排序${sortBy === 'name' ? (sortOrder === 'asc' ? '（A-Z）' : '（Z-A）') : ''}`}>
+          <button
+            className={`${styles.sortButton} ${sortBy === 'name' ? styles.sortButtonActive : ''}`}
+            onClick={() => setSortBy('name')}
+          >
+            <span>名称</span>
+            {getSortIcon('name')}
+          </button>
+        </Tooltip>
       </div>
 
       <div className={styles.content}>
