@@ -26,3 +26,26 @@
   color: var(--color-text-tertiary);
   font-size: 14px;
 }
+
+/* 全屏大图样式 */
+.fullscreenModal :global(.ant-modal-content) {
+  background-color: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.fullscreenModal :global(.ant-modal-close) {
+  color: #fff;
+}
+
+.fullscreenModal :global(.ant-modal-close:hover) {
+  color: #ccc;
+}
+
+.fullscreenImage {
+  max-width: 100%;
+  max-height: 85vh;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}

@@ -64,6 +64,7 @@ interface DraftState {
   // Computed
   getSelectedDraft: () => Draft | null;
   getSelectedResource: () => Resource | null;
+  getResourceById: (id: string) => Resource | null;
   getResourcesByType: (type: ResourceType) => Resource[];
 }
 
@@ -410,6 +411,11 @@ export const useDraftStore = create<DraftState>((set, get) => ({
   getSelectedResource: () => {
     const { resources, selectedResourceId } = get();
     return resources.find((r) => r.id === selectedResourceId) || null;
+  },
+
+  getResourceById: (id: string) => {
+    const { resources } = get();
+    return resources.find((r) => r.id === id) || null;
   },
 
   getResourcesByType: (type: ResourceType) => {

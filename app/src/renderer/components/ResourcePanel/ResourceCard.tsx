@@ -6,6 +6,7 @@ import { isVideoMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
 import { useSceneLinkStore } from '../../stores/sceneLink';
+import { useFullscreenPreviewStore } from '../../stores/fullscreenPreview';
 import styles from './ResourceCard.module.css';
 
 interface ResourceCardProps {
@@ -146,8 +147,9 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   onDragEnd,
 }) => {
   const { selectedResourceId, selectResource, deleteResource, getSelectedResource } = useDraftStore();
-  const { isPlaying, setShouldAutoPlay } = usePlaybackStore();
+  const { isPlaying, setShouldAutoPlay, startPlaying } = usePlaybackStore();
   const { getLinkedId, setLink } = useSceneLinkStore();
+  const { openFullscreen } = useFullscreenPreviewStore();
   const { message } = App.useApp();
   const isSelected = selectedResourceId === resource.id;
   const isVideo = resource.mimeType.startsWith('video/');
@@ -208,6 +210,18 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
       setShouldAutoPlay(true);
     }
     selectResource(resource.id);
+  };
+
+  // 双击处理 - 使用全局 store 打开全屏预览
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isImage) {
+      openFullscreen(resource.id, 'image', resource.type);
+    } else if (isVideo) {
+      // 通知其他播放器暂停
+      startPlaying('fullscreen');
+      openFullscreen(resource.id, 'video', resource.type);
+    }
   };
 
   const handleDelete = async (e: React.MouseEvent) => {
@@ -282,12 +296,14 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
     <div
       className={cardClassName}
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
+      title="双击放大查看"
     >
       <div className={styles.thumbnailWrapper}>
         {getThumbnail()}

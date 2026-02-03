@@ -5,7 +5,7 @@ export const CONTINUOUS_PLAY_TYPES = ['scene_source', 'scene_new', 'scene_hd', '
 export type ContinuousPlayType = (typeof CONTINUOUS_PLAY_TYPES)[number];
 
 // 播放器类型：用于区分不同的播放位置，实现互斥播放
-export type PlayerType = 'preview' | 'boundary-editor' | null;
+export type PlayerType = 'preview' | 'boundary-editor' | 'fullscreen' | null;
 
 interface PlaybackState {
   // 是否启用自动播放（下一个选中的视频自动播放）

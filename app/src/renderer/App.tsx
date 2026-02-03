@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar';
 import ResourcePanel from './components/ResourcePanel';
 import PreviewPanel from './components/PreviewPanel';
 import NotificationBar from './components/NotificationBar';
+import FullscreenPreviewModal from './components/FullscreenPreviewModal';
 import { useDraftStore } from './stores/draft';
 import styles from './App.module.css';
 
@@ -46,6 +47,7 @@ const App: React.FC = () => {
     <AntdApp>
       <AppContent />
       <NotificationBar />
+      <FullscreenPreviewModal />
     </AntdApp>
   );
 };

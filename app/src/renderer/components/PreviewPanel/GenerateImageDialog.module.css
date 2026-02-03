@@ -44,11 +44,11 @@
 
 .imageGrid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--spacing-md);
-  max-height: 240px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--spacing-lg);
+  max-height: 480px;
   overflow-y: auto;
-  padding: var(--spacing-xs);
+  padding: var(--spacing-sm);
 }
 
 .imageItem {

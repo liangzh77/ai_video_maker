@@ -16,13 +16,14 @@ import AnalyzeVideoDialog from './AnalyzeVideoDialog';
 import SplitPointEditorDialog from './SplitPointEditorDialog';
 import SceneBoundaryEditorDialog from './SceneBoundaryEditorDialog';
 import DualVideoPlayerDialog from './DualVideoPlayerDialog';
+import FullscreenVideoDialog from './FullscreenVideoDialog';
 import styles from './PreviewPanel.module.css';
 
 const PreviewPanel: React.FC = () => {
   const { message } = App.useApp();
   const { selectedDraftId, selectedResourceId, getSelectedResource, openResourceFolder, selectResource, getResourcesByType, loadResources } = useDraftStore();
   const { splitPoints, videoId, loadSplitPoints, clearPoints } = useSplitPointsStore();
-  const { shouldAutoPlay, setShouldAutoPlay, activePlayerType } = usePlaybackStore();
+  const { shouldAutoPlay, setShouldAutoPlay, activePlayerType, startPlaying } = usePlaybackStore();
   const { getCustomOrder, getLinkedId } = useSceneLinkStore();
   const selectedResource = getSelectedResource();
   const [splitDialogVisible, setSplitDialogVisible] = useState(false);
@@ -30,6 +31,7 @@ const PreviewPanel: React.FC = () => {
   const [editorDialogVisible, setEditorDialogVisible] = useState(false);
   const [boundaryEditorVisible, setBoundaryEditorVisible] = useState(false);
   const [dualPlayerVisible, setDualPlayerVisible] = useState(false);
+  const [fullscreenVideoVisible, setFullscreenVideoVisible] = useState(false);
   const videoPlayerRef = useRef<VideoPlayerRef>(null);
 
   // 获取按自定义排序的资源列表
@@ -155,8 +157,13 @@ const PreviewPanel: React.FC = () => {
   // 全局空格键播放/暂停（仅对支持连续播放的视频类型生效）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 如果有全屏播放器正在活动（包括 ResourceCard 的全屏视频），不响应空格键
+      if (activePlayerType === 'fullscreen') {
+        return;
+      }
+
       // 如果对话框打开，不响应空格键（由对话框自己处理）
-      if (dualPlayerVisible || boundaryEditorVisible || editorDialogVisible) {
+      if (dualPlayerVisible || boundaryEditorVisible || editorDialogVisible || fullscreenVideoVisible) {
         return;
       }
 
@@ -169,12 +176,9 @@ const PreviewPanel: React.FC = () => {
       // 只响应空格键
       if (e.code !== 'Space') return;
 
-      // 检查当前资源是否支持连续播放
+      // 检查当前资源是否是视频（所有视频都支持空格键控制）
       if (!selectedResource) return;
-      const isContinuousPlayable = selectedResource.mimeType.startsWith('video/') &&
-        CONTINUOUS_PLAY_TYPES.includes(selectedResource.type as typeof CONTINUOUS_PLAY_TYPES[number]);
-
-      if (!isContinuousPlayable) return;
+      if (!selectedResource.mimeType.startsWith('video/')) return;
 
       e.preventDefault();
       videoPlayerRef.current?.togglePlay();
@@ -184,7 +188,7 @@ const PreviewPanel: React.FC = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [selectedResource, dualPlayerVisible, boundaryEditorVisible, editorDialogVisible]);
+  }, [selectedResource, dualPlayerVisible, boundaryEditorVisible, editorDialogVisible, fullscreenVideoVisible, activePlayerType]);
 
   // Auto-load split points when selecting a source video
   useEffect(() => {
@@ -457,14 +461,23 @@ const PreviewPanel: React.FC = () => {
 
       <div className={styles.content}>
         {isVideo && (
-          <VideoPlayer
-            ref={videoPlayerRef}
-            src={getLocalFileUrl(selectedResource.filePath, selectedResource.fileSize)}
-            resource={selectedResource}
-            showSplitTimeline={isSourceVideo && hasSplitPoints}
-            onEnded={handleVideoEnded}
-            autoPlay={shouldAutoPlay && CONTINUOUS_PLAY_TYPES.includes(selectedResource.type as typeof CONTINUOUS_PLAY_TYPES[number])}
-          />
+          <div
+            onDoubleClick={() => {
+              videoPlayerRef.current?.pause();
+              startPlaying('fullscreen');
+              setFullscreenVideoVisible(true);
+            }}
+            title="双击放大播放"
+          >
+            <VideoPlayer
+              ref={videoPlayerRef}
+              src={getLocalFileUrl(selectedResource.filePath, selectedResource.fileSize)}
+              resource={selectedResource}
+              showSplitTimeline={isSourceVideo && hasSplitPoints}
+              onEnded={handleVideoEnded}
+              autoPlay={shouldAutoPlay && CONTINUOUS_PLAY_TYPES.includes(selectedResource.type as typeof CONTINUOUS_PLAY_TYPES[number])}
+            />
+          </div>
         )}
 
         {isImage && (
@@ -529,6 +542,16 @@ const PreviewPanel: React.FC = () => {
           sourceResource={dualPlayerResources.sourceResource}
           newResource={dualPlayerResources.newResource}
           onClose={() => setDualPlayerVisible(false)}
+        />
+      )}
+
+      {/* Fullscreen Video Dialog */}
+      {isVideo && (
+        <FullscreenVideoDialog
+          visible={fullscreenVideoVisible}
+          src={getLocalFileUrl(selectedResource.filePath, selectedResource.fileSize)}
+          resource={selectedResource}
+          onClose={() => setFullscreenVideoVisible(false)}
         />
       )}
     </div>

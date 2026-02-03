@@ -1,0 +1,157 @@
+.modal :global(.ant-modal-content) {
+  background-color: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.modal :global(.ant-modal-close) {
+  color: #fff;
+  z-index: 10;
+}
+
+.modal :global(.ant-modal-close:hover) {
+  color: #ccc;
+}
+
+/* 图片容器 */
+.imageContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+}
+
+.image {
+  max-width: 100%;
+  max-height: 85vh;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+
+/* 视频容器 */
+.videoContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #000;
+  max-height: 85vh;
+}
+
+.video {
+  max-width: 100%;
+  max-height: 80vh;
+  display: block;
+  cursor: pointer;
+}
+
+/* 提示文字 */
+.hint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  padding: 4px 12px;
+  background-color: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* 视频控制条 */
+.controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  padding: 40px 16px 16px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.controls.visible {
+  opacity: 1;
+}
+
+.progress {
+  margin-bottom: 8px;
+}
+
+.progressSlider {
+  margin: 0;
+}
+
+.progressSlider :global(.ant-slider-rail) {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.progressSlider :global(.ant-slider-track) {
+  background-color: var(--color-primary);
+}
+
+.progressSlider :global(.ant-slider-handle::after) {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.controlBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.leftControls,
+.rightControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.controlButton {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.controlButton:hover {
+  color: var(--color-primary);
+}
+
+.time {
+  color: #fff;
+  font-size: 13px;
+  font-family: monospace;
+}
+
+.volumeControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.volumeSlider {
+  width: 80px;
+  margin: 0;
+}
+
+.volumeSlider :global(.ant-slider-rail) {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.volumeSlider :global(.ant-slider-track) {
+  background-color: var(--color-primary);
+}
+
+.volumeSlider :global(.ant-slider-handle::after) {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}

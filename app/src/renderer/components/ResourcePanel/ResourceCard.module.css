@@ -177,3 +177,150 @@
   color: var(--color-text-tertiary);
   margin-top: 2px;
 }
+
+/* 全屏 Modal 样式 */
+.fullscreenModal :global(.ant-modal-content) {
+  background-color: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.fullscreenModal :global(.ant-modal-close) {
+  color: #fff;
+  z-index: 10;
+}
+
+.fullscreenModal :global(.ant-modal-close:hover) {
+  color: #ccc;
+}
+
+.fullscreenImage {
+  max-width: 100%;
+  max-height: 85vh;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+
+.fullscreenVideoContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #000;
+  max-height: 85vh;
+}
+
+.fullscreenVideo {
+  max-width: 100%;
+  max-height: 80vh;
+  display: block;
+  cursor: pointer;
+}
+
+.fullscreenHint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  padding: 4px 12px;
+  background-color: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.videoControls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  padding: 40px 16px 16px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.videoControls.visible {
+  opacity: 1;
+}
+
+.videoProgress {
+  margin-bottom: 8px;
+}
+
+.videoProgressSlider {
+  margin: 0;
+}
+
+.videoProgressSlider :global(.ant-slider-rail) {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.videoProgressSlider :global(.ant-slider-track) {
+  background-color: var(--color-primary);
+}
+
+.videoProgressSlider :global(.ant-slider-handle::after) {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.videoControlBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.videoLeftControls,
+.videoRightControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.videoControlButton {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.videoControlButton:hover {
+  color: var(--color-primary);
+}
+
+.videoTime {
+  color: #fff;
+  font-size: 13px;
+  font-family: monospace;
+}
+
+.videoVolumeControl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.videoVolumeSlider {
+  width: 80px;
+  margin: 0;
+}
+
+.videoVolumeSlider :global(.ant-slider-rail) {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.videoVolumeSlider :global(.ant-slider-track) {
+  background-color: var(--color-primary);
+}
+
+.videoVolumeSlider :global(.ant-slider-handle::after) {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}

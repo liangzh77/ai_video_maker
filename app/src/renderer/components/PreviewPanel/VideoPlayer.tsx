@@ -231,6 +231,10 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   // 空格键播放/暂停
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 如果全屏播放器正在活动，不响应空格键（避免与全屏播放器冲突）
+      if (activePlayerType === 'fullscreen') {
+        return;
+      }
       // 只在焦点在容器内或视频区域时响应
       if (e.code === 'Space' && containerRef.current?.contains(document.activeElement as Node)) {
         e.preventDefault();
@@ -251,7 +255,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         container.removeEventListener('keydown', handleKeyDown);
       }
     };
-  }, [togglePlay]);
+  }, [togglePlay, activePlayerType]);
 
   const toggleMute = useCallback(() => {
     const video = videoRef.current;

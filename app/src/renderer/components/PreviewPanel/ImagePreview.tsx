@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Modal } from 'antd';
 import type { Resource } from '@shared/types';
 import styles from './ImagePreview.module.css';
 
@@ -10,6 +11,7 @@ interface ImagePreviewProps {
 const ImagePreview: React.FC<ImagePreviewProps> = ({ src, resource }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const [fullscreenVisible, setFullscreenVisible] = useState(false);
 
   const handleLoad = () => {
     setIsLoading(false);
@@ -18,6 +20,12 @@ const ImagePreview: React.FC<ImagePreviewProps> = ({ src, resource }) => {
   const handleError = () => {
     setIsLoading(false);
     setHasError(true);
+  };
+
+  const handleDoubleClick = () => {
+    if (!hasError) {
+      setFullscreenVisible(true);
+    }
   };
 
   return (
@@ -35,9 +43,38 @@ const ImagePreview: React.FC<ImagePreviewProps> = ({ src, resource }) => {
           className={styles.image}
           onLoad={handleLoad}
           onError={handleError}
-          style={{ display: isLoading ? 'none' : 'block' }}
+          onDoubleClick={handleDoubleClick}
+          style={{ display: isLoading ? 'none' : 'block', cursor: 'pointer' }}
+          title="双击放大查看"
         />
       )}
+
+      {/* 大图预览 Modal */}
+      <Modal
+        open={fullscreenVisible}
+        onCancel={() => setFullscreenVisible(false)}
+        footer={null}
+        width="90vw"
+        centered
+        className={styles.fullscreenModal}
+        styles={{
+          body: {
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            maxHeight: '85vh',
+            overflow: 'auto',
+            backgroundColor: '#000',
+          },
+        }}
+      >
+        <img
+          src={src}
+          alt={resource.fileName}
+          className={styles.fullscreenImage}
+        />
+      </Modal>
     </div>
   );
 };

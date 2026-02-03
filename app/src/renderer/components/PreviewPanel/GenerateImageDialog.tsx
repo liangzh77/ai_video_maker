@@ -194,7 +194,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         loading: isGenerating,
       }}
       cancelButtonProps={{ disabled: isGenerating }}
-      width={600}
+      width={800}
     >
       <div className={styles.content}>
         {/* Model Selection */}
