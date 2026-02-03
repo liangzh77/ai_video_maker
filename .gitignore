@@ -55,3 +55,4 @@ tools/build/
 
 # Windows null device
 nul
+models.json
