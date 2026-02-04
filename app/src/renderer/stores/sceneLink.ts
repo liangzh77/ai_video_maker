@@ -7,11 +7,22 @@ import { create } from 'zustand';
  * - scene_source 和 scene_new 按索引一一对应
  * - 点击批量关联按钮时，按当前排序顺序重新建立关联
  * - 拖动调整顺序时，关联关系保持不变（基于资源 ID）
+ *
+ * 持久化：
+ * - 关联关系保存在 links.json 文件中
+ * - 切换草稿时自动加载
+ * - 修改关联时自动保存
  */
 
 // 支持拖动排序的资源类型
 export const SORTABLE_TYPES = ['scene_source', 'scene_new', 'scene_hd', 'lipsync'] as const;
 export type SortableType = typeof SORTABLE_TYPES[number];
+
+// Links 文件结构（与后端保持一致）
+interface LinksFile {
+  sourceToNew: Record<string, string>;
+  customOrder: Record<string, string[]>;
+}
 
 interface SceneLinkState {
   // 当前草稿 ID
@@ -55,6 +66,12 @@ interface SceneLinkState {
 
   // 移动资源到末尾
   moveToEnd: (type: SortableType, fromId: string) => void;
+
+  // 从后端加载关联关系
+  loadFromStorage: (draftId: string) => Promise<void>;
+
+  // 保存关联关系到后端
+  saveToStorage: () => Promise<void>;
 }
 
 export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
@@ -66,7 +83,7 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
   setDraftId: (draftId: string | null) => {
     const currentDraftId = get().draftId;
     if (currentDraftId !== draftId) {
-      // 切换草稿时清除关联和自定义排序
+      // 切换草稿时清除状态（实际数据由 loadFromStorage 加载）
       set({
         draftId,
         sourceToNewMap: new Map(),
@@ -88,6 +105,9 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     }
 
     set({ sourceToNewMap, newToSourceMap });
+
+    // 自动保存
+    get().saveToStorage();
   },
 
   getLinkedId: (resourceId: string, resourceType: 'scene_source' | 'scene_new') => {
@@ -105,6 +125,9 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
       sourceToNewMap: new Map(),
       newToSourceMap: new Map(),
     });
+
+    // 自动保存
+    get().saveToStorage();
   },
 
   setLink: (sourceId: string, newId: string) => {
@@ -134,12 +157,18 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
       sourceToNewMap: newSourceToNewMap,
       newToSourceMap: newNewToSourceMap,
     });
+
+    // 自动保存
+    get().saveToStorage();
   },
 
   setCustomOrder: (type: SortableType, orderedIds: string[]) => {
     const customOrder = new Map(get().customOrder);
     customOrder.set(type, [...orderedIds]);
     set({ customOrder });
+
+    // 自动保存
+    get().saveToStorage();
   },
 
   getCustomOrder: (type: SortableType) => {
@@ -155,6 +184,9 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     } else {
       set({ customOrder: new Map() });
     }
+
+    // 自动保存
+    get().saveToStorage();
   },
 
   moveOrder: (type: SortableType, fromId: string, toId: string) => {
@@ -177,6 +209,9 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     const newCustomOrder = new Map(customOrder);
     newCustomOrder.set(type, newOrder);
     set({ customOrder: newCustomOrder });
+
+    // 自动保存
+    get().saveToStorage();
   },
 
   moveToEnd: (type: SortableType, fromId: string) => {
@@ -198,6 +233,78 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     const newCustomOrder = new Map(customOrder);
     newCustomOrder.set(type, newOrder);
     set({ customOrder: newCustomOrder });
+
+    // 自动保存
+    get().saveToStorage();
+  },
+
+  // 从后端加载关联关系
+  loadFromStorage: async (draftId: string) => {
+    try {
+      const result = await window.api.links.load({ draftId });
+      if (result.success && result.data) {
+        const data = result.data as LinksFile;
+
+        // 转换 sourceToNew 对象为 Map
+        const sourceToNewMap = new Map<string, string>();
+        const newToSourceMap = new Map<string, string>();
+        for (const [sourceId, newId] of Object.entries(data.sourceToNew)) {
+          sourceToNewMap.set(sourceId, newId);
+          newToSourceMap.set(newId, sourceId);
+        }
+
+        // 转换 customOrder 对象为 Map
+        const customOrder = new Map<SortableType, string[]>();
+        for (const [type, ids] of Object.entries(data.customOrder)) {
+          if (SORTABLE_TYPES.includes(type as SortableType)) {
+            customOrder.set(type as SortableType, ids);
+          }
+        }
+
+        set({
+          draftId,
+          sourceToNewMap,
+          newToSourceMap,
+          customOrder,
+        });
+
+        console.log('[SceneLink] Loaded from storage:', {
+          links: sourceToNewMap.size,
+          customOrders: customOrder.size,
+        });
+      }
+    } catch (error) {
+      console.error('[SceneLink] Failed to load from storage:', error);
+    }
+  },
+
+  // 保存关联关系到后端
+  saveToStorage: async () => {
+    const { draftId, sourceToNewMap, customOrder } = get();
+    if (!draftId) return;
+
+    try {
+      // 转换 Map 为对象
+      const sourceToNew: Record<string, string> = {};
+      for (const [sourceId, newId] of sourceToNewMap.entries()) {
+        sourceToNew[sourceId] = newId;
+      }
+
+      const customOrderObj: Record<string, string[]> = {};
+      for (const [type, ids] of customOrder.entries()) {
+        customOrderObj[type] = ids;
+      }
+
+      const links: LinksFile = {
+        sourceToNew,
+        customOrder: customOrderObj,
+      };
+
+      await window.api.links.save({ draftId, links });
+      console.log('[SceneLink] Saved to storage');
+    } catch (error) {
+      console.error('[SceneLink] Failed to save to storage:', error);
+    }
   },
 }));
 

@@ -71,6 +71,14 @@ export const CONFIG_CHANNELS = {
 } as const;
 
 // ============================================
+// Links Channels (分镜关联关系)
+// ============================================
+export const LINKS_CHANNELS = {
+  LOAD: 'links:load',
+  SAVE: 'links:save',
+} as const;
+
+// ============================================
 // All Channels (for registration)
 // ============================================
 export const ALL_CHANNELS = {
@@ -79,6 +87,7 @@ export const ALL_CHANNELS = {
   ...TASK_CHANNELS,
   ...TASK_EVENTS,
   ...CONFIG_CHANNELS,
+  ...LINKS_CHANNELS,
 } as const;
 
 export type IpcChannel = (typeof ALL_CHANNELS)[keyof typeof ALL_CHANNELS];

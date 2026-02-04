@@ -580,6 +580,86 @@ export async function runVideoSynthesizer(
 }
 
 // ============================================
+// Image Generator
+// ============================================
+
+export interface ImageGenerateResult {
+  outputPath: string;
+  width: number;
+  height: number;
+  revisedPrompt?: string;
+}
+
+export async function runImageGenerator(
+  modelId: string,
+  sourcePath: string,
+  prompt: string,
+  resolution: '2K' | '4K',
+  outputPath: string,
+  onProgress?: (progress: number) => void,
+  appConfig?: AppConfig
+): Promise<ImageGenerateResult> {
+  let resultWidth = 0;
+  let resultHeight = 0;
+  let resultPath = outputPath;
+  let revisedPrompt: string | undefined;
+
+  const useExe = shouldUseExe();
+
+  let command: string;
+  let args: string[];
+
+  if (useExe) {
+    // TODO: 打包后使用 exe
+    command = getVideoToolsPath();
+    args = ['generate', '--model', modelId, '--source', sourcePath, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
+  } else {
+    command = getPythonPath(appConfig);
+    args = [path.join(getToolsPath(), 'image_generator.py'), '--model', modelId, '--source', sourcePath, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
+  }
+
+  console.log('[ImageGenerator] Starting with command:', command);
+  console.log('[ImageGenerator] Args:', args);
+
+  await runProcess({
+    command,
+    args,
+    onStdoutLine: (message: string) => {
+      console.log('[ImageGenerator]', message);
+
+      // Parse progress
+      const progress = parseProgress(message);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
+
+      // Parse output info
+      const sizeMatch = message.match(/Output size:\s*(\d+)x(\d+)/i);
+      if (sizeMatch) {
+        resultWidth = parseInt(sizeMatch[1], 10);
+        resultHeight = parseInt(sizeMatch[2], 10);
+      }
+
+      // Parse output path
+      const outputMatch = message.match(/Output:\s*(.+)/i);
+      if (outputMatch) {
+        resultPath = outputMatch[1].trim();
+      }
+    },
+    onStderrLine: (stderr: string) => {
+      console.log('[ImageGenerator stderr]', stderr);
+    },
+  });
+
+  return {
+    outputPath: resultPath,
+    width: resultWidth,
+    height: resultHeight,
+    revisedPrompt,
+  };
+}
+
+// ============================================
 // Exports
 // ============================================
 
@@ -588,6 +668,7 @@ export const pythonBridge = {
   splitVideo: runVideoSplitter,
   upscaleVideo: runVideoUpscaler,
   synthesizeVideo: runVideoSynthesizer,
+  generateImage: runImageGenerator,
 };
 
 export default pythonBridge;

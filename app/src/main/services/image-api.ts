@@ -7,6 +7,7 @@ import * as path from 'path';
 import axios, { AxiosError } from 'axios';
 import * as dotenv from 'dotenv';
 import { app } from 'electron';
+import type { ImageResolution } from '@shared/types';
 
 // Load environment variables
 function getEnvPath(): string {
@@ -183,6 +184,7 @@ interface ImageProvider {
   imageToImage(
     sourceImagePath: string,
     prompt: string,
+    resolution: ImageResolution,
     onProgress?: (progress: number) => void
   ): Promise<ImageGenerationResult>;
 }
@@ -212,11 +214,12 @@ class DoubaoProvider implements ImageProvider {
   async imageToImage(
     sourceImagePath: string,
     prompt: string,
+    resolution: ImageResolution = '2K',
     onProgress?: (progress: number) => void
   ): Promise<ImageGenerationResult> {
     this.validate();
 
-    console.log('[DoubaoProvider] Starting image-to-image');
+    console.log(`[DoubaoProvider] Starting image-to-image, resolution: ${resolution}`);
     onProgress?.(10);
 
     const refImageDataUri = await imageToDataUri(sourceImagePath);
@@ -225,7 +228,10 @@ class DoubaoProvider implements ImageProvider {
 
     onProgress?.(20);
 
-    const { width, height } = calculateOutputSize(refWidth, refHeight);
+    // 4K ≈ 3840x2160 = 8,294,400 像素, 2K ≈ 1920x1080 = 2,073,600 像素
+    // 但实际我们使用稍大一些的值以确保质量: 4K=8294400, 2K=3686400
+    const minPixels = resolution === '4K' ? 8294400 : 3686400;
+    const { width, height } = calculateOutputSize(refWidth, refHeight, minPixels);
     const sizeStr = `${width}x${height}`;
     console.log(`[DoubaoProvider] Output size: ${sizeStr}`);
 
@@ -318,11 +324,12 @@ class GeminiProvider implements ImageProvider {
   async imageToImage(
     sourceImagePath: string,
     prompt: string,
+    resolution: ImageResolution = '2K',
     onProgress?: (progress: number) => void
   ): Promise<ImageGenerationResult> {
     this.validate();
 
-    console.log('[GeminiProvider] Starting image-to-image');
+    console.log(`[GeminiProvider] Starting image-to-image, resolution: ${resolution}`);
     onProgress?.(10);
 
     const refImageBase64 = await imageToBase64(sourceImagePath);
@@ -334,6 +341,10 @@ class GeminiProvider implements ImageProvider {
 
     const url = `${this.baseUrl}/models/${this.model}:generateContent`;
 
+    // 在 prompt 中加入分辨率提示，因为 Gemini 图生图模式下 imageSize 参数可能被忽略
+    // 参考: https://discuss.ai.google.dev/t/gemini-3-pro-image-api-completely-ignores-imagesize-2k-parameter-node-js-sdk/110458
+    const enhancedPrompt = `${resolution} resolution. ${prompt}`;
+
     const requestData = {
       contents: [
         {
@@ -344,7 +355,7 @@ class GeminiProvider implements ImageProvider {
                 data: refImageBase64
               }
             },
-            { text: prompt }
+            { text: enhancedPrompt }
           ]
         }
       ],
@@ -352,7 +363,7 @@ class GeminiProvider implements ImageProvider {
         responseModalities: ["TEXT", "IMAGE"],
         imageConfig: {
           aspectRatio,
-          imageSize: "4K"
+          imageSize: resolution  // 直接使用 '4K' 或 '2K'
         }
       }
     };
@@ -451,18 +462,23 @@ class GeminiProxyProvider implements ImageProvider {
   async imageToImage(
     sourceImagePath: string,
     prompt: string,
+    resolution: ImageResolution = '2K',
     onProgress?: (progress: number) => void
   ): Promise<ImageGenerationResult> {
     this.validate();
 
-    console.log('[GeminiProxyProvider] Starting image-to-image');
+    console.log(`[GeminiProxyProvider] Starting image-to-image, resolution: ${resolution}`);
     onProgress?.(10);
 
     const refImageBase64 = await imageToBase64(sourceImagePath);
     const { width: refWidth, height: refHeight } = await getImageDimensions(sourceImagePath);
+    const aspectRatio = getClosestAspectRatio(refWidth, refHeight);
 
-    console.log(`[GeminiProxyProvider] Reference: ${refWidth}x${refHeight}`);
+    console.log(`[GeminiProxyProvider] Reference: ${refWidth}x${refHeight}, Aspect: ${aspectRatio}`);
     onProgress?.(20);
+
+    // 在 prompt 中加入宽高比和分辨率提示
+    const enhancedPrompt = `宽高比${aspectRatio}。${resolution}分辨率。${prompt}`;
 
     const url = `${this.baseUrl}/chat/completions`;
 
@@ -478,7 +494,7 @@ class GeminiProxyProvider implements ImageProvider {
                 url: `data:image/jpeg;base64,${refImageBase64}`
               }
             },
-            { type: "text", text: prompt }
+            { type: "text", text: enhancedPrompt }
           ]
         }
       ],
@@ -612,11 +628,12 @@ class OpenRouterProvider implements ImageProvider {
   async imageToImage(
     sourceImagePath: string,
     prompt: string,
+    resolution: ImageResolution = '2K',
     onProgress?: (progress: number) => void
   ): Promise<ImageGenerationResult> {
     this.validate();
 
-    console.log('[OpenRouterProvider] Starting image-to-image');
+    console.log(`[OpenRouterProvider] Starting image-to-image, resolution: ${resolution}`);
     onProgress?.(10);
 
     const refImageBase64 = await imageToBase64(sourceImagePath);
@@ -627,7 +644,7 @@ class OpenRouterProvider implements ImageProvider {
     onProgress?.(20);
 
     // 在 prompt 中加入宽高比和分辨率提示
-    const enhancedPrompt = `宽高比${aspectRatio}。4K分辨率。${prompt}`;
+    const enhancedPrompt = `宽高比${aspectRatio}。${resolution}分辨率。${prompt}`;
 
     const url = `${this.baseUrl}/chat/completions`;
 
@@ -887,18 +904,20 @@ export function getAvailableModels(): ModelInfo[] {
  * @param modelId 模型ID (格式: provider:endpoint)
  * @param sourceImagePath 源图片路径
  * @param prompt 提示词
+ * @param resolution 输出分辨率 ('4K' | '2K')，默认 '2K'
  * @param onProgress 进度回调
  */
 export async function imageToImage(
   modelId: string,
   sourceImagePath: string,
   prompt: string,
+  resolution: ImageResolution = '2K',
   onProgress?: (progress: number) => void
 ): Promise<ImageGenerationResult> {
-  console.log(`[ImageAPI] imageToImage: model=${modelId}`);
+  console.log(`[ImageAPI] imageToImage: model=${modelId}, resolution=${resolution}`);
 
   const provider = createProvider(modelId);
-  return provider.imageToImage(sourceImagePath, prompt, onProgress);
+  return provider.imageToImage(sourceImagePath, prompt, resolution, onProgress);
 }
 
 export default {

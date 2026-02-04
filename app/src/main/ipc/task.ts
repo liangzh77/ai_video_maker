@@ -13,7 +13,7 @@ const execAsync = promisify(exec);
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import imageApi from '../services/image-api';
-import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, getFFmpegPath } from '../services/python-bridge';
+import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, getFFmpegPath } from '../services/python-bridge';
 import storage from '../services/storage';
 import appConfigService from '../services/config';
 import type {
@@ -48,6 +48,7 @@ interface TaskGenerateImageRequest {
   sourceImageId: string;
   promptResourceId: string;
   modelEndpoint?: string;
+  resolution?: '4K' | '2K';
 }
 
 interface TaskCancelRequest {
@@ -141,34 +142,43 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
   }
   console.log('[TaskHandler] Using model:', modelId);
 
-  const result = await imageApi.imageToImage(
-    modelId,
-    sourceResource.filePath,
-    prompt,
-    (progress) => {
-      // Map API progress to 5-95
-      onProgress(5 + Math.floor(progress * 0.9));
-    }
-  );
+  // 使用配置的分辨率，默认 2K
+  const resolution = generateConfig.resolution || '2K';
+  console.log('[TaskHandler] Resolution:', resolution);
 
-  onProgress(95);
-
-  // 使用新的命名规范保存生成的图片
+  // 准备输出路径
   const sequenceNumber = await storage.getNextSequenceNumber(draftId, 'new_character');
   const filePath = storage.getResourceFilePath(draftId, 'new_character', '.png', sequenceNumber);
 
   // 确保目录存在
   await fs.mkdir(path.dirname(filePath), { recursive: true });
 
-  await fs.writeFile(filePath, result.imageData);
-  console.log('[TaskHandler] Image saved:', filePath);
+  // 调用 Python 图片生成工具
+  const result = await runImageGenerator(
+    modelId,
+    sourceResource.filePath,
+    prompt,
+    resolution,
+    filePath,
+    (progress) => {
+      // Map progress to 5-95
+      onProgress(5 + Math.floor(progress * 0.9));
+    }
+  );
+
+  onProgress(95);
+
+  console.log('[TaskHandler] Image saved:', result.outputPath);
+
+  // 获取生成文件的大小
+  const fileStats = await fs.stat(filePath);
 
   // Create new resource record
   const newResource = await storage.resource.add(draftId, {
     type: 'new_character',
     filePath,
     fileName: path.basename(filePath),
-    fileSize: result.imageData.length,
+    fileSize: fileStats.size,
     mimeType: 'image/png',
     metadata: {
       width: result.width,
@@ -608,6 +618,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           prompt,
           negativePrompt: undefined,
           modelEndpoint: request.modelEndpoint,
+          resolution: request.resolution || '2K',
         };
 
         // Add task to queue

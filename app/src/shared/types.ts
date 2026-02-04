@@ -156,10 +156,14 @@ export interface UpscaleConfig {
   interpolateFrames: boolean;
 }
 
+// 图片生成分辨率
+export type ImageResolution = '4K' | '2K';
+
 export interface GenerateConfig {
   prompt: string;
   negativePrompt?: string;
   modelEndpoint?: string;
+  resolution?: ImageResolution;  // 输出分辨率，默认 2K
 }
 
 export interface SynthesizeConfig {

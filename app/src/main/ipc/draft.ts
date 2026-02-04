@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
-import { DRAFT_CHANNELS } from '@shared/ipc-channels';
-import storage from '../services/storage';
+import { DRAFT_CHANNELS, LINKS_CHANNELS } from '@shared/ipc-channels';
+import storage, { LinksFile } from '../services/storage';
 import type { Draft, OperationResult, PaginatedResult } from '@shared/types';
 
 // ============================================
@@ -241,6 +241,52 @@ export function registerDraftHandlers(): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to cleanup files',
+        };
+      }
+    }
+  );
+
+  // ============================================
+  // Links IPC Handlers (分镜关联关系)
+  // ============================================
+
+  // Load links
+  ipcMain.handle(
+    LINKS_CHANNELS.LOAD,
+    async (_, request: { draftId: string }): Promise<OperationResult<LinksFile>> => {
+      try {
+        const existing = await storage.draft.get(request.draftId);
+        if (!existing) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        const links = await storage.links.load(request.draftId);
+        return { success: true, data: links };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to load links',
+        };
+      }
+    }
+  );
+
+  // Save links
+  ipcMain.handle(
+    LINKS_CHANNELS.SAVE,
+    async (_, request: { draftId: string; links: LinksFile }): Promise<OperationResult> => {
+      try {
+        const existing = await storage.draft.get(request.draftId);
+        if (!existing) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        await storage.links.save(request.draftId, request.links);
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to save links',
         };
       }
     }

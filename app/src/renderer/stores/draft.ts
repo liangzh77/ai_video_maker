@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Draft, Resource, ResourceType, OperationResult } from '@shared/types';
+import { useSceneLinkStore } from './sceneLink';
 
 // ============================================
 // Types
@@ -129,6 +130,12 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       }
 
       await get().loadResources(id);
+
+      // 加载分镜关联关系
+      await useSceneLinkStore.getState().loadFromStorage(id);
+    } else {
+      // 清空关联关系
+      useSceneLinkStore.getState().setDraftId(null);
     }
   },
 

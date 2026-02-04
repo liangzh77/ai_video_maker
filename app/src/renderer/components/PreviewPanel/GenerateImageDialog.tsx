@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Progress, App, Empty, Select } from 'antd';
+import { Modal, Progress, App, Empty, Select, Radio } from 'antd';
 import { CheckCircleFilled } from '@ant-design/icons';
-import type { Resource } from '@shared/types';
+import type { Resource, ImageResolution } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import styles from './GenerateImageDialog.module.css';
 
@@ -28,6 +28,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [selectedResolution, setSelectedResolution] = useState<ImageResolution>('2K');
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -158,6 +159,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         sourceImageId: selectedImageId,
         promptResourceId: promptResource.id,
         modelEndpoint: selectedModel,
+        resolution: selectedResolution,
       });
 
       if (!result.success) {
@@ -208,6 +210,19 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             className={styles.modelSelect}
             options={models.map((m) => ({ value: m.id, label: m.name }))}
           />
+        </div>
+
+        {/* Resolution Selection */}
+        <div className={styles.section}>
+          <div className={styles.sectionTitle}>分辨率</div>
+          <Radio.Group
+            value={selectedResolution}
+            onChange={(e) => setSelectedResolution(e.target.value)}
+            disabled={isGenerating}
+          >
+            <Radio value="2K">2K</Radio>
+            <Radio value="4K">4K</Radio>
+          </Radio.Group>
         </div>
 
         {/* Prompt Preview */}

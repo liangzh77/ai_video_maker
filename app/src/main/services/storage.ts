@@ -81,6 +81,10 @@ function getTasksPath(draftId: string): string {
   return path.join(getDraftPath(draftId), 'tasks.json');
 }
 
+function getLinksPath(draftId: string): string {
+  return path.join(getDraftPath(draftId), 'links.json');
+}
+
 function getThumbnailsPath(draftId: string): string {
   return path.join(getDraftPath(draftId), 'thumbnails');
 }
@@ -288,6 +292,7 @@ export async function createDraft(name: string): Promise<Draft> {
   await writeJson(getMetaPath(id), draft);
   await writeJson(getResourcesPath(id), { resources: [] });
   await writeJson(getTasksPath(id), { tasks: [] });
+  await writeJson(getLinksPath(id), DEFAULT_LINKS);
 
   return draft;
 }
@@ -365,6 +370,10 @@ export async function copyDraft(sourceId: string, newName: string): Promise<Draf
 
   // 清空 tasks.json（任务不需要复制）
   await writeJson(getTasksPath(newId), { tasks: [] });
+
+  // 复制 links.json（保持关联关系）
+  const sourceLinks = await loadLinks(sourceId);
+  await writeJson(getLinksPath(newId), sourceLinks);
 
   console.log('[Storage] Copied draft:', sourceId, '->', newId);
   return newDraft;
@@ -581,6 +590,41 @@ export async function updateTask(
 }
 
 // ============================================
+// Links CRUD Operations (分镜关联关系)
+// ============================================
+
+/**
+ * 关联关系数据结构
+ */
+export interface LinksFile {
+  // 分镜源视频 -> 分镜新视频 的关联映射
+  sourceToNew: Record<string, string>;
+  // 自定义排序：类型 -> 资源 ID 数组
+  customOrder: Record<string, string[]>;
+}
+
+const DEFAULT_LINKS: LinksFile = {
+  sourceToNew: {},
+  customOrder: {},
+};
+
+/**
+ * 加载关联关系
+ */
+export async function loadLinks(draftId: string): Promise<LinksFile> {
+  const linksPath = getLinksPath(draftId);
+  return await readJson<LinksFile>(linksPath, DEFAULT_LINKS);
+}
+
+/**
+ * 保存关联关系
+ */
+export async function saveLinks(draftId: string, links: LinksFile): Promise<void> {
+  const linksPath = getLinksPath(draftId);
+  await writeJson(linksPath, links);
+}
+
+// ============================================
 // File Cleanup
 // ============================================
 
@@ -725,6 +769,10 @@ export const storage = {
     get: getTask,
     add: addTask,
     update: updateTask,
+  },
+  links: {
+    load: loadLinks,
+    save: saveLinks,
   },
   splitPoints: {
     save: saveSplitPoints,

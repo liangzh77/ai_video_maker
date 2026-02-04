@@ -35,7 +35,7 @@ export interface ElectronAPI {
     splitVideoWithPoints: (params: { draftId: string; sourceVideoId: string; splitPoints: any[] }) => Promise<any>;
     resplitScene: (params: { draftId: string; sceneResourceId: string; newStartTime: number; newEndTime: number }) => Promise<any>;
     upscaleVideo: (params: { draftId: string; sourceVideoIds: string[]; config: any }) => Promise<any>;
-    generateImage: (params: { draftId: string; sourceImageId: string; promptResourceId: string; modelEndpoint: string }) => Promise<any>;
+    generateImage: (params: { draftId: string; sourceImageId: string; promptResourceId: string; modelEndpoint: string; resolution?: '4K' | '2K' }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
     extractAudio: (params: { draftId: string; videoResourceId: string }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
@@ -46,6 +46,10 @@ export interface ElectronAPI {
     getWorkspace: () => Promise<{ path: string; isDefault: boolean }>;
     setWorkspace: (params: { path: string }) => Promise<any>;
     selectWorkspace: () => Promise<any>;
+  };
+  links: {
+    load: (params: { draftId: string }) => Promise<any>;
+    save: (params: { draftId: string; links: { sourceToNew: Record<string, string>; customOrder: Record<string, string[]> } }) => Promise<any>;
   };
   on: (channel: string, callback: (event: IpcRendererEvent, ...args: any[]) => void) => () => void;
   off: (channel: string, callback: (...args: any[]) => void) => void;
@@ -98,6 +102,10 @@ const api: ElectronAPI = {
     getWorkspace: () => ipcRenderer.invoke('config:getWorkspace'),
     setWorkspace: (params) => ipcRenderer.invoke('config:setWorkspace', params),
     selectWorkspace: () => ipcRenderer.invoke('config:selectWorkspace'),
+  },
+  links: {
+    load: (params) => ipcRenderer.invoke('links:load', params),
+    save: (params) => ipcRenderer.invoke('links:save', params),
   },
   on: (channel, callback) => {
     ipcRenderer.on(channel, callback);
