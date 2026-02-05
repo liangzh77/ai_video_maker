@@ -27,6 +27,7 @@ export const RESOURCE_CHANNELS = {
   UPDATE: 'resource:update',
   DELETE: 'resource:delete',
   COPY: 'resource:copy',
+  REORDER: 'resource:reorder',              // 重新排序资源（通过重命名文件）
   OPEN_FOLDER: 'resource:openFolder',
   CAPTURE_FRAME: 'resource:captureFrame',
   DELETE_SPLIT_FOLDERS: 'resource:deleteSplitFolders',

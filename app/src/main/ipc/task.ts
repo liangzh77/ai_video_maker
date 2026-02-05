@@ -226,6 +226,30 @@ const upscaleVideoHandler: TaskHandler = async (task, onProgress) => {
   if (!outputDir) {
     throw new Error('Failed to get output directory for scene_hd');
   }
+
+  // 清空现有的高清分镜视频：先删除数据库记录，再删除文件
+  const existingHdResources = await storage.resource.list(draftId, 'scene_hd');
+  for (const resource of existingHdResources) {
+    await storage.resource.delete(draftId, resource.id);
+  }
+  if (existingHdResources.length > 0) {
+    console.log(`[TaskHandler] Deleted ${existingHdResources.length} existing scene_hd records`);
+  }
+
+  // 清空高清分镜视频文件夹
+  try {
+    const existingFiles = await fs.readdir(outputDir);
+    for (const file of existingFiles) {
+      const filePath = path.join(outputDir, file);
+      await fs.unlink(filePath);
+    }
+    if (existingFiles.length > 0) {
+      console.log(`[TaskHandler] Cleared ${existingFiles.length} existing files from scene_hd folder`);
+    }
+  } catch {
+    // 文件夹不存在，忽略
+  }
+
   await fs.mkdir(outputDir, { recursive: true });
 
   // Load app config for Python path

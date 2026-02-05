@@ -65,6 +65,12 @@ interface ResourceCopyRequest {
   targetDraftId?: string; // 目标草稿 ID（默认为原资源所在草稿）
 }
 
+interface ResourceReorderRequest {
+  draftId: string;
+  type: ResourceType;
+  orderedIds: string[]; // 按新顺序排列的资源 ID 数组
+}
+
 // ============================================
 // Helper Functions
 // ============================================
@@ -481,7 +487,14 @@ export function registerResourceHandlers(): void {
         // Copy the resource file to a new location
         const ext = path.extname(foundResource.filePath);
         const sequenceNumber = await storage.getNextSequenceNumber(targetDraftId, targetType);
-        const newFilePath = storage.getResourceFilePath(targetDraftId, targetType, ext, sequenceNumber);
+
+        // 获取原始文件名（去掉序号前缀）用于新文件
+        const originalName = storage.getOriginalNameFromFileName(foundResource.fileName);
+        const newFileName = storage.makeSequencedFileName(sequenceNumber, originalName, ext);
+        const folderPath = storage.getResourceFolderPath(targetDraftId, targetType);
+        const newFilePath = folderPath
+          ? path.join(folderPath, newFileName)
+          : storage.getResourceFilePath(targetDraftId, targetType, ext, sequenceNumber);
 
         // Ensure directory exists
         await fs.mkdir(path.dirname(newFilePath), { recursive: true });
@@ -514,6 +527,36 @@ export function registerResourceHandlers(): void {
     }
   );
 
+  // Reorder resources (rename files to change order)
+  ipcMain.handle(
+    RESOURCE_CHANNELS.REORDER,
+    async (_, request: ResourceReorderRequest): Promise<OperationResult<Resource[]>> => {
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Reorder the resources by renaming files
+        const updatedResources = await storage.reorderResourceFiles(
+          request.draftId,
+          request.type,
+          request.orderedIds
+        );
+
+        console.log('[Resource] Reordered', updatedResources.length, 'resources of type', request.type);
+        return { success: true, data: updatedResources };
+      } catch (error) {
+        console.error('[Resource] Reorder failed:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to reorder resources',
+        };
+      }
+    }
+  );
+
   // Delete resource
   ipcMain.handle(
     RESOURCE_CHANNELS.DELETE,
@@ -537,6 +580,8 @@ export function registerResourceHandlers(): void {
           return { success: false, error: 'RESOURCE_NOT_FOUND' };
         }
 
+        const resourceType = foundResource.type;
+
         // Delete the file from storage if it exists in the files directory
         const filesDir = storage.getFilesPath(foundDraftId);
         if (foundResource.filePath.startsWith(filesDir)) {
@@ -550,6 +595,14 @@ export function registerResourceHandlers(): void {
         const deleted = await storage.resource.delete(foundDraftId, request.id);
         if (!deleted) {
           return { success: false, error: 'Failed to delete resource' };
+        }
+
+        // 删除后重新整理同类型资源的序号
+        try {
+          await storage.renumberResourceFiles(foundDraftId, resourceType);
+        } catch (err) {
+          console.warn('[Resource] Failed to renumber after delete:', err);
+          // 不影响删除操作的成功返回
         }
 
         return { success: true };

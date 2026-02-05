@@ -12,16 +12,13 @@ import { create } from 'zustand';
  * - 关联关系保存在 links.json 文件中
  * - 切换草稿时自动加载
  * - 修改关联时自动保存
+ *
+ * 注意：排序功能已迁移到文件名序号实现，不再使用 customOrder
  */
-
-// 支持拖动排序的资源类型
-export const SORTABLE_TYPES = ['scene_source', 'scene_new', 'scene_hd', 'lipsync'] as const;
-export type SortableType = typeof SORTABLE_TYPES[number];
 
 // Links 文件结构（与后端保持一致）
 interface LinksFile {
   sourceToNew: Record<string, string>;
-  customOrder: Record<string, string[]>;
 }
 
 interface SceneLinkState {
@@ -33,9 +30,6 @@ interface SceneLinkState {
 
   // 反向映射：scene_new ID -> scene_source ID
   newToSourceMap: Map<string, string>;
-
-  // 自定义排序：类型 -> 资源 ID 数组（按显示顺序）
-  customOrder: Map<SortableType, string[]>;
 
   // 设置当前草稿
   setDraftId: (draftId: string | null) => void;
@@ -52,21 +46,6 @@ interface SceneLinkState {
   // 设置单个关联（用于手动关联）
   setLink: (sourceId: string, newId: string) => void;
 
-  // 设置自定义排序
-  setCustomOrder: (type: SortableType, orderedIds: string[]) => void;
-
-  // 获取自定义排序（如果存在）
-  getCustomOrder: (type: SortableType) => string[] | null;
-
-  // 清除自定义排序
-  clearCustomOrder: (type?: SortableType) => void;
-
-  // 移动资源到目标位置前面
-  moveOrder: (type: SortableType, fromId: string, toId: string) => void;
-
-  // 移动资源到末尾
-  moveToEnd: (type: SortableType, fromId: string) => void;
-
   // 从后端加载关联关系
   loadFromStorage: (draftId: string) => Promise<void>;
 
@@ -78,7 +57,6 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
   draftId: null,
   sourceToNewMap: new Map(),
   newToSourceMap: new Map(),
-  customOrder: new Map(),
 
   setDraftId: (draftId: string | null) => {
     const currentDraftId = get().draftId;
@@ -88,7 +66,6 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
         draftId,
         sourceToNewMap: new Map(),
         newToSourceMap: new Map(),
-        customOrder: new Map(),
       });
     }
   },
@@ -162,82 +139,6 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     get().saveToStorage();
   },
 
-  setCustomOrder: (type: SortableType, orderedIds: string[]) => {
-    const customOrder = new Map(get().customOrder);
-    customOrder.set(type, [...orderedIds]);
-    set({ customOrder });
-
-    // 自动保存
-    get().saveToStorage();
-  },
-
-  getCustomOrder: (type: SortableType) => {
-    const order = get().customOrder.get(type);
-    return order ? [...order] : null;
-  },
-
-  clearCustomOrder: (type?: SortableType) => {
-    if (type) {
-      const customOrder = new Map(get().customOrder);
-      customOrder.delete(type);
-      set({ customOrder });
-    } else {
-      set({ customOrder: new Map() });
-    }
-
-    // 自动保存
-    get().saveToStorage();
-  },
-
-  moveOrder: (type: SortableType, fromId: string, toId: string) => {
-    const { customOrder } = get();
-    const currentOrder = customOrder.get(type);
-    if (!currentOrder) return;
-
-    const fromIndex = currentOrder.indexOf(fromId);
-    const toIndex = currentOrder.indexOf(toId);
-    if (fromIndex === -1 || toIndex === -1) return;
-
-    // 移动到目标位置前面：先移除，再插入
-    const newOrder = [...currentOrder];
-    newOrder.splice(fromIndex, 1); // 移除被拖拽的元素
-
-    // 计算插入位置：如果原位置在目标前面，目标索引需要减1
-    const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
-    newOrder.splice(insertIndex, 0, fromId); // 插入到目标位置前面
-
-    const newCustomOrder = new Map(customOrder);
-    newCustomOrder.set(type, newOrder);
-    set({ customOrder: newCustomOrder });
-
-    // 自动保存
-    get().saveToStorage();
-  },
-
-  moveToEnd: (type: SortableType, fromId: string) => {
-    const { customOrder } = get();
-    const currentOrder = customOrder.get(type);
-    if (!currentOrder) return;
-
-    const fromIndex = currentOrder.indexOf(fromId);
-    if (fromIndex === -1) return;
-
-    // 已经在末尾，不需要移动
-    if (fromIndex === currentOrder.length - 1) return;
-
-    // 移动到末尾：先移除，再添加到末尾
-    const newOrder = [...currentOrder];
-    newOrder.splice(fromIndex, 1);
-    newOrder.push(fromId);
-
-    const newCustomOrder = new Map(customOrder);
-    newCustomOrder.set(type, newOrder);
-    set({ customOrder: newCustomOrder });
-
-    // 自动保存
-    get().saveToStorage();
-  },
-
   // 从后端加载关联关系
   loadFromStorage: async (draftId: string) => {
     try {
@@ -253,24 +154,14 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
           newToSourceMap.set(newId, sourceId);
         }
 
-        // 转换 customOrder 对象为 Map
-        const customOrder = new Map<SortableType, string[]>();
-        for (const [type, ids] of Object.entries(data.customOrder)) {
-          if (SORTABLE_TYPES.includes(type as SortableType)) {
-            customOrder.set(type as SortableType, ids);
-          }
-        }
-
         set({
           draftId,
           sourceToNewMap,
           newToSourceMap,
-          customOrder,
         });
 
         console.log('[SceneLink] Loaded from storage:', {
           links: sourceToNewMap.size,
-          customOrders: customOrder.size,
         });
       }
     } catch (error) {
@@ -280,7 +171,7 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
 
   // 保存关联关系到后端
   saveToStorage: async () => {
-    const { draftId, sourceToNewMap, customOrder } = get();
+    const { draftId, sourceToNewMap } = get();
     if (!draftId) return;
 
     try {
@@ -290,14 +181,8 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
         sourceToNew[sourceId] = newId;
       }
 
-      const customOrderObj: Record<string, string[]> = {};
-      for (const [type, ids] of customOrder.entries()) {
-        customOrderObj[type] = ids;
-      }
-
       const links: LinksFile = {
         sourceToNew,
-        customOrder: customOrderObj,
       };
 
       await window.api.links.save({ draftId, links });

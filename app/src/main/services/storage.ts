@@ -181,10 +181,10 @@ export async function getNextSequenceNumber(draftId: string, resourceType: Resou
     await fs.mkdir(folderPath, { recursive: true });
     const entries = await fs.readdir(folderPath);
 
-    // 提取现有文件的序号
+    // 提取现有文件的序号（支持 001.mp4 和 001_name.mp4 两种格式）
     const numbers = entries
       .map(name => {
-        const match = name.match(/^(\d+)\./);
+        const match = name.match(/^(\d+)(?:_|\.)/);
         return match ? parseInt(match[1], 10) : 0;
       })
       .filter(n => n > 0);
@@ -197,6 +197,165 @@ export async function getNextSequenceNumber(draftId: string, resourceType: Resou
   } catch {
     return 1;
   }
+}
+
+// ============================================
+// 文件序号命名相关函数
+// ============================================
+
+/**
+ * 从文件名中提取序号
+ * 支持格式：001.mp4, 001_name.mp4
+ * @returns 序号，如果没有序号则返回 0
+ */
+export function getSequenceFromFileName(fileName: string): number {
+  const match = fileName.match(/^(\d+)(?:_|\.)/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+/**
+ * 从文件名中提取原始文件名（去掉序号前缀）
+ * 001_scene1.mp4 -> scene1
+ * 001.mp4 -> (empty string)
+ */
+export function getOriginalNameFromFileName(fileName: string): string {
+  const ext = path.extname(fileName);
+  const baseName = path.basename(fileName, ext);
+  const match = baseName.match(/^\d+_(.+)$/);
+  return match ? match[1] : '';
+}
+
+/**
+ * 生成带序号的文件名
+ * @param sequence 序号（1-999）
+ * @param originalName 原始文件名（不含扩展名，可以为空）
+ * @param ext 扩展名（包含点号，如 ".mp4"）
+ */
+export function makeSequencedFileName(sequence: number, originalName: string, ext: string): string {
+  const seqStr = sequence.toString().padStart(3, '0');
+  if (originalName) {
+    return `${seqStr}_${originalName}${ext}`;
+  }
+  return `${seqStr}${ext}`;
+}
+
+/**
+ * 重新排序指定类型的所有资源文件
+ * 通过重命名文件来实现排序
+ * @param draftId 草稿ID
+ * @param resourceType 资源类型
+ * @param orderedResourceIds 按新顺序排列的资源ID数组
+ * @returns 更新后的资源列表
+ */
+export async function reorderResourceFiles(
+  draftId: string,
+  resourceType: ResourceType,
+  orderedResourceIds: string[]
+): Promise<Resource[]> {
+  const resourcesPath = getResourcesPath(draftId);
+  const data = await readJson<ResourcesFile>(resourcesPath, { resources: [] });
+
+  // 获取要重排序的资源
+  const targetResources = data.resources.filter(
+    r => r.type === resourceType && orderedResourceIds.includes(r.id)
+  );
+
+  // 按新顺序排序
+  const sortedResources = orderedResourceIds
+    .map(id => targetResources.find(r => r.id === id))
+    .filter((r): r is Resource => r !== undefined);
+
+  if (sortedResources.length === 0) {
+    return [];
+  }
+
+  const folderPath = getResourceFolderPath(draftId, resourceType);
+  if (!folderPath) {
+    return sortedResources;
+  }
+
+  // 第一步：将所有文件重命名为临时名称，避免冲突
+  const tempRenames: Array<{ resource: Resource; tempPath: string }> = [];
+  for (const resource of sortedResources) {
+    const ext = path.extname(resource.filePath);
+    const tempFileName = `_temp_${uuidv4()}${ext}`;
+    const tempPath = path.join(folderPath, tempFileName);
+
+    try {
+      await fs.rename(resource.filePath, tempPath);
+      tempRenames.push({ resource, tempPath });
+    } catch (err) {
+      console.error('[Storage] Failed to rename to temp:', resource.filePath, err);
+      // 回滚已重命名的文件
+      for (const { resource: r, tempPath: tp } of tempRenames) {
+        try {
+          await fs.rename(tp, r.filePath);
+        } catch {
+          // 忽略回滚失败
+        }
+      }
+      throw err;
+    }
+  }
+
+  // 第二步：按新顺序重命名为最终名称
+  const updatedResources: Resource[] = [];
+  for (let i = 0; i < tempRenames.length; i++) {
+    const { resource, tempPath } = tempRenames[i];
+    const newSequence = i + 1;
+    const ext = path.extname(resource.filePath);
+    const originalName = getOriginalNameFromFileName(resource.fileName);
+    const newFileName = makeSequencedFileName(newSequence, originalName, ext);
+    const newPath = path.join(folderPath, newFileName);
+
+    try {
+      await fs.rename(tempPath, newPath);
+
+      // 更新资源记录
+      const resourceIndex = data.resources.findIndex(r => r.id === resource.id);
+      if (resourceIndex !== -1) {
+        data.resources[resourceIndex] = {
+          ...data.resources[resourceIndex],
+          filePath: newPath,
+          fileName: newFileName,
+        };
+        updatedResources.push(data.resources[resourceIndex]);
+      }
+    } catch (err) {
+      console.error('[Storage] Failed to rename to final:', tempPath, '->', newPath, err);
+      throw err;
+    }
+  }
+
+  // 保存更新后的资源记录
+  await writeJson(resourcesPath, data);
+  await updateDraft(draftId, {});
+
+  console.log('[Storage] Reordered', updatedResources.length, 'resources of type', resourceType);
+  return updatedResources;
+}
+
+/**
+ * 删除资源后重新整理序号
+ * @param draftId 草稿ID
+ * @param resourceType 资源类型
+ */
+export async function renumberResourceFiles(
+  draftId: string,
+  resourceType: ResourceType
+): Promise<void> {
+  const resources = await listResources(draftId, resourceType);
+  if (resources.length === 0) {
+    return;
+  }
+
+  // 按当前文件名排序
+  const sorted = [...resources].sort((a, b) =>
+    a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true })
+  );
+
+  // 重新排序
+  await reorderResourceFiles(draftId, resourceType, sorted.map(r => r.id));
 }
 
 // ============================================
@@ -595,17 +754,15 @@ export async function updateTask(
 
 /**
  * 关联关系数据结构
+ * 注意：customOrder 已废弃，排序现在通过文件名序号实现
  */
 export interface LinksFile {
   // 分镜源视频 -> 分镜新视频 的关联映射
   sourceToNew: Record<string, string>;
-  // 自定义排序：类型 -> 资源 ID 数组
-  customOrder: Record<string, string[]>;
 }
 
 const DEFAULT_LINKS: LinksFile = {
   sourceToNew: {},
-  customOrder: {},
 };
 
 /**
@@ -749,6 +906,12 @@ export const storage = {
   getResourceFolderPath,
   getNextSequenceNumber,
   cleanupOrphanedFiles,
+  // 文件序号命名相关
+  getSequenceFromFileName,
+  getOriginalNameFromFileName,
+  makeSequencedFileName,
+  reorderResourceFiles,
+  renumberResourceFiles,
   draft: {
     list: listDrafts,
     get: getDraft,

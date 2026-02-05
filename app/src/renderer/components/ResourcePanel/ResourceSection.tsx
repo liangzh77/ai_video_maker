@@ -1,9 +1,12 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Empty, App, Popconfirm, Tooltip } from 'antd';
 import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined, ThunderboltOutlined, MergeCellsOutlined, HolderOutlined } from '@ant-design/icons';
 import type { Resource, ResourceType, UpscaleConfig, SynthesizeConfig } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
-import { useSceneLinkStore, SORTABLE_TYPES, type SortableType } from '../../stores/sceneLink';
+import { useSceneLinkStore } from '../../stores/sceneLink';
+
+// 支持拖动排序的资源类型（通过重命名文件实现）
+const SORTABLE_TYPES: ResourceType[] = ['scene_source', 'scene_new', 'scene_hd', 'lipsync', 'source_character', 'new_character', 'prompt'];
 
 // 支持拖拽复制的资源类型（所有非文本类型）
 const DRAGGABLE_TYPES: ResourceType[] = ['source_video', 'source_character', 'new_character', 'scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized'];
@@ -103,8 +106,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [synthesizeProgress, setSynthesizeProgress] = useState(0);
   const [synthesizeTaskId, setSynthesizeTaskId] = useState<string | null>(null);
-  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType, loadResources, copyResource } = useDraftStore();
-  const { batchLink, getCustomOrder, setCustomOrder, moveOrder, moveToEnd, customOrder } = useSceneLinkStore();
+  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType, loadResources, copyResource, reorderResource, clearLocalResourcesByType } = useDraftStore();
+  const { batchLink } = useSceneLinkStore();
   const { message } = App.useApp();
 
   const canDrop = !!acceptFormats && acceptFormats.length > 0;
@@ -118,26 +121,9 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   // 只有 lipsync 才显示合成按钮
   const canSynthesize = type === 'lipsync' && resources.length > 0;
   // 是否支持拖动排序
-  const isSortable = SORTABLE_TYPES.includes(type as SortableType);
+  const isSortable = SORTABLE_TYPES.includes(type);
   // 是否支持拖拽复制（所有非文本类型都支持）
   const isDraggable = DRAGGABLE_TYPES.includes(type);
-
-  // 初始化自定义排序（当资源列表变化时）
-  useEffect(() => {
-    if (!isSortable || resources.length === 0) return;
-
-    const currentOrder = getCustomOrder(type as SortableType);
-    const resourceIds = resources.map((r) => r.id);
-
-    // 如果没有自定义排序或资源列表变化（有新增/删除），重新初始化
-    if (!currentOrder || currentOrder.length !== resourceIds.length) {
-      // 保留已有的顺序，添加新资源到末尾
-      const newOrder = currentOrder
-        ? [...currentOrder.filter((id) => resourceIds.includes(id)), ...resourceIds.filter((id) => !currentOrder.includes(id))]
-        : resourceIds;
-      setCustomOrder(type as SortableType, newOrder);
-    }
-  }, [isSortable, type, resources, getCustomOrder, setCustomOrder]);
 
   // 监听任务进度和完成事件
   useEffect(() => {
@@ -224,31 +210,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     };
   }, [synthesizeTaskId, selectedDraftId, loadResources, message]);
 
-  // 获取排序后的资源列表
-  // 注意：依赖 customOrder 状态而不只是 getCustomOrder 函数，确保状态变化时重新计算
-  const sortedResources = useMemo(() => {
-    if (!isSortable) return resources;
-
-    const order = customOrder.get(type as SortableType);
-    if (!order) return resources;
-
-    // 根据自定义排序重新排列资源
-    const resourceMap = new Map(resources.map((r) => [r.id, r]));
-    const sorted: Resource[] = [];
-    for (const id of order) {
-      const resource = resourceMap.get(id);
-      if (resource) {
-        sorted.push(resource);
-      }
-    }
-    // 添加不在排序中的资源（理论上不应该发生）
-    for (const resource of resources) {
-      if (!order.includes(resource.id)) {
-        sorted.push(resource);
-      }
-    }
-    return sorted;
-  }, [isSortable, type, resources, customOrder]);
+  // 资源列表已经按文件名排序（由 getResourcesByType 实现）
+  // 直接使用 resources 即可
 
   const handleClearAll = async () => {
     setIsClearing(true);
@@ -268,7 +231,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   };
 
   const handleBatchLink = () => {
-    // 获取 scene_source 和 scene_new 资源列表
+    // 获取 scene_source 和 scene_new 资源列表（已按文件名排序）
     const sceneSourceResources = getResourcesByType('scene_source');
     const sceneNewResources = getResourcesByType('scene_new');
 
@@ -277,17 +240,9 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       return;
     }
 
-    // 使用自定义排序（如果存在），否则使用默认排序
-    const sourceOrder = getCustomOrder('scene_source');
-    const newOrder = getCustomOrder('scene_new');
-
-    // 按自定义排序获取 ID 列表
-    const sortedSourceIds = sourceOrder
-      ? sourceOrder.filter((id) => sceneSourceResources.some((r) => r.id === id))
-      : sceneSourceResources.map((r) => r.id);
-    const sortedNewIds = newOrder
-      ? newOrder.filter((id) => sceneNewResources.some((r) => r.id === id))
-      : sceneNewResources.map((r) => r.id);
+    // 资源已按文件名排序，直接使用
+    const sortedSourceIds = sceneSourceResources.map((r) => r.id);
+    const sortedNewIds = sceneNewResources.map((r) => r.id);
 
     batchLink(sortedSourceIds, sortedNewIds);
 
@@ -303,8 +258,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     setUpscaleProgress(0);
 
     try {
-      // 获取排序后的资源 ID 列表
-      const videoIds = sortedResources.map((r) => r.id);
+      // 获取排序后的资源 ID 列表（resources 已按文件名排序）
+      const videoIds = resources.map((r) => r.id);
 
       const result = await window.api.task.upscaleVideo({
         draftId: selectedDraftId,
@@ -315,6 +270,10 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       if (result.success && result.data) {
         // 保存任务 ID 用于监听进度
         setUpscaleTaskId(result.data.id);
+
+        // 立即从前端状态中移除 scene_hd 资源
+        // 因为后端会在任务开始时删除这些资源，这样可以避免在任务完成后出现重复卡片
+        clearLocalResourcesByType('scene_hd');
       } else {
         message.error(result.error || '启动高清化任务失败');
         setIsUpscaling(false);
@@ -336,8 +295,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     setSynthesizeProgress(0);
 
     try {
-      // 获取排序后的资源 ID 列表
-      const videoIds = sortedResources.map((r) => r.id);
+      // 获取排序后的资源 ID 列表（resources 已按文件名排序）
+      const videoIds = resources.map((r) => r.id);
 
       const result = await window.api.task.synthesizeVideo({
         draftId: selectedDraftId,
@@ -429,11 +388,11 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     if (!fromId || !isDraggable) return;
 
-    // 同区域拖拽 -> 调整顺序
+    // 同区域拖拽 -> 调整顺序（通过重命名文件）
     if (fromType === type) {
       if (fromId === targetId) return; // 拖到自己身上，忽略
       if (isSortable) {
-        moveOrder(type as SortableType, fromId, targetId);
+        await reorderResource(type, fromId, targetId);
       }
       return;
     }
@@ -452,7 +411,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     } else {
       message.error('复制失败');
     }
-  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, moveOrder]);
+  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource]);
 
   const handleCardDragEnd = useCallback(() => {
     setDragOverCardId(null);
@@ -489,10 +448,10 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     if (!fromId || !isDraggable) return;
 
-    // 同区域拖拽 -> 移动到末尾
+    // 同区域拖拽 -> 移动到末尾（toId 为 null）
     if (fromType === type) {
       if (isSortable) {
-        moveToEnd(type as SortableType, fromId);
+        await reorderResource(type, fromId, null);
       }
       return;
     }
@@ -511,7 +470,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     } else {
       message.error('复制失败');
     }
-  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, moveToEnd]);
+  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource]);
 
   // 处理拖拽到 grid 空白区域（最后一个卡片右边）
   const handleGridDragOver = useCallback((e: React.DragEvent) => {
@@ -535,10 +494,10 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     setDragOverCardId(null);
     setDraggingCardId(null);
 
-    // 同区域拖拽 -> 移动到末尾
+    // 同区域拖拽 -> 移动到末尾（toId 为 null）
     if (fromType === type) {
       if (isSortable) {
-        moveToEnd(type as SortableType, fromId);
+        await reorderResource(type, fromId, null);
       }
       return;
     }
@@ -557,7 +516,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     } else {
       message.error('复制失败');
     }
-  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, moveToEnd]);
+  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -767,7 +726,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
             onDragOver={handleGridDragOver}
             onDrop={handleGridDrop}
           >
-            {sortedResources.map((resource) =>
+            {resources.map((resource) =>
               isText ? (
                 <PromptCard key={resource.id} resource={resource} />
               ) : (

@@ -4,7 +4,7 @@ import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined, Ed
 import { useDraftStore } from '../../stores/draft';
 import { useSplitPointsStore } from '../../stores/splitPoints';
 import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
-import { useSceneLinkStore, SORTABLE_TYPES, type SortableType } from '../../stores/sceneLink';
+import { useSceneLinkStore } from '../../stores/sceneLink';
 import { isVideoMetadata, isImageMetadata, isTextMetadata } from '@shared/types';
 import type { ResourceType, VideoMetadata, Resource } from '@shared/types';
 import VideoPlayer, { type VideoPlayerRef } from './VideoPlayer';
@@ -24,7 +24,7 @@ const PreviewPanel: React.FC = () => {
   const { selectedDraftId, selectedResourceId, getSelectedResource, openResourceFolder, selectResource, getResourcesByType, loadResources } = useDraftStore();
   const { splitPoints, videoId, loadSplitPoints, clearPoints } = useSplitPointsStore();
   const { shouldAutoPlay, setShouldAutoPlay, activePlayerType, startPlaying } = usePlaybackStore();
-  const { getCustomOrder, getLinkedId } = useSceneLinkStore();
+  const { getLinkedId } = useSceneLinkStore();
   const selectedResource = getSelectedResource();
   const [splitDialogVisible, setSplitDialogVisible] = useState(false);
   const [analyzeDialogVisible, setAnalyzeDialogVisible] = useState(false);
@@ -34,33 +34,10 @@ const PreviewPanel: React.FC = () => {
   const [fullscreenVideoVisible, setFullscreenVideoVisible] = useState(false);
   const videoPlayerRef = useRef<VideoPlayerRef>(null);
 
-  // 获取按自定义排序的资源列表
+  // 获取按文件名排序的资源列表（getResourcesByType 已自动排序）
   const getSortedResources = useCallback((resourceType: ResourceType) => {
-    const resources = getResourcesByType(resourceType);
-    if (!SORTABLE_TYPES.includes(resourceType as SortableType)) {
-      return resources;
-    }
-
-    const customOrder = getCustomOrder(resourceType as SortableType);
-    if (!customOrder) return resources;
-
-    // 按自定义排序重新排列资源
-    const resourceMap = new Map(resources.map((r) => [r.id, r]));
-    const sorted = [];
-    for (const id of customOrder) {
-      const resource = resourceMap.get(id);
-      if (resource) {
-        sorted.push(resource);
-      }
-    }
-    // 添加不在排序中的资源
-    for (const resource of resources) {
-      if (!customOrder.includes(resource.id)) {
-        sorted.push(resource);
-      }
-    }
-    return sorted;
-  }, [getResourcesByType, getCustomOrder]);
+    return getResourcesByType(resourceType);
+  }, [getResourcesByType]);
 
   // 获取分镜源视频相关的信息（源视频、前后分镜）
   const getSceneRelatedResources = useCallback((sceneResource: Resource) => {

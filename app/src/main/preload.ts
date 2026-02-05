@@ -21,6 +21,7 @@ export interface ElectronAPI {
     update: (params: { id: string; metadata?: any }) => Promise<any>;
     delete: (params: { id: string }) => Promise<any>;
     copy: (params: { resourceId: string; targetType?: string; targetDraftId?: string }) => Promise<any>;
+    reorder: (params: { draftId: string; type: string; orderedIds: string[] }) => Promise<any>;
     openFolder: (params: { id: string }) => Promise<any>;
     captureFrame: (params: { videoResourceId: string; timestamp: number; outputType: string }) => Promise<any>;
     deleteSplitFolders: (params: { draftId: string }) => Promise<any>;
@@ -50,7 +51,7 @@ export interface ElectronAPI {
   };
   links: {
     load: (params: { draftId: string }) => Promise<any>;
-    save: (params: { draftId: string; links: { sourceToNew: Record<string, string>; customOrder: Record<string, string[]> } }) => Promise<any>;
+    save: (params: { draftId: string; links: { sourceToNew: Record<string, string> } }) => Promise<any>;
   };
   on: (channel: string, callback: (event: IpcRendererEvent, ...args: any[]) => void) => () => void;
   off: (channel: string, callback: (...args: any[]) => void) => void;
@@ -78,6 +79,7 @@ const api: ElectronAPI = {
     update: (params) => ipcRenderer.invoke('resource:update', params),
     delete: (params) => ipcRenderer.invoke('resource:delete', params),
     copy: (params) => ipcRenderer.invoke('resource:copy', params),
+    reorder: (params) => ipcRenderer.invoke('resource:reorder', params),
     openFolder: (params) => ipcRenderer.invoke('resource:openFolder', params),
     captureFrame: (params) => ipcRenderer.invoke('resource:captureFrame', params),
     deleteSplitFolders: (params) => ipcRenderer.invoke('resource:deleteSplitFolders', params),

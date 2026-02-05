@@ -60,7 +60,9 @@ interface DraftState {
   updateResource: (id: string, metadata: Partial<Resource['metadata']>) => Promise<Resource | null>;
   deleteResource: (id: string) => Promise<boolean>;
   copyResource: (id: string, targetType?: ResourceType) => Promise<Resource | null>;
+  reorderResource: (type: ResourceType, fromId: string, toId: string | null) => Promise<boolean>;
   deleteResourcesByType: (type: ResourceType) => Promise<{ success: number; failed: number }>;
+  clearLocalResourcesByType: (type: ResourceType) => void;
   openResourceFolder: (id: string) => Promise<void>;
 
   // Computed
@@ -355,6 +357,62 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   },
 
+  reorderResource: async (type: ResourceType, fromId: string, toId: string | null) => {
+    const { resources, selectedDraftId } = get();
+    if (!selectedDraftId) return false;
+
+    // 获取该类型的所有资源，按当前文件名排序
+    const typeResources = resources
+      .filter((r) => r.type === type)
+      .sort((a, b) => a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true }));
+
+    const currentIds = typeResources.map((r) => r.id);
+    const fromIndex = currentIds.indexOf(fromId);
+    if (fromIndex === -1) return false;
+
+    // 构建新顺序
+    const newOrder = [...currentIds];
+    newOrder.splice(fromIndex, 1); // 先移除
+
+    if (toId === null) {
+      // 移动到末尾
+      newOrder.push(fromId);
+    } else {
+      // 移动到目标位置前面
+      const toIndex = newOrder.indexOf(toId);
+      if (toIndex === -1) {
+        newOrder.push(fromId);
+      } else {
+        newOrder.splice(toIndex, 0, fromId);
+      }
+    }
+
+    try {
+      const result: OperationResult<Resource[]> = await window.api.resource.reorder({
+        draftId: selectedDraftId,
+        type,
+        orderedIds: newOrder,
+      });
+
+      if (result.success && result.data) {
+        // 更新本地资源状态
+        set((state) => {
+          const updatedMap = new Map(result.data!.map((r) => [r.id, r]));
+          return {
+            resources: state.resources.map((r) =>
+              updatedMap.has(r.id) ? updatedMap.get(r.id)! : r
+            ),
+          };
+        });
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('[Draft] Reorder failed:', err);
+      return false;
+    }
+  },
+
   deleteResourcesByType: async (type: ResourceType) => {
     const { resources, selectedDraftId } = get();
     const toDelete = resources.filter((r) => r.type === type);
@@ -420,6 +478,17 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     return { success: successCount, failed: failedCount };
   },
 
+  // 仅从前端状态中移除指定类型的资源（不调用后端API）
+  // 用于在后端异步任务开始时立即更新UI
+  clearLocalResourcesByType: (type: ResourceType) => {
+    set((state) => ({
+      resources: state.resources.filter((r) => r.type !== type),
+      selectedResourceId: state.resources.find((r) => r.id === state.selectedResourceId)?.type === type
+        ? null
+        : state.selectedResourceId,
+    }));
+  },
+
   openResourceFolder: async (id: string) => {
     try {
       await window.api.resource.openFolder({ id });
@@ -448,8 +517,11 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     const { resources } = get();
     const filtered = resources.filter((r) => r.type === type);
 
-    // 某些类型按文件名排序
-    const sortByNameTypes: ResourceType[] = ['scene_new', 'scene_hd', 'lipsync', 'scene_source'];
+    // 所有文件夹类型都按文件名排序（序号在文件名开头）
+    const sortByNameTypes: ResourceType[] = [
+      'source_character', 'new_character', 'prompt',
+      'scene_source', 'scene_new', 'scene_hd', 'lipsync'
+    ];
     if (sortByNameTypes.includes(type)) {
       return filtered.sort((a, b) => a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true }));
     }
