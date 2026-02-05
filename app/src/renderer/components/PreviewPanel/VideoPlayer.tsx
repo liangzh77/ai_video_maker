@@ -94,15 +94,16 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     if (pauseRequestId !== prevPauseRequestIdRef.current) {
       prevPauseRequestIdRef.current = pauseRequestId;
       // 如果当前不是活跃播放器，暂停视频
-      if (activePlayerType !== playerType && isPlaying) {
+      // 不依赖 isPlaying 状态，直接检查视频元素的实际播放状态
+      if (activePlayerType !== playerType) {
         const video = videoRef.current;
-        if (video) {
+        if (video && !video.paused) {
           video.pause();
           setIsPlaying(false);
         }
       }
     }
-  }, [pauseRequestId, activePlayerType, playerType, isPlaying]);
+  }, [pauseRequestId, activePlayerType, playerType]);
 
   // Handle autoPlay when video is ready
   useEffect(() => {

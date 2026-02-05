@@ -544,7 +544,28 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     e.stopPropagation();
     setIsFileDragOver(false);
 
-    if (!canDrop || !selectedDraftId) return;
+    if (!selectedDraftId) return;
+
+    // 首先检查是否是资源卡片拖拽（跨 section 复制）
+    const fromId = e.dataTransfer.getData('text/plain');
+    const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
+    if (fromId && fromType && fromType !== type && isDraggable) {
+      // 验证类型兼容性
+      if (!areTypesCompatible(fromType, type)) {
+        message.warning(`不能将${getMediaType(fromType) === 'video' ? '视频' : '图片'}复制到${getMediaType(type) === 'video' ? '视频' : '图片'}区域`);
+        return;
+      }
+      // 复制资源到目标类型
+      const newResource = await copyResource(fromId, type);
+      if (newResource) {
+        message.success('已复制');
+      } else {
+        message.error('复制失败');
+      }
+      return;
+    }
+
+    if (!canDrop) return;
 
     // Check for frame data from video player
     const frameDataStr = e.dataTransfer.getData(FRAME_DATA_MIME);

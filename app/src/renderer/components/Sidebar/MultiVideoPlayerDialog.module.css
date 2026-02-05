@@ -1,0 +1,139 @@
+.modal :global(.ant-modal-content) {
+  padding: 16px;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.videoContainer {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 竖屏视频布局：并排 */
+.videoContainer.portrait {
+  flex-direction: row;
+}
+
+.videoContainer.portrait.count2 .videoWrapper {
+  flex: 1;
+}
+
+.videoContainer.portrait.count3 .videoWrapper {
+  flex: 1;
+}
+
+.videoContainer.portrait.count4 .videoWrapper {
+  flex: 1;
+}
+
+/* 横屏视频布局：2x2 网格 */
+.videoContainer.landscape {
+  flex-wrap: wrap;
+}
+
+.videoContainer.landscape.count2 {
+  flex-direction: row;
+}
+
+.videoContainer.landscape.count2 .videoWrapper {
+  flex: 1;
+  min-width: calc(50% - 8px);
+}
+
+.videoContainer.landscape.count3 {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.videoContainer.landscape.count3 .videoWrapper {
+  flex: 1;
+  min-width: calc(50% - 8px);
+  max-height: 50%;
+}
+
+.videoContainer.landscape.count3 .videoWrapper:nth-child(3) {
+  flex: none;
+  width: calc(50% - 8px);
+  margin: 0 auto;
+}
+
+.videoContainer.landscape.count4 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.videoContainer.landscape.count4 .videoWrapper {
+  min-height: 0;
+}
+
+.videoWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.videoLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.video {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  object-fit: contain;
+  background-color: #000;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background-color: var(--color-bg-elevated);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.playButton {
+  font-size: 24px;
+}
+
+.time {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-family: monospace;
+}
+
+.progressBar {
+  flex: 1;
+  margin: 0;
+}
+
+.progressBar :global(.ant-slider-track) {
+  background-color: var(--color-primary);
+}
+
+.progressBar :global(.ant-slider-handle) {
+  border-color: var(--color-primary);
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  text-align: center;
+}

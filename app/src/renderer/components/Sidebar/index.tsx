@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button, Tooltip, App } from 'antd';
 import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined } from '@ant-design/icons';
 import DraftList from './DraftList';
+import MultiVideoDropZone from './MultiVideoDropZone';
 import { useDraftStore, type DraftSortBy } from '../../stores/draft';
 import styles from './Sidebar.module.css';
 
@@ -144,6 +145,9 @@ const Sidebar: React.FC = () => {
       <div className={styles.content}>
         <DraftList />
       </div>
+
+      {/* 多视频播放区域 */}
+      <MultiVideoDropZone />
     </div>
   );
 };
