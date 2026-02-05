@@ -28,7 +28,7 @@ interface TaskState {
   loadTasks: (draftId: string) => Promise<void>;
   splitVideo: (draftId: string, sourceVideoId: string, config?: object) => Promise<ProcessingTask | null>;
   upscaleVideo: (draftId: string, sourceVideoIds: string[], config: object) => Promise<ProcessingTask | null>;
-  generateImage: (draftId: string, sourceImageId: string, promptResourceId: string) => Promise<ProcessingTask | null>;
+  generateImage: (draftId: string, sourceImageIds: string[], promptResourceId: string, modelEndpoint: string, resolution?: '4K' | '2K') => Promise<ProcessingTask | null>;
   synthesizeVideo: (draftId: string, videoResourceIds: string[], config?: object) => Promise<ProcessingTask | null>;
   cancelTask: (taskId: string) => Promise<boolean>;
 
@@ -108,12 +108,14 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }
   },
 
-  generateImage: async (draftId: string, sourceImageId: string, promptResourceId: string) => {
+  generateImage: async (draftId: string, sourceImageIds: string[], promptResourceId: string, modelEndpoint: string, resolution?: '4K' | '2K') => {
     try {
       const result: OperationResult<ProcessingTask> = await window.api.task.generateImage({
         draftId,
-        sourceImageId,
+        sourceImageIds,
         promptResourceId,
+        modelEndpoint,
+        resolution,
       });
       if (result.success && result.data) {
         set((state) => ({

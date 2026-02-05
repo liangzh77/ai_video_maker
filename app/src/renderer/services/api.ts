@@ -120,8 +120,10 @@ interface TaskUpscaleVideoRequest {
 
 interface TaskGenerateImageRequest {
   draftId: string;
-  sourceImageId: string;
+  sourceImageIds: string[];
   promptResourceId: string;
+  modelEndpoint: string;
+  resolution?: '4K' | '2K';
 }
 
 interface TaskSynthesizeVideoRequest {

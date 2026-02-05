@@ -630,7 +630,7 @@ export interface ImageGenerateResult {
 
 export async function runImageGenerator(
   modelId: string,
-  sourcePath: string,
+  sourcePaths: string | string[],
   prompt: string,
   resolution: '2K' | '4K',
   outputPath: string,
@@ -644,17 +644,26 @@ export async function runImageGenerator(
 
   const useExe = shouldUseExe();
 
+  // 统一转换为数组格式
+  const sourcePathList = Array.isArray(sourcePaths) ? sourcePaths : [sourcePaths];
+
   let command: string;
   let args: string[];
+
+  // 构建 --source 参数（支持多个）
+  const sourceArgs: string[] = [];
+  for (const sp of sourcePathList) {
+    sourceArgs.push('--source', sp);
+  }
 
   if (useExe) {
     // 使用打包后的 exe
     command = getImageGeneratorPath();
-    args = ['--model', modelId, '--source', sourcePath, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
+    args = ['--model', modelId, ...sourceArgs, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
   } else {
     // 开发模式使用 Python 脚本
     command = getPythonPath(appConfig);
-    args = [path.join(getToolsPath(), 'image_generator.py'), '--model', modelId, '--source', sourcePath, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
+    args = [path.join(getToolsPath(), 'image_generator.py'), '--model', modelId, ...sourceArgs, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
   }
 
   // 获取 .env.local 路径（打包后在安装目录根目录）

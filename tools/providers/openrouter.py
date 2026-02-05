@@ -6,7 +6,7 @@ import httpx
 import logging
 import io
 import base64
-from typing import Optional
+from typing import Optional, List, Union
 from PIL import Image
 
 from .config import settings
@@ -226,15 +226,17 @@ class OpenRouterProvider(ImageGeneratorBase):
     async def image_to_image(
         self,
         prompt: str,
-        reference_image: bytes,
+        reference_images: Union[bytes, List[bytes]],
         config: Optional[GenerationConfig] = None
     ) -> GenerationResult:
         """
         图生图 - 使用 OpenRouter
 
+        支持多张参考图片输入，所有图片会作为上下文发送给模型。
+
         Args:
             prompt: 文本提示词
-            reference_image: 参考图片数据
+            reference_images: 参考图片数据，支持单张 (bytes) 或多张 (List[bytes])
             config: 生成配置
 
         Returns:
@@ -246,10 +248,21 @@ class OpenRouterProvider(ImageGeneratorBase):
             config = self.get_default_config()
         config = self.validate_config(config)
 
-        ref_width, ref_height = get_image_dimensions(reference_image)
+        # 统一转换为列表格式
+        if isinstance(reference_images, bytes):
+            images_list = [reference_images]
+        else:
+            images_list = reference_images
+
+        if not images_list:
+            raise ProviderError("至少需要提供一张参考图片", provider=self.name)
+
+        # 使用第一张图片计算宽高比
+        ref_width, ref_height = get_image_dimensions(images_list[0])
         aspect_ratio = get_closest_aspect_ratio(ref_width, ref_height)
         logger.info(f"[{self.name}] 图生图请求: prompt={prompt[:50]}...")
-        logger.info(f"[{self.name}] 参考图片尺寸: {ref_width}x{ref_height}, 宽高比: {aspect_ratio}")
+        logger.info(f"[{self.name}] 参考图片数量: {len(images_list)}")
+        logger.info(f"[{self.name}] 第一张图片尺寸: {ref_width}x{ref_height}, 宽高比: {aspect_ratio}")
 
         # 从 config 获取目标分辨率，默认 4K
         image_size = getattr(config, 'target_resolution', '4K') or '4K'
@@ -258,22 +271,27 @@ class OpenRouterProvider(ImageGeneratorBase):
         enhanced_prompt = f"宽高比{aspect_ratio}。{image_size}分辨率。{prompt}"
         logger.info(f"[{self.name}] 增强后的 prompt: {enhanced_prompt[:80]}...")
 
-        # 编码参考图片为 base64
-        ref_image_b64 = base64.b64encode(reference_image).decode('utf-8')
+        # 构建 content 数组，包含所有参考图片
+        content = []
+        for i, img_data in enumerate(images_list):
+            img_b64 = base64.b64encode(img_data).decode('utf-8')
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{img_b64}"
+                }
+            })
+            img_w, img_h = get_image_dimensions(img_data)
+            logger.info(f"[{self.name}] 图片 {i+1} 尺寸: {img_w}x{img_h}")
 
-        # OpenAI 格式消息（包含图片）
+        # 添加文本 prompt
+        content.append({"type": "text", "text": enhanced_prompt})
+
+        # OpenAI 格式消息（包含多张图片）
         messages = [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{ref_image_b64}"
-                        }
-                    },
-                    {"type": "text", "text": enhanced_prompt}
-                ]
+                "content": content
             }
         ]
 

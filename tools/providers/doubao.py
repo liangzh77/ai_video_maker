@@ -3,7 +3,7 @@
 字节跳动 AI 图片生成服务 - Seedream 模型
 """
 import logging
-from typing import Optional
+from typing import Optional, List, Union
 
 from .config import settings
 from .base import (
@@ -171,15 +171,17 @@ class DoubaoProvider(ImageGeneratorBase):
     async def image_to_image(
         self,
         prompt: str,
-        reference_image: bytes,
+        reference_images: Union[bytes, List[bytes]],
         config: Optional[GenerationConfig] = None
     ) -> GenerationResult:
         """
         图生图 - 使用 Seedream 模型
 
+        支持多张参考图片输入（最多 14 张），使用 image_urls 数组参数。
+
         Args:
             prompt: 文本提示词
-            reference_image: 参考图片数据
+            reference_images: 参考图片数据，支持单张 (bytes) 或多张 (List[bytes])
             config: 生成配置
 
         Returns:
@@ -191,9 +193,25 @@ class DoubaoProvider(ImageGeneratorBase):
             config = self.get_default_config()
         config = self.validate_config(config)
 
-        # 获取参考图片尺寸
-        ref_width, ref_height = get_image_size(reference_image)
-        logger.info(f"[{self.name}] 参考图片尺寸: {ref_width}x{ref_height}")
+        # 统一转换为列表格式
+        if isinstance(reference_images, bytes):
+            images_list = [reference_images]
+        else:
+            images_list = reference_images
+
+        if not images_list:
+            raise ProviderError("至少需要提供一张参考图片", provider=self.name)
+
+        # Seedream API 最多支持 14 张参考图片
+        if len(images_list) > 14:
+            logger.warning(f"[{self.name}] 参考图片数量 {len(images_list)} 超过限制，将只使用前 14 张")
+            images_list = images_list[:14]
+
+        logger.info(f"[{self.name}] 图生图请求: 参考图片数量={len(images_list)}")
+
+        # 获取第一张参考图片尺寸（用于计算输出尺寸）
+        ref_width, ref_height = get_image_size(images_list[0])
+        logger.info(f"[{self.name}] 第一张参考图片尺寸: {ref_width}x{ref_height}")
 
         # 根据目标分辨率和参考图片宽高比计算输出尺寸
         min_size = self._get_min_size().width
@@ -212,18 +230,23 @@ class DoubaoProvider(ImageGeneratorBase):
         config.size = ImageSize.custom(output_width, output_height)
         logger.info(f"[{self.name}] 输出尺寸（保持宽高比）: {output_width}x{output_height}")
 
-        # 编码参考图片为 data URI 格式（豆包 API 要求）
-        ref_image_b64 = encode_image_to_base64(reference_image)
-        ref_image_data_uri = f"data:image/jpeg;base64,{ref_image_b64}"
+        # 编码所有参考图片为 data URI 格式
+        image_urls = []
+        for i, img_data in enumerate(images_list):
+            img_b64 = encode_image_to_base64(img_data)
+            img_data_uri = f"data:image/jpeg;base64,{img_b64}"
+            image_urls.append(img_data_uri)
+            img_w, img_h = get_image_size(img_data)
+            logger.info(f"[{self.name}] 图片 {i+1} 尺寸: {img_w}x{img_h}")
 
-        # 构建请求体（图生图格式）
+        # 构建请求体（多图生图格式，使用 image_urls 数组）
         request_data = {
             "model": self.model_endpoint,
             "prompt": prompt,
             "size": config.size.value,
             "n": 1,
             "response_format": "b64_json",
-            "image": ref_image_data_uri,  # 参考图片（data URI 格式）
+            "image_urls": image_urls,  # 多张参考图片（data URI 数组格式）
             "watermark": config.watermark,  # 水印控制
         }
 
@@ -239,8 +262,8 @@ class DoubaoProvider(ImageGeneratorBase):
         logger.info(f"[{self.name}] model: {self.model_endpoint}")
         logger.info(f"[{self.name}] size: {config.size.value} (width={config.size.width}, height={config.size.height})")
         logger.info(f"[{self.name}] prompt: {prompt[:100]}...")
+        logger.info(f"[{self.name}] image_urls count: {len(image_urls)}")
         logger.info(f"[{self.name}] watermark: {config.watermark}")
-        logger.info(f"[{self.name}] 完整请求参数: {request_data}")
         logger.info(f"[{self.name}] =========================")
 
         try:

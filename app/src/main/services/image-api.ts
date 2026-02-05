@@ -855,25 +855,25 @@ export function getAvailableModels(): ModelInfo[] {
     }
   }
 
-  // 3. Doubao 豆包模型 (DOUBAO_MODEL_1, DOUBAO_MODEL_2, ...)
-  // 格式: endpoint:displayName
-  for (let i = 1; i <= 10; i++) {
-    const envKey = `DOUBAO_MODEL_${i}`;
-    const envValue = process.env[envKey];
-    if (!envValue) continue;
-
-    const colonIndex = envValue.indexOf(':');
-    if (colonIndex > 0) {
-      const endpoint = envValue.substring(0, colonIndex);
-      const name = envValue.substring(colonIndex + 1);
-      models.push({
-        id: `doubao:${endpoint}`,
-        name: `[豆包] ${name}`,
-        provider: 'doubao',
-        endpoint,
-      });
-    }
-  }
+  // 3. Doubao 豆包模型 - 已禁用（多图融合效果不佳）
+  // 保留代码但不加载，如需恢复取消注释即可
+  // for (let i = 1; i <= 10; i++) {
+  //   const envKey = `DOUBAO_MODEL_${i}`;
+  //   const envValue = process.env[envKey];
+  //   if (!envValue) continue;
+  //
+  //   const colonIndex = envValue.indexOf(':');
+  //   if (colonIndex > 0) {
+  //     const endpoint = envValue.substring(0, colonIndex);
+  //     const name = envValue.substring(colonIndex + 1);
+  //     models.push({
+  //       id: `doubao:${endpoint}`,
+  //       name: `[豆包] ${name}`,
+  //       provider: 'doubao',
+  //       endpoint,
+  //     });
+  //   }
+  // }
 
   // 4. Gemini 中转模型 (GEMINI_PROXY_MODEL_1, GEMINI_PROXY_MODEL_2, ...)
   // 格式: modelName:displayName

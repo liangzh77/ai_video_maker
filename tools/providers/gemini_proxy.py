@@ -6,7 +6,7 @@ import httpx
 import logging
 import io
 import base64
-from typing import Optional
+from typing import Optional, List, Union
 from PIL import Image
 
 from .config import settings
@@ -177,7 +177,7 @@ class GeminiProxyProvider(ImageGeneratorBase):
     async def image_to_image(
         self,
         prompt: str,
-        reference_image: bytes,
+        reference_images: Union[bytes, List[bytes]],
         config: Optional[GenerationConfig] = None
     ) -> GenerationResult:
         """
@@ -185,7 +185,8 @@ class GeminiProxyProvider(ImageGeneratorBase):
 
         Args:
             prompt: 文本提示词
-            reference_image: 参考图片数据
+            reference_images: 参考图片数据，支持单张 (bytes) 或多张 (List[bytes])
+                              注意：当前实现仅使用第一张图片
             config: 生成配置
 
         Returns:
@@ -196,6 +197,16 @@ class GeminiProxyProvider(ImageGeneratorBase):
         if config is None:
             config = self.get_default_config()
         config = self.validate_config(config)
+
+        # 统一转换为列表格式，取第一张图片
+        if isinstance(reference_images, bytes):
+            reference_image = reference_images
+        else:
+            if not reference_images:
+                raise ProviderError("至少需要提供一张参考图片", provider=self.name)
+            reference_image = reference_images[0]
+            if len(reference_images) > 1:
+                logger.warning(f"[{self.name}] 当前仅支持单图输入，将只使用第一张图片")
 
         ref_width, ref_height = get_image_dimensions(reference_image)
         logger.info(f"[{self.name}] 图生图请求: prompt={prompt[:50]}...")
