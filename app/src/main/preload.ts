@@ -20,6 +20,7 @@ export interface ElectronAPI {
     addText: (params: { draftId: string; type: string; content: string }) => Promise<any>;
     update: (params: { id: string; metadata?: any }) => Promise<any>;
     delete: (params: { id: string }) => Promise<any>;
+    copy: (params: { resourceId: string; targetType?: string; targetDraftId?: string }) => Promise<any>;
     openFolder: (params: { id: string }) => Promise<any>;
     captureFrame: (params: { videoResourceId: string; timestamp: number; outputType: string }) => Promise<any>;
     deleteSplitFolders: (params: { draftId: string }) => Promise<any>;
@@ -76,6 +77,7 @@ const api: ElectronAPI = {
     addText: (params) => ipcRenderer.invoke('resource:addText', params),
     update: (params) => ipcRenderer.invoke('resource:update', params),
     delete: (params) => ipcRenderer.invoke('resource:delete', params),
+    copy: (params) => ipcRenderer.invoke('resource:copy', params),
     openFolder: (params) => ipcRenderer.invoke('resource:openFolder', params),
     captureFrame: (params) => ipcRenderer.invoke('resource:captureFrame', params),
     deleteSplitFolders: (params) => ipcRenderer.invoke('resource:deleteSplitFolders', params),

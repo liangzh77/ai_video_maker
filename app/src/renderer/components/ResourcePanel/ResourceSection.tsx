@@ -4,6 +4,25 @@ import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined, ThunderboltO
 import type { Resource, ResourceType, UpscaleConfig, SynthesizeConfig } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import { useSceneLinkStore, SORTABLE_TYPES, type SortableType } from '../../stores/sceneLink';
+
+// 支持拖拽复制的资源类型（所有非文本类型）
+const DRAGGABLE_TYPES: ResourceType[] = ['source_video', 'source_character', 'new_character', 'scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized'];
+
+// 按媒体类型分组的资源类型（用于跨类型拖拽兼容性检查）
+const VIDEO_TYPES: ResourceType[] = ['source_video', 'scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized'];
+const IMAGE_TYPES: ResourceType[] = ['source_character', 'new_character'];
+
+// 获取资源类型的媒体类型
+const getMediaType = (resourceType: ResourceType): 'video' | 'image' | 'text' => {
+  if (VIDEO_TYPES.includes(resourceType)) return 'video';
+  if (IMAGE_TYPES.includes(resourceType)) return 'image';
+  return 'text';
+};
+
+// 检查两个资源类型是否兼容（可以相互拖拽复制）
+const areTypesCompatible = (fromType: ResourceType, toType: ResourceType): boolean => {
+  return getMediaType(fromType) === getMediaType(toType);
+};
 import ResourceCard from './ResourceCard';
 import PromptCard from './PromptCard';
 import UpscaleDialog from './UpscaleDialog';
@@ -84,7 +103,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [synthesizeProgress, setSynthesizeProgress] = useState(0);
   const [synthesizeTaskId, setSynthesizeTaskId] = useState<string | null>(null);
-  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType, loadResources } = useDraftStore();
+  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType, loadResources, copyResource } = useDraftStore();
   const { batchLink, getCustomOrder, setCustomOrder, moveOrder, moveToEnd, customOrder } = useSceneLinkStore();
   const { message } = App.useApp();
 
@@ -100,6 +119,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const canSynthesize = type === 'lipsync' && resources.length > 0;
   // 是否支持拖动排序
   const isSortable = SORTABLE_TYPES.includes(type as SortableType);
+  // 是否支持拖拽复制（所有非文本类型都支持）
+  const isDraggable = DRAGGABLE_TYPES.includes(type);
 
   // 初始化自定义排序（当资源列表变化时）
   useEffect(() => {
@@ -365,62 +386,73 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     }
   };
 
-  // 卡片拖动排序处理 - 使用组件状态而不是 dataTransfer MIME 类型
+  // 卡片拖动处理 - 支持拖拽复制
   const handleCardDragStart = useCallback((e: React.DragEvent, resourceId: string) => {
-    if (!isSortable) return;
+    if (!isDraggable) return;
     setDraggingCardId(resourceId);
-    e.dataTransfer.effectAllowed = 'move';
-    // 设置一个简单的文本数据，某些浏览器需要这个才能正常工作
+    e.dataTransfer.effectAllowed = 'copy';
+    // 设置资源 ID 和类型，用于跨 Section 拖拽
     e.dataTransfer.setData('text/plain', resourceId);
-  }, [isSortable]);
+    e.dataTransfer.setData('application/x-resource-type', type);
+  }, [isDraggable, type]);
 
   const handleCardDragOver = useCallback((e: React.DragEvent, resourceId: string) => {
     // 必须调用 preventDefault 才能使元素成为有效的 drop 目标
     e.preventDefault();
     e.stopPropagation();
 
-    // 只有在拖动卡片时才显示高亮
-    if (!draggingCardId || !isSortable) return;
-    if (resourceId !== draggingCardId) {
-      setDragOverCardId(resourceId);
-    }
-  }, [draggingCardId, isSortable]);
+    // 检查是否有资源类型数据（支持跨 section 拖拽）
+    const fromType = e.dataTransfer.types.includes('application/x-resource-type');
+    if (!fromType || !isDraggable) return;
+
+    // 本地拖拽时不高亮自己
+    if (draggingCardId && resourceId === draggingCardId) return;
+
+    setDragOverCardId(resourceId);
+  }, [draggingCardId, isDraggable]);
 
   const handleCardDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOverCardId(null);
   }, []);
 
-  const handleCardDrop = useCallback((e: React.DragEvent, targetId: string) => {
+  const handleCardDrop = useCallback(async (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const fromId = draggingCardId;
+    // 从 dataTransfer 读取数据（支持跨 section 拖拽）
+    const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
+    const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
+
     setDragOverCardId(null);
     setDraggingCardId(null);
 
-    if (!fromId || !isSortable || fromId === targetId) return;
+    if (!fromId || !isDraggable) return;
 
-    // 确保 customOrder 已初始化（防止 moveOrder 因为 customOrder 不存在而失败）
-    const currentOrder = getCustomOrder(type as SortableType);
-    if (!currentOrder) {
-      // 初始化排序并执行移动
-      const resourceIds = resources.map((r) => r.id);
-      const fromIndex = resourceIds.indexOf(fromId);
-      const toIndex = resourceIds.indexOf(targetId);
-      if (fromIndex !== -1 && toIndex !== -1) {
-        // 移动到目标位置前面：先移除，再插入
-        const newOrder = [...resourceIds];
-        newOrder.splice(fromIndex, 1);
-        const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
-        newOrder.splice(insertIndex, 0, fromId);
-        setCustomOrder(type as SortableType, newOrder);
+    // 同区域拖拽 -> 调整顺序
+    if (fromType === type) {
+      if (fromId === targetId) return; // 拖到自己身上，忽略
+      if (isSortable) {
+        moveOrder(type as SortableType, fromId, targetId);
       }
       return;
     }
 
-    moveOrder(type as SortableType, fromId, targetId);
-  }, [draggingCardId, isSortable, type, moveOrder, getCustomOrder, setCustomOrder, resources]);
+    // 跨区域拖拽 -> 复制
+    // 验证类型兼容性
+    if (fromType && !areTypesCompatible(fromType, type)) {
+      message.warning(`不能将${getMediaType(fromType) === 'video' ? '视频' : '图片'}复制到${getMediaType(type) === 'video' ? '视频' : '图片'}区域`);
+      return;
+    }
+
+    // 复制资源到目标类型
+    const newResource = await copyResource(fromId, type);
+    if (newResource) {
+      message.success('已复制');
+    } else {
+      message.error('复制失败');
+    }
+  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, moveOrder]);
 
   const handleCardDragEnd = useCallback(() => {
     setDragOverCardId(null);
@@ -430,86 +462,109 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
   // 处理拖拽到末尾占位区域
   const handleEndZoneDragOver = useCallback((e: React.DragEvent) => {
-    if (!draggingCardId || !isSortable) return;
+    // 支持跨 section 拖拽
+    const hasResourceType = e.dataTransfer.types.includes('application/x-resource-type');
+    if (!hasResourceType || !isDraggable) return;
     e.preventDefault();
     e.stopPropagation();
     setDragOverEndZone(true);
-  }, [draggingCardId, isSortable]);
+  }, [isDraggable]);
 
   const handleEndZoneDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOverEndZone(false);
   }, []);
 
-  const handleEndZoneDrop = useCallback((e: React.DragEvent) => {
-    if (!draggingCardId || !isSortable) return;
-
+  const handleEndZoneDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const fromId = draggingCardId;
+    // 从 dataTransfer 读取数据（支持跨 section 拖拽）
+    const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
+    const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
+
     setDragOverCardId(null);
     setDraggingCardId(null);
     setDragOverEndZone(false);
 
-    // 确保 customOrder 已初始化
-    const currentOrder = getCustomOrder(type as SortableType);
-    if (!currentOrder) {
-      const resourceIds = resources.map((r) => r.id);
-      const fromIndex = resourceIds.indexOf(fromId);
-      if (fromIndex !== -1 && fromIndex !== resourceIds.length - 1) {
-        const newOrder = [...resourceIds];
-        newOrder.splice(fromIndex, 1);
-        newOrder.push(fromId);
-        setCustomOrder(type as SortableType, newOrder);
+    if (!fromId || !isDraggable) return;
+
+    // 同区域拖拽 -> 移动到末尾
+    if (fromType === type) {
+      if (isSortable) {
+        moveToEnd(type as SortableType, fromId);
       }
       return;
     }
 
-    moveToEnd(type as SortableType, fromId);
-  }, [draggingCardId, isSortable, type, moveToEnd, getCustomOrder, setCustomOrder, resources]);
+    // 跨区域拖拽 -> 复制
+    // 验证类型兼容性
+    if (fromType && !areTypesCompatible(fromType, type)) {
+      message.warning(`不能将${getMediaType(fromType) === 'video' ? '视频' : '图片'}复制到${getMediaType(type) === 'video' ? '视频' : '图片'}区域`);
+      return;
+    }
+
+    // 复制资源到目标类型
+    const newResource = await copyResource(fromId, type);
+    if (newResource) {
+      message.success('已复制');
+    } else {
+      message.error('复制失败');
+    }
+  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, moveToEnd]);
 
   // 处理拖拽到 grid 空白区域（最后一个卡片右边）
   const handleGridDragOver = useCallback((e: React.DragEvent) => {
-    // 只有在拖动卡片时才允许 drop
-    if (!draggingCardId || !isSortable) return;
+    // 支持跨 section 拖拽
+    const hasResourceType = e.dataTransfer.types.includes('application/x-resource-type');
+    if (!hasResourceType || !isDraggable) return;
     e.preventDefault();
-  }, [draggingCardId, isSortable]);
+  }, [isDraggable]);
 
-  const handleGridDrop = useCallback((e: React.DragEvent) => {
-    // 只处理卡片拖拽（不是文件拖入）
-    if (!draggingCardId || !isSortable) return;
-
+  const handleGridDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const fromId = draggingCardId;
+    // 从 dataTransfer 读取数据（支持跨 section 拖拽）
+    const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
+    const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
+
+    // 如果没有资源 ID 或不支持拖拽，则返回
+    if (!fromId || !isDraggable) return;
+
     setDragOverCardId(null);
     setDraggingCardId(null);
 
-    // 确保 customOrder 已初始化
-    const currentOrder = getCustomOrder(type as SortableType);
-    if (!currentOrder) {
-      // 初始化排序并移动到末尾
-      const resourceIds = resources.map((r) => r.id);
-      const fromIndex = resourceIds.indexOf(fromId);
-      if (fromIndex !== -1 && fromIndex !== resourceIds.length - 1) {
-        const newOrder = [...resourceIds];
-        newOrder.splice(fromIndex, 1);
-        newOrder.push(fromId);
-        setCustomOrder(type as SortableType, newOrder);
+    // 同区域拖拽 -> 移动到末尾
+    if (fromType === type) {
+      if (isSortable) {
+        moveToEnd(type as SortableType, fromId);
       }
       return;
     }
 
-    moveToEnd(type as SortableType, fromId);
-  }, [draggingCardId, isSortable, type, moveToEnd, getCustomOrder, setCustomOrder, resources]);
+    // 跨区域拖拽 -> 复制
+    // 验证类型兼容性
+    if (fromType && !areTypesCompatible(fromType, type)) {
+      message.warning(`不能将${getMediaType(fromType) === 'video' ? '视频' : '图片'}复制到${getMediaType(type) === 'video' ? '视频' : '图片'}区域`);
+      return;
+    }
+
+    // 复制资源到目标类型
+    const newResource = await copyResource(fromId, type);
+    if (newResource) {
+      message.success('已复制');
+    } else {
+      message.error('复制失败');
+    }
+  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, moveToEnd]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    // 只有文件拖入时才高亮区域，卡片排序时不高亮
-    if (canDrop && !draggingCardId) {
+    // 只有文件拖入时才高亮区域，资源卡片拖拽时不高亮
+    const isResourceDrag = e.dataTransfer.types.includes('application/x-resource-type') || draggingCardId;
+    if (canDrop && !isResourceDrag) {
       setIsFileDragOver(true);
     }
   }, [canDrop, draggingCardId]);
@@ -722,7 +777,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
                   badge={badge}
                   badgeType={badgeType}
                   isLarge={isLarge}
-                  draggable={isSortable}
+                  draggable={isDraggable}
                   isDragOver={dragOverCardId === resource.id}
                   onDragStart={(e) => handleCardDragStart(e, resource.id)}
                   onDragOver={(e) => handleCardDragOver(e, resource.id)}
@@ -733,7 +788,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
               )
             )}
             {/* 拖拽时显示末尾拖放区域 */}
-            {draggingCardId && isSortable && (
+            {draggingCardId && isDraggable && (
               <div
                 className={`${styles.dropEndZone} ${dragOverEndZone ? styles.dragOver : ''}`}
                 onDragOver={handleEndZoneDragOver}

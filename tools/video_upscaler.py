@@ -2,11 +2,21 @@
 视频分辨率和帧率提升工具
 基于 FFmpeg 实现视频分辨率和帧率提升，支持硬件加速
 """
+# ============================================
+# Windows UTF-8 输出强制设置
+# 必须在任何 print 之前执行，确保 PyInstaller 打包后也能正确输出中文
+# ============================================
+import sys
+import io
+
+# 强制使用 UTF-8 编码，解决 Windows 下 GBK 乱码问题
+if sys.stdout is None or (hasattr(sys.stdout, 'encoding') and sys.stdout.encoding != 'utf-8'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer if hasattr(sys.stdout, 'buffer') else sys.stdout, encoding='utf-8', errors='replace')
+if sys.stderr is None or (hasattr(sys.stderr, 'encoding') and sys.stderr.encoding != 'utf-8'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer if hasattr(sys.stderr, 'buffer') else sys.stderr, encoding='utf-8', errors='replace')
 
 # 导入路径设置模块（设置 FFmpeg 路径）
 import path_setup  # noqa: F401
-
-import sys
 
 import os
 import json

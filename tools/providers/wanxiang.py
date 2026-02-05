@@ -17,7 +17,7 @@ class WanxiangProvider(ImageGeneratorBase):
         self.access_key = settings.WANXIANG_ACCESS_KEY
         self.access_secret = settings.WANXIANG_ACCESS_SECRET
         self.endpoint = settings.WANXIANG_ENDPOINT
-        self.timeout = 120.0
+        self.timeout = 90.0  # 1分半超时
 
     async def text_to_image(self, prompt: str) -> bytes:
         """

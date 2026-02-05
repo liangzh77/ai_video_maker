@@ -112,6 +112,7 @@
   align-items: center;
   justify-content: center;
   transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+  z-index: 1;
 }
 
 .linkButton:hover {
@@ -157,6 +158,26 @@
   font-weight: 500;
   background-color: rgba(0, 0, 0, 0.7);
   color: white;
+}
+
+.videoIndicator {
+  position: absolute;
+  top: var(--spacing-xs);
+  right: calc(var(--spacing-xs) + 50px);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 没有 badge 时，视频标志移到最右边 */
+.card:not(:has(.badge)) .videoIndicator {
+  right: var(--spacing-xs);
 }
 
 .info {

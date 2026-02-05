@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import { App } from 'antd';
 import type { Resource } from '@shared/types';
 import { isVideoMetadata } from '@shared/types';
@@ -322,6 +322,12 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
           <span className={`${styles.badge} ${styles[badgeType]}`}>
             {badgeType === 'success' && <CheckCircleFilled />}
             {badge}
+          </span>
+        )}
+
+        {isVideo && (
+          <span className={styles.videoIndicator}>
+            <VideoCameraOutlined />
           </span>
         )}
 

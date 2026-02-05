@@ -59,6 +59,12 @@ interface ResourceAddTextRequest {
   content: string;
 }
 
+interface ResourceCopyRequest {
+  resourceId: string;
+  targetType?: ResourceType; // 目标资源类型（用于跨类型复制，如 scene_source -> scene_new）
+  targetDraftId?: string; // 目标草稿 ID（默认为原资源所在草稿）
+}
+
 // ============================================
 // Helper Functions
 // ============================================
@@ -440,6 +446,69 @@ export function registerResourceHandlers(): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to update resource',
+        };
+      }
+    }
+  );
+
+  // Copy resource (duplicate)
+  ipcMain.handle(
+    RESOURCE_CHANNELS.COPY,
+    async (_, request: ResourceCopyRequest): Promise<OperationResult<Resource>> => {
+      try {
+        // Find the resource and its draft
+        const drafts = await storage.draft.list();
+        let foundDraftId: string | null = null;
+        let foundResource: Resource | null = null;
+
+        for (const draft of drafts) {
+          const resource = await storage.resource.get(draft.id, request.resourceId);
+          if (resource) {
+            foundDraftId = draft.id;
+            foundResource = resource;
+            break;
+          }
+        }
+
+        if (!foundDraftId || !foundResource) {
+          return { success: false, error: 'RESOURCE_NOT_FOUND' };
+        }
+
+        // 确定目标类型和草稿
+        const targetType = request.targetType || foundResource.type;
+        const targetDraftId = request.targetDraftId || foundDraftId;
+
+        // Copy the resource file to a new location
+        const ext = path.extname(foundResource.filePath);
+        const sequenceNumber = await storage.getNextSequenceNumber(targetDraftId, targetType);
+        const newFilePath = storage.getResourceFilePath(targetDraftId, targetType, ext, sequenceNumber);
+
+        // Ensure directory exists
+        await fs.mkdir(path.dirname(newFilePath), { recursive: true });
+
+        // Copy the file
+        await fs.copyFile(foundResource.filePath, newFilePath);
+
+        // Get new file stats
+        const stats = await fs.stat(newFilePath);
+
+        // Create new resource record
+        const newResource = await storage.resource.add(targetDraftId, {
+          type: targetType,
+          filePath: newFilePath,
+          fileName: path.basename(newFilePath),
+          fileSize: stats.size,
+          mimeType: foundResource.mimeType,
+          metadata: { ...foundResource.metadata },
+        });
+
+        console.log('[Resource] Copied resource:', foundResource.id, '->', newResource.id, 'type:', foundResource.type, '->', targetType);
+        return { success: true, data: newResource };
+      } catch (error) {
+        console.error('[Resource] Copy failed:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to copy resource',
         };
       }
     }

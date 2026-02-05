@@ -78,7 +78,7 @@ class OpenRouterProvider(ImageGeneratorBase):
         self.api_key = settings.OPENROUTER_API_KEY
         self.base_url = settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1"
         self.model = model
-        self.timeout = 300.0
+        self.timeout = 90.0  # 1分半超时
 
     def _check_config(self) -> None:
         """检查配置是否完整"""

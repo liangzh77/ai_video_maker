@@ -22,6 +22,19 @@
         --resolution "2K" \
         --output "/path/to/output.png"
 """
+# ============================================
+# Windows UTF-8 输出强制设置
+# 必须在任何 print 之前执行，确保 PyInstaller 打包后也能正确输出中文
+# ============================================
+import sys
+import io
+
+# 强制使用 UTF-8 编码，解决 Windows 下 GBK 乱码问题
+if sys.stdout is None or (hasattr(sys.stdout, 'encoding') and sys.stdout.encoding != 'utf-8'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer if hasattr(sys.stdout, 'buffer') else sys.stdout, encoding='utf-8', errors='replace')
+if sys.stderr is None or (hasattr(sys.stderr, 'encoding') and sys.stderr.encoding != 'utf-8'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer if hasattr(sys.stderr, 'buffer') else sys.stderr, encoding='utf-8', errors='replace')
+
 import argparse
 import asyncio
 import sys

@@ -26,6 +26,7 @@ export const RESOURCE_CHANNELS = {
   ADD_TEXT: 'resource:addText',
   UPDATE: 'resource:update',
   DELETE: 'resource:delete',
+  COPY: 'resource:copy',
   OPEN_FOLDER: 'resource:openFolder',
   CAPTURE_FRAME: 'resource:captureFrame',
   DELETE_SPLIT_FOLDERS: 'resource:deleteSplitFolders',

@@ -59,6 +59,7 @@ interface DraftState {
   addTextResource: (draftId: string, type: ResourceType, content: string) => Promise<Resource | null>;
   updateResource: (id: string, metadata: Partial<Resource['metadata']>) => Promise<Resource | null>;
   deleteResource: (id: string) => Promise<boolean>;
+  copyResource: (id: string, targetType?: ResourceType) => Promise<Resource | null>;
   deleteResourcesByType: (type: ResourceType) => Promise<{ success: number; failed: number }>;
   openResourceFolder: (id: string) => Promise<void>;
 
@@ -333,6 +334,24 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       return false;
     } catch {
       return false;
+    }
+  },
+
+  copyResource: async (id: string, targetType?: ResourceType) => {
+    try {
+      const result: OperationResult<Resource> = await window.api.resource.copy({
+        resourceId: id,
+        targetType,
+      });
+      if (result.success && result.data) {
+        set((state) => ({
+          resources: [...state.resources, result.data!],
+        }));
+        return result.data;
+      }
+      return null;
+    } catch {
+      return null;
     }
   },
 
