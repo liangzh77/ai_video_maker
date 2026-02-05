@@ -395,13 +395,14 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       });
 
       if (result.success && result.data) {
-        // 更新本地资源状态
+        // 重排序后资源 ID 会变化（因为文件名变了）
+        // 所以需要完全替换该类型的所有资源，而不是尝试匹配旧 ID
         set((state) => {
-          const updatedMap = new Map(result.data!.map((r) => [r.id, r]));
+          // 保留其他类型的资源
+          const otherResources = state.resources.filter((r) => r.type !== type);
+          // 合并新的该类型资源
           return {
-            resources: state.resources.map((r) =>
-              updatedMap.has(r.id) ? updatedMap.get(r.id)! : r
-            ),
+            resources: [...otherResources, ...result.data!],
           };
         });
         return true;

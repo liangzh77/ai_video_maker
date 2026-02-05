@@ -2,8 +2,9 @@ import { app } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import type { Draft, Resource, ResourceType, ProcessingTask } from '@shared/types';
+import type { Draft, Resource, ResourceType, ProcessingTask, ResourceMetadata } from '@shared/types';
 import { loadConfig, saveConfig } from './config';
+import { extractMetadata, getMimeType } from './metadata';
 
 // ============================================
 // Storage Paths
@@ -73,6 +74,10 @@ function getMetaPath(draftId: string): string {
   return path.join(getDraftPath(draftId), 'meta.json');
 }
 
+/**
+ * @deprecated resources.json 已废弃，资源列表通过扫描文件系统获取
+ * 此函数仅保留用于数据迁移
+ */
 function getResourcesPath(draftId: string): string {
   return path.join(getDraftPath(draftId), 'resources.json');
 }
@@ -118,7 +123,7 @@ interface ResourcePathConfig {
 
 const RESOURCE_PATH_CONFIG: Record<ResourceType, ResourcePathConfig> = {
   'source_video': { isFolder: false, name: '源视频' },
-  'source_character': { isFolder: true, name: '原角色图片' },
+  'source_character': { isFolder: true, name: '源角色图片' },
   'prompt': { isFolder: true, name: '提示词' },
   'new_character': { isFolder: true, name: '新角色图片' },
   'scene_source': { isFolder: true, name: '分镜源视频' },
@@ -166,6 +171,232 @@ export function getResourceFolderPath(draftId: string, resourceType: ResourceTyp
     return null;
   }
   return path.join(getFilesPath(draftId), config.name);
+}
+
+// ============================================
+// 文件夹名 -> 资源类型 反向映射
+// ============================================
+
+const FOLDER_NAME_TO_TYPE: Record<string, ResourceType> = {};
+for (const [type, config] of Object.entries(RESOURCE_PATH_CONFIG)) {
+  FOLDER_NAME_TO_TYPE[config.name] = type as ResourceType;
+}
+
+/**
+ * 从相对路径获取资源类型
+ * 例如：'分镜源视频/001.mp4' -> 'scene_source'
+ *       '源视频.mp4' -> 'source_video'
+ */
+export function getResourceTypeFromPath(relativePath: string): ResourceType | null {
+  const parts = relativePath.split(/[/\\]/);
+
+  if (parts.length === 1) {
+    // 顶层文件，检查是否是源视频或合成新视频
+    const fileName = parts[0];
+    for (const [type, config] of Object.entries(RESOURCE_PATH_CONFIG)) {
+      if (!config.isFolder) {
+        // 文件名以配置名开头（如 "源视频.mp4"）
+        const baseName = path.parse(fileName).name;
+        if (baseName === config.name) {
+          return type as ResourceType;
+        }
+      }
+    }
+    return null;
+  }
+
+  // 在子文件夹中
+  const folderName = parts[0];
+  return FOLDER_NAME_TO_TYPE[folderName] || null;
+}
+
+// ============================================
+// 元数据缓存
+// ============================================
+
+interface MetadataCacheEntry {
+  metadata: ResourceMetadata;
+  mtimeMs: number; // 文件修改时间戳
+  size: number;    // 文件大小
+}
+
+// 内存缓存：draftId -> relativePath -> cache entry
+const metadataCache = new Map<string, Map<string, MetadataCacheEntry>>();
+
+/**
+ * 清除指定草稿的元数据缓存
+ */
+export function clearMetadataCache(draftId: string): void {
+  metadataCache.delete(draftId);
+}
+
+/**
+ * 清除所有元数据缓存
+ */
+export function clearAllMetadataCache(): void {
+  metadataCache.clear();
+}
+
+// ============================================
+// 扫描资源文件系统
+// ============================================
+
+/**
+ * 扫描草稿的 files 目录获取所有资源
+ * 资源 ID 为相对路径（如 '分镜源视频/001.mp4'）
+ */
+export async function scanResources(draftId: string, type?: ResourceType): Promise<Resource[]> {
+  const filesDir = getFilesPath(draftId);
+  const resources: Resource[] = [];
+
+  // 获取或创建该草稿的缓存
+  if (!metadataCache.has(draftId)) {
+    metadataCache.set(draftId, new Map());
+  }
+  const draftCache = metadataCache.get(draftId)!;
+
+  try {
+    await fs.access(filesDir);
+  } catch {
+    // files 目录不存在
+    return resources;
+  }
+
+  // 遍历每种资源类型
+  for (const [resourceType, config] of Object.entries(RESOURCE_PATH_CONFIG)) {
+    // 如果指定了类型筛选，跳过不匹配的类型
+    if (type && resourceType !== type) {
+      continue;
+    }
+
+    if (config.isFolder) {
+      // 文件夹型资源
+      const folderPath = path.join(filesDir, config.name);
+      try {
+        const entries = await fs.readdir(folderPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+          if (!entry.isFile()) continue;
+
+          // 忽略隐藏文件和临时文件
+          if (entry.name.startsWith('.') || entry.name.startsWith('_temp_')) continue;
+
+          const filePath = path.join(folderPath, entry.name);
+          const relativePath = `${config.name}/${entry.name}`;
+
+          const resource = await buildResource(
+            draftId,
+            relativePath,
+            filePath,
+            resourceType as ResourceType,
+            entry.name,
+            draftCache
+          );
+
+          if (resource) {
+            resources.push(resource);
+          }
+        }
+      } catch {
+        // 文件夹不存在，跳过
+      }
+    } else {
+      // 单文件型资源（源视频、合成新视频）
+      // 查找匹配的文件（扩展名可能不同）
+      try {
+        const entries = await fs.readdir(filesDir, { withFileTypes: true });
+
+        for (const entry of entries) {
+          if (!entry.isFile()) continue;
+
+          const baseName = path.parse(entry.name).name;
+          if (baseName === config.name) {
+            const filePath = path.join(filesDir, entry.name);
+            const relativePath = entry.name;
+
+            const resource = await buildResource(
+              draftId,
+              relativePath,
+              filePath,
+              resourceType as ResourceType,
+              entry.name,
+              draftCache
+            );
+
+            if (resource) {
+              resources.push(resource);
+            }
+          }
+        }
+      } catch {
+        // 读取失败，跳过
+      }
+    }
+  }
+
+  // 按文件名排序（对于同类型资源）
+  resources.sort((a, b) => {
+    if (a.type !== b.type) {
+      // 不同类型，按类型排序
+      return a.type.localeCompare(b.type);
+    }
+    // 同类型，按文件名数字排序
+    return a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true });
+  });
+
+  return resources;
+}
+
+/**
+ * 构建单个资源对象
+ */
+async function buildResource(
+  draftId: string,
+  relativePath: string,
+  filePath: string,
+  resourceType: ResourceType,
+  fileName: string,
+  cache: Map<string, MetadataCacheEntry>
+): Promise<Resource | null> {
+  try {
+    const stat = await fs.stat(filePath);
+
+    // 检查缓存
+    const cached = cache.get(relativePath);
+    let metadata: ResourceMetadata;
+
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      // 缓存命中
+      metadata = cached.metadata;
+    } else {
+      // 提取元数据
+      metadata = await extractMetadata(filePath, resourceType);
+
+      // 更新缓存
+      cache.set(relativePath, {
+        metadata,
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+      });
+    }
+
+    const resource: Resource = {
+      id: relativePath, // 使用相对路径作为 ID
+      draftId,
+      type: resourceType,
+      fileName,
+      filePath,
+      fileSize: stat.size,
+      mimeType: getMimeType(filePath),
+      metadata,
+      createdAt: stat.birthtime.toISOString(),
+    };
+
+    return resource;
+  } catch (err) {
+    console.error('[Storage] Failed to build resource:', filePath, err);
+    return null;
+  }
 }
 
 /**
@@ -244,7 +475,7 @@ export function makeSequencedFileName(sequence: number, originalName: string, ex
  * 通过重命名文件来实现排序
  * @param draftId 草稿ID
  * @param resourceType 资源类型
- * @param orderedResourceIds 按新顺序排列的资源ID数组
+ * @param orderedResourceIds 按新顺序排列的资源ID数组（相对路径）
  * @returns 更新后的资源列表
  */
 export async function reorderResourceFiles(
@@ -252,13 +483,11 @@ export async function reorderResourceFiles(
   resourceType: ResourceType,
   orderedResourceIds: string[]
 ): Promise<Resource[]> {
-  const resourcesPath = getResourcesPath(draftId);
-  const data = await readJson<ResourcesFile>(resourcesPath, { resources: [] });
+  // 通过扫描获取当前资源列表
+  const allResources = await scanResources(draftId, resourceType);
 
   // 获取要重排序的资源
-  const targetResources = data.resources.filter(
-    r => r.type === resourceType && orderedResourceIds.includes(r.id)
-  );
+  const targetResources = allResources.filter(r => orderedResourceIds.includes(r.id));
 
   // 按新顺序排序
   const sortedResources = orderedResourceIds
@@ -274,16 +503,19 @@ export async function reorderResourceFiles(
     return sortedResources;
   }
 
+  const config = RESOURCE_PATH_CONFIG[resourceType];
+
   // 第一步：将所有文件重命名为临时名称，避免冲突
-  const tempRenames: Array<{ resource: Resource; tempPath: string }> = [];
+  const tempRenames: Array<{ resource: Resource; tempPath: string; originalName: string }> = [];
   for (const resource of sortedResources) {
     const ext = path.extname(resource.filePath);
     const tempFileName = `_temp_${uuidv4()}${ext}`;
     const tempPath = path.join(folderPath, tempFileName);
+    const originalName = getOriginalNameFromFileName(resource.fileName);
 
     try {
       await fs.rename(resource.filePath, tempPath);
-      tempRenames.push({ resource, tempPath });
+      tempRenames.push({ resource, tempPath, originalName });
     } catch (err) {
       console.error('[Storage] Failed to rename to temp:', resource.filePath, err);
       // 回滚已重命名的文件
@@ -299,39 +531,32 @@ export async function reorderResourceFiles(
   }
 
   // 第二步：按新顺序重命名为最终名称
-  const updatedResources: Resource[] = [];
+  const newResourceIds: string[] = [];
   for (let i = 0; i < tempRenames.length; i++) {
-    const { resource, tempPath } = tempRenames[i];
+    const { tempPath, originalName } = tempRenames[i];
     const newSequence = i + 1;
-    const ext = path.extname(resource.filePath);
-    const originalName = getOriginalNameFromFileName(resource.fileName);
+    const ext = path.extname(tempPath);
     const newFileName = makeSequencedFileName(newSequence, originalName, ext);
     const newPath = path.join(folderPath, newFileName);
+    const newRelativePath = `${config.name}/${newFileName}`;
 
     try {
       await fs.rename(tempPath, newPath);
-
-      // 更新资源记录
-      const resourceIndex = data.resources.findIndex(r => r.id === resource.id);
-      if (resourceIndex !== -1) {
-        data.resources[resourceIndex] = {
-          ...data.resources[resourceIndex],
-          filePath: newPath,
-          fileName: newFileName,
-        };
-        updatedResources.push(data.resources[resourceIndex]);
-      }
+      newResourceIds.push(newRelativePath);
     } catch (err) {
       console.error('[Storage] Failed to rename to final:', tempPath, '->', newPath, err);
       throw err;
     }
   }
 
-  // 保存更新后的资源记录
-  await writeJson(resourcesPath, data);
+  // 清除缓存，让下次扫描重新加载
+  clearMetadataCache(draftId);
   await updateDraft(draftId, {});
 
+  // 重新扫描获取更新后的资源
+  const updatedResources = await scanResources(draftId, resourceType);
   console.log('[Storage] Reordered', updatedResources.length, 'resources of type', resourceType);
+
   return updatedResources;
 }
 
@@ -449,7 +674,7 @@ export async function createDraft(name: string): Promise<Draft> {
   await fs.mkdir(getFilesPath(id), { recursive: true });
 
   await writeJson(getMetaPath(id), draft);
-  await writeJson(getResourcesPath(id), { resources: [] });
+  // 注意：resources.json 已废弃，资源列表通过扫描文件系统获取
   await writeJson(getTasksPath(id), { tasks: [] });
   await writeJson(getLinksPath(id), DEFAULT_LINKS);
 
@@ -512,20 +737,14 @@ export async function copyDraft(sourceId: string, newName: string): Promise<Draf
   };
   await writeJson(getMetaPath(newId), newDraft);
 
-  // 更新 resources.json 中的路径引用
-  const resourcesPath = getResourcesPath(newId);
-  const data = await readJson<{ resources: Resource[] }>(resourcesPath, { resources: [] });
-
-  // 更新每个资源的路径（将旧的 draftId 替换为新的）
-  data.resources = data.resources.map(resource => ({
-    ...resource,
-    id: uuidv4(), // 为资源生成新 ID
-    draftId: newId,
-    filePath: resource.filePath.replace(sourceId, newId),
-    thumbnailPath: resource.thumbnailPath?.replace(sourceId, newId),
-    createdAt: now,
-  }));
-  await writeJson(resourcesPath, data);
+  // 删除复制过来的 resources.json（如果存在）
+  // 资源列表现在通过扫描文件系统获取
+  const oldResourcesPath = path.join(targetPath, 'resources.json');
+  try {
+    await fs.unlink(oldResourcesPath);
+  } catch {
+    // 文件可能不存在
+  }
 
   // 清空 tasks.json（任务不需要复制）
   await writeJson(getTasksPath(newId), { tasks: [] });
@@ -561,81 +780,59 @@ async function copyDirectory(src: string, dest: string): Promise<void> {
 // Resource CRUD Operations
 // ============================================
 
-interface ResourcesFile {
-  resources: Resource[];
-}
+// 注意：resources.json 已废弃
+// 资源列表现在通过扫描文件系统动态获取
+// 资源 ID 为相对路径（如 '分镜源视频/001.mp4'）
 
+/**
+ * 列出草稿中的资源
+ * 通过扫描文件系统获取，不再依赖 resources.json
+ */
 export async function listResources(draftId: string, type?: ResourceType): Promise<Resource[]> {
-  const resourcesPath = getResourcesPath(draftId);
-  const data = await readJson<ResourcesFile>(resourcesPath, { resources: [] });
-
-  if (type) {
-    return data.resources.filter((r) => r.type === type);
-  }
-  return data.resources;
+  return scanResources(draftId, type);
 }
 
+/**
+ * 获取单个资源
+ * resourceId 为相对路径（如 '分镜源视频/001.mp4'）
+ */
 export async function getResource(draftId: string, resourceId: string): Promise<Resource | null> {
   const resources = await listResources(draftId);
   return resources.find((r) => r.id === resourceId) || null;
 }
 
-export async function addResource(draftId: string, resource: Omit<Resource, 'id' | 'draftId' | 'createdAt'>): Promise<Resource> {
-  const resourcesPath = getResourcesPath(draftId);
-  const data = await readJson<ResourcesFile>(resourcesPath, { resources: [] });
-
-  const newResource: Resource = {
-    ...resource,
-    id: uuidv4(),
-    draftId,
-    createdAt: new Date().toISOString(),
-  };
-
-  data.resources.push(newResource);
-  await writeJson(resourcesPath, data);
-
-  // Update draft's updatedAt
-  await updateDraft(draftId, {});
-
-  return newResource;
-}
-
-export async function updateResource(
-  draftId: string,
-  resourceId: string,
-  updates: Partial<Resource>
-): Promise<Resource | null> {
-  const resourcesPath = getResourcesPath(draftId);
-  const data = await readJson<ResourcesFile>(resourcesPath, { resources: [] });
-
-  const index = data.resources.findIndex((r) => r.id === resourceId);
-  if (index === -1) return null;
-
-  data.resources[index] = {
-    ...data.resources[index],
-    ...updates,
-    id: resourceId, // Ensure ID cannot be changed
-    draftId, // Ensure draftId cannot be changed
-  };
-
-  await writeJson(resourcesPath, data);
-  await updateDraft(draftId, {});
-
-  return data.resources[index];
-}
-
+/**
+ * 删除资源
+ * 直接删除文件，不再需要更新 resources.json
+ */
 export async function deleteResource(draftId: string, resourceId: string): Promise<boolean> {
-  const resourcesPath = getResourcesPath(draftId);
-  const data = await readJson<ResourcesFile>(resourcesPath, { resources: [] });
+  const filesDir = getFilesPath(draftId);
+  const filePath = path.join(filesDir, resourceId);
 
-  const index = data.resources.findIndex((r) => r.id === resourceId);
-  if (index === -1) return false;
+  try {
+    await fs.unlink(filePath);
 
-  data.resources.splice(index, 1);
-  await writeJson(resourcesPath, data);
-  await updateDraft(draftId, {});
+    // 清除该资源的缓存
+    const draftCache = metadataCache.get(draftId);
+    if (draftCache) {
+      draftCache.delete(resourceId);
+    }
 
-  return true;
+    // 同时尝试删除缩略图
+    const thumbnailsDir = getThumbnailsPath(draftId);
+    const thumbnailPath = path.join(thumbnailsDir, resourceId.replace(/[/\\]/g, '_') + '.jpg');
+    try {
+      await fs.unlink(thumbnailPath);
+    } catch {
+      // 缩略图可能不存在
+    }
+
+    await updateDraft(draftId, {});
+    return true;
+  } catch (err) {
+    console.error('[Storage] Failed to delete resource:', filePath, err);
+    return false;
+  }
 }
 
 // ============================================
@@ -814,8 +1011,8 @@ async function getAllFilesRecursive(dirPath: string): Promise<string[]> {
 const PROTECTED_FILES = ['分割点.txt'];
 
 /**
- * 清理草稿中未被引用的文件
- * 扫描 files 目录，删除不在 resources.json 中引用的文件
+ * 清理草稿中的临时文件和空文件夹
+ * 注意：现在资源列表通过扫描获取，这个函数主要用于清理临时文件
  * @returns 删除的文件数量
  */
 export async function cleanupOrphanedFiles(draftId: string): Promise<number> {
@@ -904,8 +1101,12 @@ export const storage = {
   getFilesPath,
   getResourceFilePath,
   getResourceFolderPath,
+  getResourceTypeFromPath,
   getNextSequenceNumber,
   cleanupOrphanedFiles,
+  clearMetadataCache,
+  clearAllMetadataCache,
+  scanResources,
   // 文件序号命名相关
   getSequenceFromFileName,
   getOriginalNameFromFileName,
@@ -923,9 +1124,9 @@ export const storage = {
   resource: {
     list: listResources,
     get: getResource,
-    add: addResource,
-    update: updateResource,
     delete: deleteResource,
+    // 注意：addResource 和 updateResource 已移除
+    // 资源通过文件系统直接管理，添加资源请直接复制文件到相应文件夹
   },
   task: {
     list: listTasks,

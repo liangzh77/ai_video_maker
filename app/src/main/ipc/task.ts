@@ -31,6 +31,19 @@ import type {
 } from '@shared/types';
 
 // ============================================
+// Helper Functions
+// ============================================
+
+/**
+ * 构建资源 ID（相对于 files 目录的路径）
+ * 资源 ID 现在是相对路径，如 '分镜源视频/001.mp4'
+ */
+function buildResourceId(draftId: string, filePath: string): string {
+  const filesDir = storage.getFilesPath(draftId);
+  return path.relative(filesDir, filePath).replace(/\\/g, '/');
+}
+
+// ============================================
 // Request Types
 // ============================================
 
@@ -185,27 +198,13 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
 
   console.log('[TaskHandler] Image saved:', result.outputPath);
 
-  // 获取生成文件的大小
-  const fileStats = await fs.stat(filePath);
+  // 构建资源 ID（相对路径）
+  const resourceId = buildResourceId(draftId, filePath);
 
-  // Create new resource record
-  const newResource = await storage.resource.add(draftId, {
-    type: 'new_character',
-    filePath,
-    fileName: path.basename(filePath),
-    fileSize: fileStats.size,
-    mimeType: 'image/png',
-    metadata: {
-      width: result.width,
-      height: result.height,
-      format: 'png',
-    },
-  });
-
-  console.log('[TaskHandler] Resource created:', newResource.id);
+  console.log('[TaskHandler] Resource created:', resourceId);
   onProgress(100);
 
-  return [newResource.id];
+  return [resourceId];
 };
 
 /**
@@ -286,28 +285,11 @@ const upscaleVideoHandler: TaskHandler = async (task, onProgress) => {
         appConfig
       );
 
-      // 获取文件信息
-      const stats = await fs.stat(outputPath);
+      // 构建资源 ID（相对路径）
+      const resourceId = buildResourceId(draftId, outputPath);
 
-      // 创建资源记录
-      const newResource = await storage.resource.add(draftId, {
-        type: 'scene_hd',
-        filePath: outputPath,
-        fileName: outputFileName,
-        fileSize: stats.size,
-        mimeType: 'video/mp4',
-        metadata: {
-          duration: (sourceResource.metadata as VideoMetadata).duration || 0,
-          width: result.width,
-          height: result.height,
-          fps: result.fps,
-          codec: 'h264',
-          hasAudio: (sourceResource.metadata as VideoMetadata).hasAudio || false,
-        } as VideoMetadata,
-      });
-
-      console.log(`[TaskHandler] Created HD resource: ${newResource.id} (${outputFileName})`);
-      outputResourceIds.push(newResource.id);
+      console.log(`[TaskHandler] Created HD resource: ${resourceId} (${outputFileName})`);
+      outputResourceIds.push(resourceId);
     } catch (error) {
       console.error(`[TaskHandler] Failed to upscale video ${sourceResource.fileName}:`, error);
       // 继续处理下一个视频
@@ -378,30 +360,13 @@ const synthesizeVideoHandler: TaskHandler = async (task, onProgress) => {
       appConfig
     );
 
-    // 获取文件信息
-    const stats = await fs.stat(outputPath);
+    // 构建资源 ID（相对路径）
+    const resourceId = buildResourceId(draftId, outputPath);
 
-    // 创建资源记录
-    const newResource = await storage.resource.add(draftId, {
-      type: 'synthesized',
-      filePath: outputPath,
-      fileName: outputFileName,
-      fileSize: stats.size,
-      mimeType: 'video/mp4',
-      metadata: {
-        duration: result.duration || totalDuration,
-        width: result.width,
-        height: result.height,
-        fps: result.fps,
-        codec: 'h264',
-        hasAudio: true,
-      } as VideoMetadata,
-    });
-
-    console.log(`[TaskHandler] Created synthesized resource: ${newResource.id}`);
+    console.log(`[TaskHandler] Created synthesized resource: ${resourceId}`);
     onProgress(100);
 
-    return [newResource.id];
+    return [resourceId];
   } catch (error) {
     console.error('[TaskHandler] Failed to synthesize videos:', error);
     throw error;
@@ -502,32 +467,12 @@ const splitVideoHandler: TaskHandler = async (task, onProgress) => {
 
     // 获取最终的文件路径
     const finalFilePath = await fs.stat(newFilePath).then(() => newFilePath).catch(() => scene.filePath);
-    const stats = await fs.stat(finalFilePath);
 
-    // Create resource record as 'scene_source' type
-    const newResource = await storage.resource.add(draftId, {
-      type: 'scene_source',
-      filePath: finalFilePath,
-      fileName: path.basename(finalFilePath),
-      fileSize: stats.size,
-      mimeType: 'video/mp4',
-      metadata: {
-        duration: scene.endTime - scene.startTime,
-        width: (sourceResource.metadata as VideoMetadata).width || 1920,
-        height: (sourceResource.metadata as VideoMetadata).height || 1080,
-        fps: (sourceResource.metadata as VideoMetadata).fps || 30,
-        codec: 'h264',
-        hasAudio: true,
-        // 分镜源视频边界编辑所需的信息
-        sourceVideoId: sourceVideoId,
-        startTime: scene.startTime,
-        endTime: scene.endTime,
-        sceneIndex: sequenceNumber,
-      } as VideoMetadata,
-    });
+    // 构建资源 ID（相对路径）
+    const resourceId = buildResourceId(draftId, finalFilePath);
 
-    console.log(`[TaskHandler] Created scene resource: ${newResource.id} (${path.basename(finalFilePath)})`);
-    outputResourceIds.push(newResource.id);
+    console.log(`[TaskHandler] Created scene resource: ${resourceId} (${path.basename(finalFilePath)})`);
+    outputResourceIds.push(resourceId);
   }
 
   console.log('[TaskHandler] All scene resources created:', outputResourceIds.length);

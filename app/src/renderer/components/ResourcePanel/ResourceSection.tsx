@@ -54,17 +54,43 @@ interface ResourceSectionProps {
   onSectionDragEnd?: () => void;
 }
 
+// 文件扩展名到媒体类型的映射（用于 file.type 为空时的后备检查）
+const EXTENSION_MEDIA_TYPES: Record<string, string> = {
+  // Video
+  '.mp4': 'video',
+  '.mov': 'video',
+  '.avi': 'video',
+  '.mkv': 'video',
+  '.webm': 'video',
+  // Image
+  '.jpg': 'image',
+  '.jpeg': 'image',
+  '.png': 'image',
+  '.webp': 'image',
+  '.gif': 'image',
+  // Text
+  '.txt': 'text',
+  '.md': 'text',
+};
+
 // File type validation
 const validateFileType = (file: File, acceptFormats?: string[]): boolean => {
   if (!acceptFormats || acceptFormats.length === 0) return false;
 
   const fileName = file.name.toLowerCase();
+  const ext = fileName.substring(fileName.lastIndexOf('.'));
 
   for (const format of acceptFormats) {
     if (format.endsWith('/*')) {
       // Check MIME type prefix (e.g., "video/*", "image/*", "text/*")
       const prefix = format.replace('/*', '');
-      if (file.type.startsWith(prefix)) return true;
+
+      // 首先检查 file.type
+      if (file.type && file.type.startsWith(prefix)) return true;
+
+      // 如果 file.type 为空，使用文件扩展名进行后备检查
+      const mediaType = EXTENSION_MEDIA_TYPES[ext];
+      if (mediaType && mediaType === prefix) return true;
     } else if (format.startsWith('.')) {
       // Check file extension (e.g., ".txt", ".md")
       if (fileName.endsWith(format)) return true;
@@ -592,14 +618,18 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     // Handle regular file drops
     const files = Array.from(e.dataTransfer.files);
+    console.log('[ResourceSection] handleDrop: files count =', files.length, 'type =', type);
     if (files.length === 0) return;
 
     let addedCount = 0;
     let skippedCount = 0;
 
     for (const file of files) {
+      console.log('[ResourceSection] Processing file:', file.name, 'type:', file.type, 'acceptFormats:', acceptFormats);
+
       // Validate file type
       if (!validateFileType(file, acceptFormats)) {
+        console.warn('[ResourceSection] File type validation failed:', file.name, file.type);
         skippedCount++;
         continue;
       }
@@ -607,20 +637,23 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       // Get the file path - Electron provides this via the path property
       const filePath = (file as any).path;
       if (!filePath) {
-        console.error('File path not available');
+        console.error('[ResourceSection] File path not available for:', file.name);
         skippedCount++;
         continue;
       }
 
+      console.log('[ResourceSection] Adding resource:', { draftId: selectedDraftId, type, filePath });
       try {
         const result = await addResource(selectedDraftId, type, filePath);
+        console.log('[ResourceSection] addResource result:', result);
         if (result) {
           addedCount++;
         } else {
+          console.warn('[ResourceSection] addResource returned null');
           skippedCount++;
         }
       } catch (error) {
-        console.error('Failed to add resource:', error);
+        console.error('[ResourceSection] Failed to add resource:', error);
         skippedCount++;
       }
     }

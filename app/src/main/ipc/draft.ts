@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { DRAFT_CHANNELS, LINKS_CHANNELS } from '@shared/ipc-channels';
 import storage, { LinksFile } from '../services/storage';
+import { checkAndMigrate } from '../services/migration';
 import type { Draft, OperationResult, PaginatedResult } from '@shared/types';
 
 // ============================================
@@ -224,6 +225,7 @@ export function registerDraftHandlers(): void {
   );
 
   // Cleanup orphaned files in draft
+  // 注意：此 handler 在选择草稿时首先调用，同时处理数据迁移
   ipcMain.handle(
     DRAFT_CHANNELS.CLEANUP_FILES,
     async (_, request: { draftId: string }): Promise<OperationResult<number>> => {
@@ -232,6 +234,10 @@ export function registerDraftHandlers(): void {
         if (!existing) {
           return { success: false, error: 'DRAFT_NOT_FOUND' };
         }
+
+        // 检查并执行数据迁移（如果需要）
+        const draftPath = storage.getDraftPath(request.draftId);
+        await checkAndMigrate(draftPath);
 
         const deletedCount = await storage.cleanupOrphanedFiles(request.draftId);
         console.log(`[Draft] Cleaned up ${deletedCount} orphaned files for draft:`, request.draftId);

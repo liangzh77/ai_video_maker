@@ -102,14 +102,24 @@ async function createResourceFromImageData(
   // Extract metadata
   const metadata = await extractMetadata(destPath, type);
 
-  return await storage.resource.add(draftId, {
+  // 构建相对路径作为资源 ID
+  const config = { name: path.basename(path.dirname(destPath)) };
+  const relativePath = `${config.name}/${path.basename(destPath)}`;
+
+  // 直接构建资源对象（不再写入 resources.json）
+  const resource: Resource = {
+    id: relativePath,
+    draftId,
     type,
     filePath: destPath,
-    fileName: path.basename(destPath),  // 使用新文件名
+    fileName: path.basename(destPath),
     fileSize: stats.size,
     mimeType,
     metadata,
-  });
+    createdAt: new Date().toISOString(),
+  };
+
+  return resource;
 }
 
 async function createResourceFromText(
@@ -136,18 +146,27 @@ async function createResourceFromText(
   const stats = await fs.stat(destPath);
   console.log('createResourceFromText: File size =', stats.size);
 
-  const resource = await storage.resource.add(draftId, {
+  // 构建相对路径作为资源 ID
+  const config = { name: path.basename(path.dirname(destPath)) };
+  const relativePath = `${config.name}/${path.basename(destPath)}`;
+
+  // 直接构建资源对象（不再写入 resources.json）
+  const resource: Resource = {
+    id: relativePath,
+    draftId,
     type,
     filePath: destPath,
-    fileName: path.basename(destPath),  // 使用新文件名
+    fileName: path.basename(destPath),
     fileSize: stats.size,
     mimeType: 'text/plain',
     metadata: {
       content,
       encoding: 'utf-8',
     },
-  });
-  console.log('createResourceFromText: Resource added to storage:', resource.id);
+    createdAt: new Date().toISOString(),
+  };
+
+  console.log('createResourceFromText: Resource created:', resource.id);
   return resource;
 }
 
@@ -157,8 +176,8 @@ async function createResourceFromFile(
   sourcePath: string
 ): Promise<Resource> {
   // Verify source file exists
-  const stats = await fs.stat(sourcePath);
-  if (!stats.isFile()) {
+  const sourceStats = await fs.stat(sourcePath);
+  if (!sourceStats.isFile()) {
     throw new Error('Path is not a file');
   }
 
@@ -171,6 +190,7 @@ async function createResourceFromFile(
   // 某些资源类型保留原有文件名（仅限 isFolder=true 的类型）
   const keepOriginalNameTypes: ResourceType[] = ['scene_new', 'scene_hd', 'lipsync'];
   let destPath: string;
+  let folderName: string;
 
   if (keepOriginalNameTypes.includes(type)) {
     // 保留原有文件名
@@ -180,11 +200,13 @@ async function createResourceFromFile(
       throw new Error(`Cannot get folder path for type: ${type}`);
     }
     destPath = path.join(folderPath, originalFileName);
+    folderName = path.basename(folderPath);
     console.log('[createResourceFromFile] destPath with original name:', destPath);
   } else {
     // 使用新的命名规范获取文件路径
     const sequenceNumber = await storage.getNextSequenceNumber(draftId, type);
     destPath = storage.getResourceFilePath(draftId, type, ext, sequenceNumber);
+    folderName = path.basename(path.dirname(destPath));
     console.log('[createResourceFromFile] destPath with sequence:', destPath);
   }
 
@@ -194,35 +216,31 @@ async function createResourceFromFile(
   // Copy file to storage
   await fs.copyFile(sourcePath, destPath);
 
+  // Get new file stats
+  const stats = await fs.stat(destPath);
+
   // Extract metadata from copied file
   const metadata = await extractMetadata(destPath, type);
 
-  // 检查是否已存在相同路径的资源（用于覆盖场景）
-  const existingResources = await storage.resource.list(draftId, type);
-  const normalizedDestPath = path.normalize(destPath);
-  const existingResource = existingResources.find(
-    (r) => path.normalize(r.filePath) === normalizedDestPath
-  );
+  // 构建相对路径作为资源 ID
+  const filesDir = storage.getFilesPath(draftId);
+  const relativePath = path.relative(filesDir, destPath).replace(/\\/g, '/');
 
-  if (existingResource) {
-    // 更新现有资源
-    console.log('[createResourceFromFile] Updating existing resource:', existingResource.id);
-    const updated = await storage.resource.update(draftId, existingResource.id, {
-      fileSize: stats.size,
-      metadata,
-    });
-    return updated || existingResource;
-  }
-
-  // 创建新资源
-  return await storage.resource.add(draftId, {
+  // 直接构建资源对象（不再写入 resources.json）
+  const resource: Resource = {
+    id: relativePath,
+    draftId,
     type,
     filePath: destPath,
     fileName: path.basename(destPath),
     fileSize: stats.size,
     mimeType,
     metadata,
-  });
+    createdAt: stats.birthtime.toISOString(),
+  };
+
+  console.log('[createResourceFromFile] Resource created:', resource.id);
+  return resource;
 }
 
 // ============================================
@@ -400,6 +418,7 @@ export function registerResourceHandlers(): void {
   );
 
   // Update resource
+  // 注意：由于资源信息现在通过扫描文件系统获取，此 handler 主要用于更新文本文件内容
   ipcMain.handle(
     RESOURCE_CHANNELS.UPDATE,
     async (_, request: ResourceUpdateRequest): Promise<OperationResult<Resource>> => {
@@ -422,32 +441,28 @@ export function registerResourceHandlers(): void {
           return { success: false, error: 'RESOURCE_NOT_FOUND' };
         }
 
-        // Update the resource
-        const updatedMetadata = request.metadata
-          ? { ...foundResource.metadata, ...request.metadata }
-          : foundResource.metadata;
-
-        // 如果是文本资源（提示词），同步更新文件内容
+        // 如果是文本资源（提示词），更新文件内容
         if (foundResource.mimeType === 'text/plain' && request.metadata && 'content' in request.metadata) {
           const textContent = request.metadata.content as string;
           try {
             await fs.writeFile(foundResource.filePath, textContent, 'utf-8');
             console.log('[Resource] Updated text file:', foundResource.filePath);
+
+            // 清除缓存以便下次获取最新内容
+            storage.clearMetadataCache(foundDraftId);
           } catch (err) {
             console.error('[Resource] Failed to update text file:', err);
             return { success: false, error: 'Failed to update text file' };
           }
         }
 
-        const updated = await storage.resource.update(foundDraftId, request.id, {
-          metadata: updatedMetadata,
-        });
-
-        if (!updated) {
-          return { success: false, error: 'Failed to update resource' };
+        // 重新获取更新后的资源
+        const updatedResource = await storage.resource.get(foundDraftId, request.id);
+        if (!updatedResource) {
+          return { success: false, error: 'Failed to get updated resource' };
         }
 
-        return { success: true, data: updated };
+        return { success: true, data: updatedResource };
       } catch (error) {
         return {
           success: false,
@@ -505,15 +520,22 @@ export function registerResourceHandlers(): void {
         // Get new file stats
         const stats = await fs.stat(newFilePath);
 
-        // Create new resource record
-        const newResource = await storage.resource.add(targetDraftId, {
+        // 构建相对路径作为资源 ID
+        const filesDir = storage.getFilesPath(targetDraftId);
+        const relativePath = path.relative(filesDir, newFilePath).replace(/\\/g, '/');
+
+        // 直接构建资源对象（不再写入 resources.json）
+        const newResource: Resource = {
+          id: relativePath,
+          draftId: targetDraftId,
           type: targetType,
           filePath: newFilePath,
           fileName: path.basename(newFilePath),
           fileSize: stats.size,
           mimeType: foundResource.mimeType,
           metadata: { ...foundResource.metadata },
-        });
+          createdAt: new Date().toISOString(),
+        };
 
         console.log('[Resource] Copied resource:', foundResource.id, '->', newResource.id, 'type:', foundResource.type, '->', targetType);
         return { success: true, data: newResource };
@@ -582,16 +604,7 @@ export function registerResourceHandlers(): void {
 
         const resourceType = foundResource.type;
 
-        // Delete the file from storage if it exists in the files directory
-        const filesDir = storage.getFilesPath(foundDraftId);
-        if (foundResource.filePath.startsWith(filesDir)) {
-          try {
-            await fs.unlink(foundResource.filePath);
-          } catch {
-            // File may already be deleted, continue
-          }
-        }
-
+        // storage.resource.delete 现在会直接删除文件
         const deleted = await storage.resource.delete(foundDraftId, request.id);
         if (!deleted) {
           return { success: false, error: 'Failed to delete resource' };
