@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Progress, App, Empty, Select, Radio } from 'antd';
-import { CheckCircleFilled } from '@ant-design/icons';
+import { Modal, Progress, App, Empty, Select, Radio, Button } from 'antd';
+import { CheckCircleFilled, CopyOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import type { Resource, ImageResolution } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import styles from './GenerateImageDialog.module.css';
@@ -34,6 +34,23 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [errorModalVisible, setErrorModalVisible] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // 显示持久错误弹窗
+  const showError = (error: string) => {
+    setErrorMessage(error);
+    setErrorModalVisible(true);
+  };
+
+  // 复制错误信息到剪贴板
+  const handleCopyError = () => {
+    navigator.clipboard.writeText(errorMessage).then(() => {
+      message.success('错误信息已复制到剪贴板');
+    }).catch(() => {
+      message.error('复制失败');
+    });
+  };
 
   // Filter source character images
   const sourceImages = resources.filter((r) => r.type === 'source_character');
@@ -90,7 +107,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       if (event.status === 'failed') {
         setStatusText(`失败: ${event.error || '未知错误'}`);
         setIsGenerating(false);
-        message.error(event.error || '生成失败');
+        showError(event.error || '生成失败');
         return;
       }
 
@@ -170,7 +187,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setStatusText('任务已创建，等待处理...');
     } catch (error) {
       console.error('Generate image error:', error);
-      message.error(error instanceof Error ? error.message : '生成失败');
+      showError(error instanceof Error ? error.message : '生成失败');
       setIsGenerating(false);
     }
   };
@@ -283,6 +300,50 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           </div>
         )}
       </div>
+
+      {/* 错误信息弹窗 */}
+      <Modal
+        title={
+          <span style={{ color: '#ff4d4f' }}>
+            <CloseCircleOutlined style={{ marginRight: 8 }} />
+            生成失败
+          </span>
+        }
+        open={errorModalVisible}
+        onCancel={() => setErrorModalVisible(false)}
+        footer={[
+          <Button
+            key="copy"
+            icon={<CopyOutlined />}
+            onClick={handleCopyError}
+          >
+            复制错误信息
+          </Button>,
+          <Button
+            key="close"
+            type="primary"
+            onClick={() => setErrorModalVisible(false)}
+          >
+            关闭
+          </Button>,
+        ]}
+        width={600}
+      >
+        <div
+          style={{
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+            padding: '12px',
+            backgroundColor: '#fafafa',
+            borderRadius: '4px',
+            border: '1px solid #f0f0f0',
+            maxHeight: '300px',
+            overflowY: 'auto',
+          }}
+        >
+          {errorMessage}
+        </div>
+      </Modal>
     </Modal>
   );
 };

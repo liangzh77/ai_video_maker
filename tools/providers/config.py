@@ -11,16 +11,34 @@ from pathlib import Path
 def load_env_file():
     """
     加载 .env.local 文件
-    优先从当前目录向上查找，直到找到 .env.local 文件
+    优先级：
+    1. ENV_FILE 环境变量指定的路径
+    2. 从当前脚本目录向上查找
+    3. app 子目录
     """
-    current = Path(__file__).parent.parent.parent  # tools/providers -> tools -> project_root
-    env_file = current / ".env.local"
+    env_file = None
 
-    if not env_file.exists():
-        # 也尝试 app 目录
-        env_file = current / "app" / ".env.local"
+    # 1. 优先使用环境变量指定的路径
+    env_path_from_env = os.environ.get("ENV_FILE")
+    if env_path_from_env:
+        env_file = Path(env_path_from_env)
+        if not env_file.exists():
+            print(f"[Config] Warning: ENV_FILE specified but not found: {env_file}")
+            env_file = None
 
-    if env_file.exists():
+    # 2. 从当前脚本目录向上查找
+    if not env_file:
+        current = Path(__file__).parent.parent.parent  # tools/providers -> tools -> project_root
+        env_file = current / ".env.local"
+
+        if not env_file.exists():
+            # 也尝试 app 目录
+            env_file = current / "app" / ".env.local"
+
+        if not env_file.exists():
+            env_file = None
+
+    if env_file and env_file.exists():
         print(f"[Config] Loading .env.local from: {env_file}")
         with open(env_file, "r", encoding="utf-8") as f:
             for line in f:

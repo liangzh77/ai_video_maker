@@ -6,11 +6,17 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* 填满 Modal body 的高度 */
+  height: 100%;
 }
 
 .videoContainer {
   display: flex;
   gap: 16px;
+  /* 使用 flex: 1 填充剩余空间 */
+  flex: 1;
+  /* 关键：允许 flex 子项收缩到比内容更小 */
+  min-height: 0;
 }
 
 .videoWrapper {
@@ -18,6 +24,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* 允许收缩 */
+  min-height: 0;
 }
 
 .videoLabel {
@@ -25,12 +33,16 @@
   font-weight: 500;
   color: var(--color-text-secondary);
   text-align: center;
+  /* 不收缩 */
+  flex-shrink: 0;
 }
 
 .video {
   width: 100%;
-  height: auto;
-  max-height: 400px;
+  /* 填满剩余空间 */
+  flex: 1;
+  /* 允许收缩 */
+  min-height: 0;
   object-fit: contain;
   background-color: #000;
   border-radius: 8px;
@@ -44,6 +56,8 @@
   padding: 12px;
   background-color: var(--color-bg-elevated);
   border-radius: 8px;
+  /* 不收缩，保持固定高度 */
+  flex-shrink: 0;
 }
 
 .playButton {

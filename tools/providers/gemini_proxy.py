@@ -96,8 +96,21 @@ class GeminiProxyProvider(ImageGeneratorBase):
                 return response.json()
             except httpx.HTTPStatusError as e:
                 logger.error(f"[{self.name}] HTTP 错误: {e.response.status_code} - {e.response.text}")
+                # 尝试从响应中提取详细错误信息
+                error_detail = ""
+                try:
+                    error_json = e.response.json()
+                    if "error" in error_json:
+                        error_detail = error_json["error"].get("message", "")
+                except Exception:
+                    error_detail = e.response.text[:200] if e.response.text else ""
+
+                error_msg = f"API 请求失败 ({e.response.status_code})"
+                if error_detail:
+                    error_msg += f": {error_detail}"
+
                 raise ProviderError(
-                    f"API 请求失败: {e.response.status_code}",
+                    error_msg,
                     provider=self.name,
                     error_code=str(e.response.status_code),
                     raw_error={"status": e.response.status_code, "text": e.response.text}
@@ -106,6 +119,12 @@ class GeminiProxyProvider(ImageGeneratorBase):
                 logger.error(f"[{self.name}] 请求超时")
                 raise ProviderError(
                     "请求超时，请稍后重试",
+                    provider=self.name
+                )
+            except httpx.ConnectError as e:
+                logger.error(f"[{self.name}] 连接失败: {e}")
+                raise ProviderError(
+                    f"无法连接到 API 服务器: {str(e)}",
                     provider=self.name
                 )
 

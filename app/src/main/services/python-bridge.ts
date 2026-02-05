@@ -57,6 +57,15 @@ function getVideoToolsPath(): string {
   return path.join(process.cwd(), '..', 'tools', 'dist', 'video_tools', 'video_tools.exe');
 }
 
+function getImageGeneratorPath(): string {
+  if (app.isPackaged) {
+    // 打包后，image_generator.exe 在 resources/tools 目录
+    return path.join(process.resourcesPath, 'tools', 'image_generator.exe');
+  }
+  // 开发模式下，使用打包好的 exe
+  return path.join(process.cwd(), '..', 'tools', 'dist', 'image_generator', 'image_generator.exe');
+}
+
 // 检查是否应该使用 exe 模式
 function shouldUseExe(): boolean {
   // 如果打包了，总是使用 exe
@@ -108,6 +117,7 @@ interface RunProcessOptions {
   args: string[];
   onStdoutLine?: (line: string) => void;
   onStderrLine?: (line: string) => void;
+  env?: Record<string, string>;
 }
 
 function runProcess(options: RunProcessOptions): Promise<void> {
@@ -122,12 +132,17 @@ function runProcess(options: RunProcessOptions): Promise<void> {
         PYTHONIOENCODING: 'utf-8',
         PYTHONUTF8: '1',  // Python 3.7+ UTF-8 模式
         PYTHONLEGACYWINDOWSSTDIO: '0',  // 禁用旧版 Windows stdio
+        ...options.env,  // 合并额外的环境变量
       },
       // Windows 下不使用 shell，避免编码问题
       shell: false,
       // Windows 下隐藏控制台窗口
       windowsHide: true,
     });
+
+    // 收集所有输出用于错误报告
+    const allStdout: string[] = [];
+    const allStderr: string[] = [];
 
     // 按行处理 stdout（Buffer 可能跨行，需要缓冲）
     let stdoutBuffer = '';
@@ -137,8 +152,11 @@ function runProcess(options: RunProcessOptions): Promise<void> {
       // 保留最后一个不完整的行
       stdoutBuffer = lines.pop() || '';
       for (const line of lines) {
-        if (line.trim() && options.onStdoutLine) {
-          options.onStdoutLine(line);
+        if (line.trim()) {
+          allStdout.push(line);
+          if (options.onStdoutLine) {
+            options.onStdoutLine(line);
+          }
         }
       }
     });
@@ -150,8 +168,11 @@ function runProcess(options: RunProcessOptions): Promise<void> {
       const lines = stderrBuffer.split(/\r?\n/);
       stderrBuffer = lines.pop() || '';
       for (const line of lines) {
-        if (line.trim() && options.onStderrLine) {
-          options.onStderrLine(line);
+        if (line.trim()) {
+          allStderr.push(line);
+          if (options.onStderrLine) {
+            options.onStderrLine(line);
+          }
         }
       }
     });
@@ -162,17 +183,34 @@ function runProcess(options: RunProcessOptions): Promise<void> {
 
     proc.on('close', (code: number | null) => {
       // 处理剩余的缓冲数据
-      if (stdoutBuffer.trim() && options.onStdoutLine) {
-        options.onStdoutLine(stdoutBuffer);
+      if (stdoutBuffer.trim()) {
+        allStdout.push(stdoutBuffer);
+        if (options.onStdoutLine) {
+          options.onStdoutLine(stdoutBuffer);
+        }
       }
-      if (stderrBuffer.trim() && options.onStderrLine) {
-        options.onStderrLine(stderrBuffer);
+      if (stderrBuffer.trim()) {
+        allStderr.push(stderrBuffer);
+        if (options.onStderrLine) {
+          options.onStderrLine(stderrBuffer);
+        }
       }
 
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`Process exited with code ${code}`));
+        // 构建详细的错误信息
+        // 优先从 stdout 中查找 Error: 开头的行（Python 脚本的错误输出）
+        const errorLine = allStdout.find(line => line.startsWith('Error:'));
+        if (errorLine) {
+          reject(new Error(errorLine));
+        } else if (allStderr.length > 0) {
+          // 其次使用 stderr 内容
+          reject(new Error(allStderr.join('\n')));
+        } else {
+          // 最后使用默认的退出码消息
+          reject(new Error(`Process exited with code ${code}`));
+        }
       }
     });
   });
@@ -610,20 +648,31 @@ export async function runImageGenerator(
   let args: string[];
 
   if (useExe) {
-    // TODO: 打包后使用 exe
-    command = getVideoToolsPath();
-    args = ['generate', '--model', modelId, '--source', sourcePath, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
+    // 使用打包后的 exe
+    command = getImageGeneratorPath();
+    args = ['--model', modelId, '--source', sourcePath, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
   } else {
+    // 开发模式使用 Python 脚本
     command = getPythonPath(appConfig);
     args = [path.join(getToolsPath(), 'image_generator.py'), '--model', modelId, '--source', sourcePath, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
   }
 
+  // 获取 .env.local 路径（打包后在安装目录根目录）
+  const envFilePath = app.isPackaged
+    ? path.join(process.resourcesPath, '..', '.env.local')
+    : path.join(process.cwd(), '.env.local');
+
   console.log('[ImageGenerator] Starting with command:', command);
   console.log('[ImageGenerator] Args:', args);
+  console.log('[ImageGenerator] ENV_FILE:', envFilePath);
+  console.log('[ImageGenerator] Using exe mode:', useExe);
 
   await runProcess({
     command,
     args,
+    env: {
+      ENV_FILE: envFilePath,
+    },
     onStdoutLine: (message: string) => {
       console.log('[ImageGenerator]', message);
 

@@ -8,6 +8,8 @@ import logging
 from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
 
+from .base import ProviderError
+
 logger = logging.getLogger(__name__)
 
 
@@ -76,15 +78,41 @@ class BaseHttpClient(ABC):
                     return result
                 except httpx.HTTPStatusError as e:
                     logger.error(f"HTTP error: {e.response.status_code} - {e.response.text}")
-                    if attempt == self.max_retries - 1:
-                        raise
                     # 只重试 5xx 错误
-                    if e.response.status_code < 500:
-                        raise
+                    if e.response.status_code < 500 or attempt == self.max_retries - 1:
+                        # 尝试从响应中提取详细错误信息
+                        error_detail = ""
+                        try:
+                            error_json = e.response.json()
+                            if "error" in error_json:
+                                error_detail = error_json["error"].get("message", "")
+                        except Exception:
+                            error_detail = e.response.text[:200] if e.response.text else ""
+
+                        error_msg = f"API 请求失败 ({e.response.status_code})"
+                        if error_detail:
+                            error_msg += f": {error_detail}"
+
+                        raise ProviderError(
+                            error_msg,
+                            provider="http_client",
+                            error_code=str(e.response.status_code),
+                            raw_error={"status": e.response.status_code, "text": e.response.text}
+                        )
                 except httpx.TimeoutException:
                     logger.warning(f"Timeout, attempt {attempt + 1}/{self.max_retries}")
                     if attempt == self.max_retries - 1:
-                        raise
+                        raise ProviderError(
+                            "请求超时，请稍后重试",
+                            provider="http_client"
+                        )
+                except httpx.ConnectError as e:
+                    logger.error(f"Connection error: {e}")
+                    if attempt == self.max_retries - 1:
+                        raise ProviderError(
+                            f"无法连接到 API 服务器: {str(e)}",
+                            provider="http_client"
+                        )
 
         return {}
 

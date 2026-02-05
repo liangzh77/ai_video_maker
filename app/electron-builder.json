@@ -22,6 +22,11 @@
       "filter": ["**/*"]
     },
     {
+      "from": "../tools/dist/image_generator",
+      "to": "tools",
+      "filter": ["**/*"]
+    },
+    {
       "from": "../bin",
       "to": "tools",
       "filter": ["ffmpeg.exe", "ffprobe.exe"]

@@ -164,7 +164,14 @@ const DualVideoPlayerDialog: React.FC<DualVideoPlayerDialogProps> = ({
       open={visible}
       onCancel={onClose}
       footer={null}
-      width={1000}
+      width="85vw"
+      styles={{
+        body: {
+          height: '85vh',
+          padding: '16px 24px',
+          overflow: 'hidden',
+        },
+      }}
       centered
       destroyOnClose
       className={styles.modal}

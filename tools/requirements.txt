@@ -1,0 +1,11 @@
+# AI Video Maker Tools Dependencies
+# 支持 Python 3.6+
+
+# dataclasses backport (Python 3.6 需要，3.7+ 已内置)
+dataclasses;python_version<"3.7"
+
+# HTTP 客户端
+httpx>=0.24.0
+
+# 图片处理
+Pillow>=9.0.0

@@ -317,6 +317,44 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
     [effectiveDuration, seekToTime]
   );
 
+  // 跳转到前一个分割点
+  const goToPrevSplitPoint = useCallback(() => {
+    if (splitPoints.length === 0) return;
+
+    const sortedPoints = [...splitPoints].sort((a, b) => a.time - b.time);
+    // 找到当前时间之前的分割点
+    const prevPoint = sortedPoints.filter(p => p.time < currentTime - 0.05).pop();
+
+    if (prevPoint) {
+      selectPoint(prevPoint.id);
+      seekToTime(prevPoint.time);
+    } else {
+      // 如果没有前一个，跳到最后一个（循环）
+      const lastPoint = sortedPoints[sortedPoints.length - 1];
+      selectPoint(lastPoint.id);
+      seekToTime(lastPoint.time);
+    }
+  }, [splitPoints, currentTime, selectPoint, seekToTime]);
+
+  // 跳转到后一个分割点
+  const goToNextSplitPoint = useCallback(() => {
+    if (splitPoints.length === 0) return;
+
+    const sortedPoints = [...splitPoints].sort((a, b) => a.time - b.time);
+    // 找到当前时间之后的分割点
+    const nextPoint = sortedPoints.find(p => p.time > currentTime + 0.05);
+
+    if (nextPoint) {
+      selectPoint(nextPoint.id);
+      seekToTime(nextPoint.time);
+    } else {
+      // 如果没有后一个，跳到第一个（循环）
+      const firstPoint = sortedPoints[0];
+      selectPoint(firstPoint.id);
+      seekToTime(firstPoint.time);
+    }
+  }, [splitPoints, currentTime, selectPoint, seekToTime]);
+
   // Keyboard navigation
   useEffect(() => {
     if (!visible) return;
@@ -337,13 +375,34 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
           togglePlay();
           break;
         case 'ArrowLeft':
+        case 'a':
+        case 'A':
           e.preventDefault();
           handleFrameStep('prev');
           break;
         case 'ArrowRight':
+        case 'd':
+        case 'D':
           e.preventDefault();
           handleFrameStep('next');
           break;
+        case 's':
+        case 'S':
+          e.preventDefault();
+          goToPrevSplitPoint();
+          break;
+        case 'w':
+        case 'W':
+          e.preventDefault();
+          goToNextSplitPoint();
+          break;
+        case 'e':
+        case 'E':
+          e.preventDefault();
+          addPoint(currentTime);
+          break;
+        case 'q':
+        case 'Q':
         case 'Delete':
         case 'Backspace':
           if (selectedPointId) {
@@ -356,7 +415,7 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [visible, togglePlay, handleFrameStep, selectedPointId, removePoint]);
+  }, [visible, togglePlay, handleFrameStep, selectedPointId, removePoint, goToPrevSplitPoint, goToNextSplitPoint, addPoint, currentTime]);
 
   const selectedPoint = splitPoints.find((p) => p.id === selectedPointId);
 
@@ -366,7 +425,15 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
       open={visible}
       onCancel={onClose}
       footer={null}
-      width={900}
+      width="85vw"
+      styles={{
+        body: {
+          /* 给 body 明确的高度，让子元素的 height 百分比能生效 */
+          height: '85vh',
+          padding: '16px 24px',
+          overflow: 'hidden',
+        },
+      }}
       centered
       destroyOnClose
     >
@@ -460,7 +527,7 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
               />
             </Tooltip>
             <span className={styles.hint}>
-              {splitPoints.length} 个分割点 | 左右方向键逐帧移动 | 空格播放/暂停
+              {splitPoints.length} 个分割点 | A/D 逐帧 | W/S 跳转分割点 | E 添加 | Q 删除 | 空格播放
             </span>
           </div>
 
