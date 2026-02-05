@@ -87,6 +87,13 @@ function getTasksPath(draftId: string): string {
 }
 
 function getLinksPath(draftId: string): string {
+  return path.join(getFilesPath(draftId), '关联.json');
+}
+
+/**
+ * @deprecated 旧版 links.json 路径，仅用于迁移
+ */
+function getOldLinksPath(draftId: string): string {
   return path.join(getDraftPath(draftId), 'links.json');
 }
 
@@ -530,10 +537,11 @@ export async function reorderResourceFiles(
     }
   }
 
-  // 第二步：按新顺序重命名为最终名称
+  // 第二步：按新顺序重命名为最终名称，同时构建 ID 映射
+  const oldToNewIdMap = new Map<string, string>();
   const newResourceIds: string[] = [];
   for (let i = 0; i < tempRenames.length; i++) {
-    const { tempPath, originalName } = tempRenames[i];
+    const { resource, tempPath, originalName } = tempRenames[i];
     const newSequence = i + 1;
     const ext = path.extname(tempPath);
     const newFileName = makeSequencedFileName(newSequence, originalName, ext);
@@ -543,10 +551,17 @@ export async function reorderResourceFiles(
     try {
       await fs.rename(tempPath, newPath);
       newResourceIds.push(newRelativePath);
+      // 记录旧 ID -> 新 ID 映射
+      oldToNewIdMap.set(resource.id, newRelativePath);
     } catch (err) {
       console.error('[Storage] Failed to rename to final:', tempPath, '->', newPath, err);
       throw err;
     }
+  }
+
+  // 第三步：如果是 scene_source 或 scene_new，更新 links.json 中的引用
+  if (resourceType === 'scene_source' || resourceType === 'scene_new') {
+    await updateLinksOnReorder(draftId, resourceType, oldToNewIdMap);
   }
 
   // 清除缓存，让下次扫描重新加载
@@ -581,6 +596,54 @@ export async function renumberResourceFiles(
 
   // 重新排序
   await reorderResourceFiles(draftId, resourceType, sorted.map(r => r.id));
+}
+
+/**
+ * 重排序后更新 links.json 中的资源引用
+ * @param draftId 草稿ID
+ * @param resourceType 资源类型（scene_source 或 scene_new）
+ * @param oldToNewIdMap 旧 ID -> 新 ID 的映射
+ */
+async function updateLinksOnReorder(
+  draftId: string,
+  resourceType: ResourceType,
+  oldToNewIdMap: Map<string, string>
+): Promise<void> {
+  if (oldToNewIdMap.size === 0) return;
+
+  try {
+    const links = await loadLinks(draftId);
+    let updated = false;
+
+    if (resourceType === 'scene_source') {
+      // 更新 sourceToNew 的键（source ID）
+      const newSourceToNew: Record<string, string> = {};
+      for (const [oldSourceId, newId] of Object.entries(links.sourceToNew)) {
+        const newSourceId = oldToNewIdMap.get(oldSourceId) || oldSourceId;
+        newSourceToNew[newSourceId] = newId;
+        if (newSourceId !== oldSourceId) {
+          updated = true;
+        }
+      }
+      links.sourceToNew = newSourceToNew;
+    } else if (resourceType === 'scene_new') {
+      // 更新 sourceToNew 的值（new ID）
+      for (const [sourceId, oldNewId] of Object.entries(links.sourceToNew)) {
+        const newNewId = oldToNewIdMap.get(oldNewId);
+        if (newNewId) {
+          links.sourceToNew[sourceId] = newNewId;
+          updated = true;
+        }
+      }
+    }
+
+    if (updated) {
+      await saveLinks(draftId, links);
+      console.log('[Storage] Updated links.json after reorder:', resourceType);
+    }
+  } catch (err) {
+    console.error('[Storage] Failed to update links on reorder:', err);
+  }
 }
 
 // ============================================
@@ -737,8 +800,8 @@ export async function copyDraft(sourceId: string, newName: string): Promise<Draf
   };
   await writeJson(getMetaPath(newId), newDraft);
 
-  // 删除复制过来的 resources.json（如果存在）
-  // 资源列表现在通过扫描文件系统获取
+  // 删除复制过来的旧文件（如果存在）
+  // resources.json 已废弃
   const oldResourcesPath = path.join(targetPath, 'resources.json');
   try {
     await fs.unlink(oldResourcesPath);
@@ -746,10 +809,18 @@ export async function copyDraft(sourceId: string, newName: string): Promise<Draf
     // 文件可能不存在
   }
 
+  // 删除旧位置的 links.json（已移到 files/关联.json）
+  const oldLinksPath = path.join(targetPath, 'links.json');
+  try {
+    await fs.unlink(oldLinksPath);
+  } catch {
+    // 文件可能不存在
+  }
+
   // 清空 tasks.json（任务不需要复制）
   await writeJson(getTasksPath(newId), { tasks: [] });
 
-  // 复制 links.json（保持关联关系）
+  // 复制关联关系到新位置 files/关联.json
   const sourceLinks = await loadLinks(sourceId);
   await writeJson(getLinksPath(newId), sourceLinks);
 
@@ -1007,8 +1078,8 @@ async function getAllFilesRecursive(dirPath: string): Promise<string[]> {
   return files;
 }
 
-// 不应被清理的特殊文件名（如分割点文件）
-const PROTECTED_FILES = ['分割点.txt'];
+// 不应被清理的特殊文件名（如分割点文件、关联文件）
+const PROTECTED_FILES = ['分割点.txt', '关联.json'];
 
 /**
  * 清理草稿中的临时文件和空文件夹

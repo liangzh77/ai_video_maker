@@ -405,6 +405,13 @@ export const useDraftStore = create<DraftState>((set, get) => ({
             resources: [...otherResources, ...result.data!],
           };
         });
+
+        // 如果是 scene_source 或 scene_new，重新加载关联关系
+        // 因为后端已更新了 关联.json 中的资源引用
+        if (type === 'scene_source' || type === 'scene_new') {
+          await useSceneLinkStore.getState().loadFromStorage(selectedDraftId);
+        }
+
         return true;
       }
       return false;
