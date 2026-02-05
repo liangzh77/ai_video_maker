@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Progress, App, Empty, Select, Radio, Button } from 'antd';
-import { CheckCircleFilled, CopyOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { Modal, Progress, App, Empty, Select, Radio, Button, Input } from 'antd';
+import { CopyOutlined, CloseCircleOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import type { Resource, ImageResolution } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import styles from './GenerateImageDialog.module.css';
@@ -26,7 +26,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const { message } = App.useApp();
   const { selectedDraftId, resources, loadResources } = useDraftStore();
 
-  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [selectedResolution, setSelectedResolution] = useState<ImageResolution>('2K');
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -36,6 +36,49 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [errorModalVisible, setErrorModalVisible] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [editedPrompt, setEditedPrompt] = useState('');
+
+  // 卡片大小比例，从 localStorage 读取缓存
+  const CARD_SCALE_KEY = 'generateImageDialog_cardScale';
+  const SCALE_STEPS = [0.2, 0.3, 0.4, 0.5, 0.75, 1, 1.25, 1.5, 2];
+  const [cardScale, setCardScale] = useState(() => {
+    const cached = localStorage.getItem(CARD_SCALE_KEY);
+    return cached ? parseFloat(cached) : 1;
+  });
+
+  // 保存卡片大小到 localStorage
+  const updateCardScale = (newScale: number) => {
+    setCardScale(newScale);
+    localStorage.setItem(CARD_SCALE_KEY, String(newScale));
+  };
+
+  // 缩小卡片
+  const handleDecreaseScale = () => {
+    const currentIndex = SCALE_STEPS.indexOf(cardScale);
+    if (currentIndex > 0) {
+      updateCardScale(SCALE_STEPS[currentIndex - 1]);
+    } else if (currentIndex === -1) {
+      // 当前值不在预设步骤中，找到最近的较小值
+      const smaller = SCALE_STEPS.filter(s => s < cardScale);
+      if (smaller.length > 0) {
+        updateCardScale(smaller[smaller.length - 1]);
+      }
+    }
+  };
+
+  // 放大卡片
+  const handleIncreaseScale = () => {
+    const currentIndex = SCALE_STEPS.indexOf(cardScale);
+    if (currentIndex >= 0 && currentIndex < SCALE_STEPS.length - 1) {
+      updateCardScale(SCALE_STEPS[currentIndex + 1]);
+    } else if (currentIndex === -1) {
+      // 当前值不在预设步骤中，找到最近的较大值
+      const larger = SCALE_STEPS.filter(s => s > cardScale);
+      if (larger.length > 0) {
+        updateCardScale(larger[0]);
+      }
+    }
+  };
 
   // 显示持久错误弹窗
   const showError = (error: string) => {
@@ -52,8 +95,22 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     });
   };
 
-  // Filter source character images
+  // Filter source character images and new character images
   const sourceImages = resources.filter((r) => r.type === 'source_character');
+  const newImages = resources.filter((r) => r.type === 'new_character');
+  const allImages = [...sourceImages, ...newImages];
+
+  // 多选图片的处理函数
+  const toggleImageSelection = (imageId: string) => {
+    if (isGenerating) return;
+    setSelectedImageIds((prev) => {
+      if (prev.includes(imageId)) {
+        return prev.filter((id) => id !== imageId);
+      } else {
+        return [...prev, imageId];
+      }
+    });
+  };
 
   // Load models when dialog opens
   useEffect(() => {
@@ -74,13 +131,14 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   // Reset state when dialog opens
   useEffect(() => {
     if (visible) {
-      setSelectedImageId(null);
+      setSelectedImageIds([]);
       setIsGenerating(false);
       setProgress(0);
       setStatusText('');
       setElapsedSeconds(0);
+      setEditedPrompt(promptContent);
     }
-  }, [visible]);
+  }, [visible, promptContent]);
 
   // Timer for elapsed time during generation
   useEffect(() => {
@@ -151,8 +209,8 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   }, [isGenerating, selectedDraftId, loadResources, message, onClose]);
 
   const handleGenerate = async () => {
-    if (!selectedDraftId || !selectedImageId) {
-      message.error('请先选择源角色图片');
+    if (!selectedDraftId || selectedImageIds.length === 0) {
+      message.error('请先选择至少一张参考图片');
       return;
     }
 
@@ -161,7 +219,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       return;
     }
 
-    if (!promptContent || promptContent.trim().length === 0) {
+    if (!editedPrompt || editedPrompt.trim().length === 0) {
       message.error('提示词内容不能为空');
       return;
     }
@@ -173,8 +231,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     try {
       const result = await window.api.task.generateImage({
         draftId: selectedDraftId,
-        sourceImageId: selectedImageId,
+        sourceImageIds: selectedImageIds,
         promptResourceId: promptResource.id,
+        prompt: editedPrompt,
         modelEndpoint: selectedModel,
         resolution: selectedResolution,
       });
@@ -209,11 +268,19 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       cancelText="取消"
       onOk={handleGenerate}
       okButtonProps={{
-        disabled: !selectedImageId || !selectedModel || isGenerating,
+        disabled: selectedImageIds.length === 0 || !selectedModel || isGenerating,
         loading: isGenerating,
       }}
       cancelButtonProps={{ disabled: isGenerating }}
-      width={800}
+      width="85vw"
+      styles={{
+        body: {
+          height: '85vh',
+          padding: '16px 24px',
+          overflow: 'hidden',
+        },
+      }}
+      centered
     >
       <div className={styles.content}>
         {/* Model Selection */}
@@ -242,47 +309,78 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           </Radio.Group>
         </div>
 
-        {/* Prompt Preview */}
+        {/* Prompt Editor */}
         <div className={styles.section}>
           <div className={styles.sectionTitle}>提示词</div>
-          <div className={styles.promptPreview}>
-            {promptContent || '(空提示词)'}
-          </div>
+          <Input.TextArea
+            value={editedPrompt}
+            onChange={(e) => setEditedPrompt(e.target.value)}
+            placeholder="输入提示词"
+            disabled={isGenerating}
+            className={styles.promptInput}
+            autoSize={{ minRows: 2, maxRows: 6 }}
+          />
         </div>
 
-        {/* Source Image Selection */}
+        {/* Image Selection - 支持多选 */}
         <div className={styles.section}>
           <div className={styles.sectionTitle}>
-            选择源角色图片
-            <span className={styles.count}>({sourceImages.length})</span>
+            选择参考图片（支持多选）
+            <span className={styles.count}>
+              已选 {selectedImageIds.length} / 共 {allImages.length} 张
+            </span>
+            <span className={styles.scaleControls}>
+              <Button
+                type="text"
+                size="small"
+                icon={<MinusOutlined />}
+                onClick={handleDecreaseScale}
+                disabled={cardScale <= SCALE_STEPS[0]}
+              />
+              <Button
+                type="text"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={handleIncreaseScale}
+                disabled={cardScale >= SCALE_STEPS[SCALE_STEPS.length - 1]}
+              />
+            </span>
           </div>
 
-          {sourceImages.length === 0 ? (
+          {allImages.length === 0 ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="暂无源角色图片，请先添加"
+              description="暂无角色图片，请先添加"
               className={styles.empty}
             />
           ) : (
             <div className={styles.imageGrid}>
-              {sourceImages.map((img) => (
+              {allImages.map((img) => (
                 <div
                   key={img.id}
-                  className={`${styles.imageItem} ${selectedImageId === img.id ? styles.selected : ''}`}
-                  onClick={() => !isGenerating && setSelectedImageId(img.id)}
+                  className={`${styles.imageItem} ${selectedImageIds.includes(img.id) ? styles.selected : ''}`}
+                  onClick={() => toggleImageSelection(img.id)}
                 >
                   <img
                     src={getImageUrl(img)}
                     alt={img.fileName}
                     className={styles.thumbnail}
+                    style={{
+                      height: `calc(37.5vh * ${cardScale})`,
+                      maxWidth: `calc(52.5vw * ${cardScale})`,
+                    }}
                   />
-                  {selectedImageId === img.id && (
+                  {selectedImageIds.includes(img.id) && (
                     <div className={styles.selectedBadge}>
-                      <CheckCircleFilled />
+                      {selectedImageIds.indexOf(img.id) + 1}
                     </div>
                   )}
                   <div className={styles.imageName} title={img.fileName}>
                     {img.fileName}
+                  </div>
+                  {/* 显示图片类型标签 */}
+                  <div className={`${styles.typeTag} ${img.type === 'source_character' ? styles.sourceTag : styles.newTag}`}>
+                    {img.type === 'source_character' ? '源' : '新'}
                   </div>
                 </div>
               ))}

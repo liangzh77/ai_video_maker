@@ -4,7 +4,7 @@ AI 模型提供者基类
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, Union
 from enum import Enum
 
 
@@ -161,7 +161,7 @@ class ImageGeneratorBase(ABC):
     async def image_to_image(
         self,
         prompt: str,
-        reference_image: bytes,
+        reference_images: Union[bytes, List[bytes]],
         config: Optional[GenerationConfig] = None
     ) -> GenerationResult:
         """
@@ -169,7 +169,7 @@ class ImageGeneratorBase(ABC):
 
         Args:
             prompt: 文本提示词
-            reference_image: 参考图片字节数据
+            reference_images: 参考图片字节数据，支持单张图片 (bytes) 或多张图片 (List[bytes])
             config: 生成配置
 
         Returns:

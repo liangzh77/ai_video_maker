@@ -45,8 +45,9 @@ interface TaskGetRequest {
 
 interface TaskGenerateImageRequest {
   draftId: string;
-  sourceImageId: string;
+  sourceImageIds: string[];
   promptResourceId: string;
+  prompt?: string;
   modelEndpoint?: string;
   resolution?: '4K' | '2K';
 }
@@ -103,6 +104,7 @@ interface TaskExtractAudioRequest {
 
 /**
  * Image generation task handler
+ * 支持多图输入：inputResourceIds 格式为 [sourceImageId1, sourceImageId2, ..., promptResourceId]
  */
 const generateImageHandler: TaskHandler = async (task, onProgress) => {
   const { draftId, inputResourceIds, config } = task;
@@ -110,16 +112,29 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
 
   console.log('[TaskHandler] Start processing image generation task:', task.id);
 
-  // Get source image resource
-  const sourceImageId = inputResourceIds[0];
-  const sourceResource = await storage.resource.get(draftId, sourceImageId);
-  if (!sourceResource) {
-    throw new Error('Source character image not found');
+  // 最后一个是 prompt 资源，前面的都是源图片
+  const promptResourceId = inputResourceIds[inputResourceIds.length - 1];
+  const sourceImageIds = inputResourceIds.slice(0, -1);
+
+  if (sourceImageIds.length === 0) {
+    throw new Error('No source images provided');
   }
-  console.log('[TaskHandler] Source image:', sourceResource.fileName);
+
+  // 获取所有源图片资源
+  const sourceResources = [];
+  const sourcePaths = [];
+  for (const sourceImageId of sourceImageIds) {
+    const sourceResource = await storage.resource.get(draftId, sourceImageId);
+    if (!sourceResource) {
+      throw new Error(`Source character image not found: ${sourceImageId}`);
+    }
+    sourceResources.push(sourceResource);
+    sourcePaths.push(sourceResource.filePath);
+    console.log('[TaskHandler] Source image:', sourceResource.fileName);
+  }
+  console.log('[TaskHandler] Total source images:', sourceResources.length);
 
   // Get prompt resource
-  const promptResourceId = inputResourceIds[1];
   const promptResource = await storage.resource.get(draftId, promptResourceId);
   if (!promptResource) {
     throw new Error('Prompt resource not found');
@@ -153,10 +168,10 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
   // 确保目录存在
   await fs.mkdir(path.dirname(filePath), { recursive: true });
 
-  // 调用 Python 图片生成工具
+  // 调用 Python 图片生成工具（支持多图）
   const result = await runImageGenerator(
     modelId,
-    sourceResource.filePath,
+    sourcePaths,
     prompt,
     resolution,
     filePath,
@@ -589,11 +604,18 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           return { success: false, error: 'DRAFT_NOT_FOUND' };
         }
 
-        // Verify source image exists
-        const sourceImage = await storage.resource.get(request.draftId, request.sourceImageId);
-        if (!sourceImage) {
-          return { success: false, error: 'RESOURCE_NOT_FOUND: Source image not found' };
+        // Verify source images exist (支持多图)
+        if (!request.sourceImageIds || request.sourceImageIds.length === 0) {
+          return { success: false, error: 'RESOURCE_NOT_FOUND: No source images provided' };
         }
+
+        for (const sourceImageId of request.sourceImageIds) {
+          const sourceImage = await storage.resource.get(request.draftId, sourceImageId);
+          if (!sourceImage) {
+            return { success: false, error: `RESOURCE_NOT_FOUND: Source image not found: ${sourceImageId}` };
+          }
+        }
+        console.log('[TaskIPC] Source images count:', request.sourceImageIds.length);
 
         // Verify prompt resource exists
         const promptResource = await storage.resource.get(request.draftId, request.promptResourceId);
@@ -601,9 +623,9 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           return { success: false, error: 'RESOURCE_NOT_FOUND: Prompt resource not found' };
         }
 
-        // Extract prompt content
+        // Extract prompt content - 优先使用传入的 prompt，否则使用资源中的内容
         const promptMeta = promptResource.metadata as TextMetadata;
-        const prompt = promptMeta?.content;
+        const prompt = request.prompt || promptMeta?.content;
         if (!prompt || prompt.trim().length === 0) {
           return { success: false, error: 'Prompt content cannot be empty' };
         }
@@ -621,11 +643,11 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           resolution: request.resolution || '2K',
         };
 
-        // Add task to queue
+        // Add task to queue (inputResourceIds: [...sourceImageIds, promptResourceId])
         const task = taskQueue.addTask(
           request.draftId,
           'generate',
-          [request.sourceImageId, request.promptResourceId],
+          [...request.sourceImageIds, request.promptResourceId],
           config
         );
 

@@ -4,13 +4,21 @@
 调用各种 AI 模型进行图生图
 
 用法:
-    python image_generator.py --model <model_id> --source <source_image> --prompt <prompt> --resolution <2K|4K> --output <output_path>
+    python image_generator.py --model <model_id> --source <source_image> [--source <source_image2>...] --prompt <prompt> --resolution <2K|4K> --output <output_path>
 
-示例:
+示例 (单图):
     python image_generator.py \
         --model "gemini:gemini-2.0-flash-exp-image-generation" \
         --source "/path/to/source.jpg" \
         --prompt "将图片转换为动漫风格" \
+        --resolution "2K" \
+        --output "/path/to/output.png"
+
+示例 (多图):
+    python image_generator.py \
+        --model "gemini:gemini-2.0-flash-exp-image-generation" \
+        --source "/path/to/source1.jpg" --source "/path/to/source2.jpg" \
+        --prompt "结合这两张图片生成新图" \
         --resolution "2K" \
         --output "/path/to/output.png"
 """
@@ -71,7 +79,7 @@ def resolution_to_config(resolution: str, ref_width: int, ref_height: int) -> Ge
 
 async def generate_image(
     model_id: str,
-    source_path: str,
+    source_paths: list,
     prompt: str,
     resolution: str,
     output_path: str
@@ -81,7 +89,7 @@ async def generate_image(
 
     Args:
         model_id: 模型 ID (provider:endpoint)
-        source_path: 源图片路径
+        source_paths: 源图片路径列表（支持单个或多个）
         prompt: 提示词
         resolution: 分辨率 (2K/4K)
         output_path: 输出路径
@@ -89,16 +97,19 @@ async def generate_image(
     Returns:
         生成结果信息
     """
-    # 读取源图片
+    # 读取所有源图片
     print(f"进度: 5%")
-    print(f"[ImageGenerator] Reading source image: {source_path}")
+    print(f"[ImageGenerator] Reading {len(source_paths)} source image(s)")
 
-    with open(source_path, "rb") as f:
-        source_image = f.read()
+    source_images = []
+    for i, path in enumerate(source_paths):
+        print(f"[ImageGenerator] Reading image {i+1}: {path}")
+        with open(path, "rb") as f:
+            source_images.append(f.read())
 
-    # 获取源图片尺寸
-    ref_width, ref_height = get_image_size(source_image)
-    print(f"[ImageGenerator] Source image size: {ref_width}x{ref_height}")
+    # 获取第一张源图片尺寸（用于计算输出尺寸）
+    ref_width, ref_height = get_image_size(source_images[0])
+    print(f"[ImageGenerator] First image size: {ref_width}x{ref_height}")
 
     # 创建配置
     config = resolution_to_config(resolution, ref_width, ref_height)
@@ -112,13 +123,13 @@ async def generate_image(
     provider = create_provider(model_id)
 
     print(f"进度: 15%")
-    print(f"[ImageGenerator] Generating image...")
+    print(f"[ImageGenerator] Generating image with {len(source_images)} reference(s)...")
 
-    # 调用图生图
+    # 调用图生图（传递图片列表）
     try:
         result = await provider.image_to_image(
             prompt=prompt,
-            reference_image=source_image,
+            reference_images=source_images,
             config=config
         )
     except ProviderError as e:
@@ -163,7 +174,8 @@ def main():
     parser.add_argument(
         "--source", "-s",
         required=True,
-        help="源图片路径"
+        action="append",
+        help="源图片路径（可多次使用以指定多张图片）"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -184,14 +196,17 @@ def main():
 
     args = parser.parse_args()
 
-    # 检查源文件是否存在
-    if not os.path.exists(args.source):
-        print(f"Error: Source file not found: {args.source}")
-        sys.exit(1)
+    # 检查所有源文件是否存在
+    for source in args.source:
+        if not os.path.exists(source):
+            print(f"Error: Source file not found: {source}")
+            sys.exit(1)
 
     print(f"[ImageGenerator] Starting...")
     print(f"[ImageGenerator] Model: {args.model}")
-    print(f"[ImageGenerator] Source: {args.source}")
+    print(f"[ImageGenerator] Source images: {len(args.source)}")
+    for i, src in enumerate(args.source):
+        print(f"[ImageGenerator]   {i+1}. {src}")
     print(f"[ImageGenerator] Prompt: {args.prompt[:50]}...")
     print(f"[ImageGenerator] Resolution: {args.resolution}")
     print(f"[ImageGenerator] Output: {args.output}")
@@ -200,7 +215,7 @@ def main():
         # 运行异步任务
         result = asyncio.run(generate_image(
             model_id=args.model,
-            source_path=args.source,
+            source_paths=args.source,
             prompt=args.prompt,
             resolution=args.resolution,
             output_path=args.output

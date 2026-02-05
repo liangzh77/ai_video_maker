@@ -2,12 +2,23 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-lg);
+  /* 填满 Modal body 的高度 */
+  height: 100%;
 }
 
 .section {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
+  /* 默认不收缩 */
+  flex-shrink: 0;
+}
+
+/* 图片选择区域需要填充剩余空间 */
+.section:has(.imageGrid),
+.section:has(.empty) {
+  flex: 1;
+  min-height: 0;
 }
 
 .sectionTitle {
@@ -25,28 +36,32 @@
   color: var(--color-text-tertiary);
 }
 
+.scaleControls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .modelSelect {
   width: 100%;
 }
 
-.promptPreview {
-  padding: var(--spacing-md);
-  background-color: var(--color-bg-main);
-  border-radius: var(--radius-md);
+.promptInput {
   font-size: 13px;
   line-height: 1.6;
-  color: var(--color-text-secondary);
-  max-height: 100px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .imageGrid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--spacing-lg);
-  max-height: 480px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-md);
+  /* 从顶部开始，内容靠左 */
+  align-content: flex-start;
+  justify-content: flex-start;
+  /* 填充剩余空间，允许滚动 */
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: var(--spacing-sm);
 }
@@ -58,7 +73,7 @@
   cursor: pointer;
   border: 2px solid transparent;
   transition: all 0.2s ease;
-  background-color: var(--color-bg-main);
+  /* 卡片尺寸由图片内容决定 */
 }
 
 .imageItem:hover {
@@ -69,11 +84,12 @@
   border-color: var(--color-primary);
 }
 
+/* 图片高度相对视口，宽度自适应，卡片跟随图片尺寸 */
 .thumbnail {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
   display: block;
+  height: 37.5vh;
+  width: auto;
+  max-width: 52.5vw;
 }
 
 .selectedBadge {
@@ -92,13 +108,38 @@
 }
 
 .imageName {
-  padding: 4px 6px;
-  font-size: 11px;
-  color: var(--color-text-tertiary);
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 2px 4px;
+  font-size: 10px;
+  color: #fff;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* 图片类型标签 */
+.typeTag {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: 4px;
+  color: #fff;
+}
+
+.sourceTag {
+  background-color: rgba(82, 196, 26, 0.85);
+}
+
+.newTag {
+  background-color: rgba(24, 144, 255, 0.85);
 }
 
 .empty {

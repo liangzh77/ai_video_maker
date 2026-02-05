@@ -41,8 +41,11 @@ export interface ElectronAPI {
     }) => Promise<any>;
     generateImage: (params: {
       draftId: string;
-      sourceImageId: string;
+      sourceImageIds: string[];
       promptResourceId: string;
+      prompt?: string;
+      modelEndpoint: string;
+      resolution?: '4K' | '2K';
     }) => Promise<any>;
     synthesizeVideo: (params: {
       draftId: string;

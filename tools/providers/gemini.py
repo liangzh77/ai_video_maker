@@ -5,7 +5,7 @@ Google AI 图片生成服务
 import httpx
 import logging
 import io
-from typing import Optional
+from typing import Optional, List, Union
 from PIL import Image
 
 from .config import settings
@@ -123,8 +123,9 @@ class GeminiProvider(ImageGeneratorBase):
         }
 
         # 构建 imageConfig
+        # 注意：gemini-2.0-flash-exp-image-generation 不支持 aspectRatio
         image_config = {}
-        if aspect_ratio:
+        if aspect_ratio and "flash-exp-image-generation" not in self.model:
             image_config["aspectRatio"] = aspect_ratio
         if image_size:
             image_config["imageSize"] = image_size
@@ -241,18 +242,18 @@ class GeminiProvider(ImageGeneratorBase):
     async def image_to_image(
         self,
         prompt: str,
-        reference_image: bytes,
+        reference_images: Union[bytes, List[bytes]],
         config: Optional[GenerationConfig] = None
     ) -> GenerationResult:
         """
         图生图 - 使用 Gemini 模型
 
-        根据参考图片的宽高比自动选择最接近的 Gemini 支持比例，
-        输出 4K 分辨率图片。
+        支持单张或多张参考图片输入。
+        根据第一张参考图片的宽高比自动选择最接近的 Gemini 支持比例。
 
         Args:
             prompt: 文本提示词
-            reference_image: 参考图片数据
+            reference_images: 参考图片数据，支持单张 (bytes) 或多张 (List[bytes])
             config: 生成配置
 
         Returns:
@@ -264,30 +265,45 @@ class GeminiProvider(ImageGeneratorBase):
             config = self.get_default_config()
         config = self.validate_config(config)
 
-        # 获取参考图片尺寸，计算最接近的宽高比
-        ref_width, ref_height = get_image_dimensions(reference_image)
+        # 统一转换为列表格式
+        if isinstance(reference_images, bytes):
+            images_list = [reference_images]
+        else:
+            images_list = reference_images
+
+        if not images_list:
+            raise ProviderError(
+                "至少需要提供一张参考图片",
+                provider=self.name
+            )
+
+        # 获取第一张参考图片尺寸，计算最接近的宽高比
+        ref_width, ref_height = get_image_dimensions(images_list[0])
         aspect_ratio = get_closest_aspect_ratio(ref_width, ref_height)
 
         logger.info(f"[{self.name}] 图生图请求: prompt={prompt[:50]}...")
-        logger.info(f"[{self.name}] 参考图片尺寸: {ref_width}x{ref_height}")
+        logger.info(f"[{self.name}] 参考图片数量: {len(images_list)}")
+        logger.info(f"[{self.name}] 第一张图片尺寸: {ref_width}x{ref_height}")
 
-        # 编码参考图片为 base64
-        ref_image_b64 = encode_image_to_base64(reference_image)
+        # 构建请求内容（包含多张图片和文本）
+        parts = []
 
-        # 构建请求内容（包含图片和文本）
-        contents = [
-            {
-                "parts": [
-                    {
-                        "inlineData": {
-                            "mimeType": "image/jpeg",
-                            "data": ref_image_b64
-                        }
-                    },
-                    {"text": prompt}
-                ]
-            }
-        ]
+        # 添加所有参考图片
+        for i, img_data in enumerate(images_list):
+            img_b64 = encode_image_to_base64(img_data)
+            parts.append({
+                "inlineData": {
+                    "mimeType": "image/jpeg",
+                    "data": img_b64
+                }
+            })
+            img_w, img_h = get_image_dimensions(img_data)
+            logger.info(f"[{self.name}] 图片 {i+1} 尺寸: {img_w}x{img_h}")
+
+        # 添加文本提示词
+        parts.append({"text": prompt})
+
+        contents = [{"parts": parts}]
 
         # 使用 config 中的 target_resolution，如果未设置则使用默认值
         image_size = config.target_resolution if config.target_resolution else self.DEFAULT_IMAGE_SIZE

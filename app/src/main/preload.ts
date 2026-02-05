@@ -35,7 +35,7 @@ export interface ElectronAPI {
     splitVideoWithPoints: (params: { draftId: string; sourceVideoId: string; splitPoints: any[] }) => Promise<any>;
     resplitScene: (params: { draftId: string; sceneResourceId: string; newStartTime: number; newEndTime: number }) => Promise<any>;
     upscaleVideo: (params: { draftId: string; sourceVideoIds: string[]; config: any }) => Promise<any>;
-    generateImage: (params: { draftId: string; sourceImageId: string; promptResourceId: string; modelEndpoint: string; resolution?: '4K' | '2K' }) => Promise<any>;
+    generateImage: (params: { draftId: string; sourceImageIds: string[]; promptResourceId: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K' }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
     extractAudio: (params: { draftId: string; videoResourceId: string }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
