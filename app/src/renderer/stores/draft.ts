@@ -411,12 +411,14 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       });
       if (result.success && result.data) {
         set((state) => ({
-          resources: [...state.resources, result.data!],
+          // 先过滤掉同 ID 的旧资源，再添加新资源，防止竞态导致的重复 ID
+          resources: [...state.resources.filter(r => r.id !== result.data!.id), result.data!],
         }));
         return result.data;
       }
       return null;
-    } catch {
+    } catch (err) {
+      console.error('[DraftStore] copyResource exception:', err);
       return null;
     }
   },

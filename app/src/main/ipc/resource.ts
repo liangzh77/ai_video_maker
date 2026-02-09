@@ -1,6 +1,7 @@
 import { ipcMain, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { constants as fsConstants } from 'fs';
 import { RESOURCE_CHANNELS } from '@shared/ipc-channels';
 import storage from '../services/storage';
 import { extractMetadata, getResourceTypeFromMime, getMimeType } from '../services/metadata';
@@ -517,26 +518,39 @@ export function registerResourceHandlers(): void {
 
         // Copy the resource file to a new location
         const ext = path.extname(foundResource.filePath);
-        const sequenceNumber = await storage.getNextSequenceNumber(targetDraftId, targetType);
-
-        console.log('[Resource] COPY: source =', foundResource.filePath, 'targetType =', targetType, 'seq =', sequenceNumber);
+        let sequenceNumber = await storage.getNextSequenceNumber(targetDraftId, targetType);
 
         // 获取原始文件名（去掉序号前缀）用于新文件
         const originalName = storage.getOriginalNameFromFileName(foundResource.fileName);
-        const newFileName = storage.makeSequencedFileName(sequenceNumber, originalName, ext);
         const folderPath = storage.getResourceFolderPath(targetDraftId, targetType);
-        const newFilePath = folderPath
-          ? path.join(folderPath, newFileName)
-          : storage.getResourceFilePath(targetDraftId, targetType, ext, sequenceNumber);
-
-        console.log('[Resource] COPY: folderPath =', folderPath, 'newFilePath =', newFilePath);
 
         // Ensure directory exists
-        await fs.mkdir(path.dirname(newFilePath), { recursive: true });
+        const dirPath = folderPath || path.dirname(
+          storage.getResourceFilePath(targetDraftId, targetType, ext, sequenceNumber)
+        );
+        await fs.mkdir(dirPath, { recursive: true });
 
-        // Copy the file
-        await fs.copyFile(foundResource.filePath, newFilePath);
-        console.log('[Resource] COPY: File copied successfully');
+        // 使用 COPYFILE_EXCL 防止覆盖已有文件，冲突时自动递增序号重试
+        let newFilePath!: string;
+        const MAX_RETRIES = 20;
+        for (let retry = 0; retry < MAX_RETRIES; retry++) {
+          const fileName = storage.makeSequencedFileName(sequenceNumber, originalName, ext);
+          newFilePath = folderPath
+            ? path.join(folderPath, fileName)
+            : storage.getResourceFilePath(targetDraftId, targetType, ext, sequenceNumber);
+
+          try {
+            await fs.copyFile(foundResource.filePath, newFilePath, fsConstants.COPYFILE_EXCL);
+            break; // 复制成功
+          } catch (err: any) {
+            if (err.code === 'EEXIST' && retry < MAX_RETRIES - 1) {
+              // 文件已存在（竞态条件），递增序号重试
+              sequenceNumber++;
+              continue;
+            }
+            throw err;
+          }
+        }
 
         // Get new file stats
         const stats = await fs.stat(newFilePath);
@@ -558,7 +572,6 @@ export function registerResourceHandlers(): void {
           createdAt: new Date().toISOString(),
         };
 
-        console.log('[Resource] Copied resource:', foundResource.id, '->', newResource.id, 'type:', foundResource.type, '->', targetType);
         return { success: true, data: newResource };
       } catch (error) {
         console.error('[Resource] Copy failed:', error);
