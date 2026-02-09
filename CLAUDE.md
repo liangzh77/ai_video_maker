@@ -41,6 +41,60 @@ python tools/video_splitter.py --help
 python -m tools.video_upscaler --help
 ```
 
+## 打包 Windows 安装包
+
+完整流程：先构建 Python 工具 exe，再构建 Electron 安装包。
+
+### 1. 环境准备（首次）
+
+miniconda 环境需安装以下依赖（PyInstaller 构建时需要）：
+
+```bash
+pip install pyinstaller numpy opencv-python tqdm click platformdirs av
+```
+
+### 2. 构建 Python 工具
+
+```bash
+cd tools
+# 清理旧构建产物
+rm -rf build dist
+
+# 构建 video_tools（含 scenedetect 场景分析）
+pyinstaller video_tools.spec --noconfirm
+
+# 构建 image_generator
+pyinstaller image_generator.spec --noconfirm
+
+# 验证
+dist/video_tools/video_tools.exe split --help
+dist/image_generator/image_generator.exe --help
+```
+
+### 3. 构建 Electron 安装包
+
+```bash
+cd app
+npm run build:win
+```
+
+产物在 `app/release/视频工坊 Setup x.x.x.exe`。
+
+### 关键配置说明
+
+**PyInstaller 必须使用 onedir 模式**（`exclude_binaries=True` + `COLLECT`），不能用 onefile。原因：electron-builder 将两个工具的 onedir 输出合并到同一个 `resources/tools/` 目录，共享 Python 运行时和公共 DLL。onefile 模式每个 exe 独立打包所有依赖，会导致安装包体积翻倍。
+
+**video_tools.spec 要点：**
+- `pathex` 必须包含 `submodules/PySceneDetect` 路径，否则 PyInstaller 找不到 scenedetect
+- `hiddenimports` 手动列出 scenedetect 子模块，不要用 `collect_submodules()`（会拉入 scipy 导致 numpy 版本冲突）
+- `excludes` 排除 scipy、matplotlib、tkinter 等不需要的大包
+- `datas` 必须包含 `path_setup.py`
+
+**路径对应关系：**
+- `electron-builder.json` 的 `extraResources` 引用 `tools/dist/video_tools/` 和 `tools/dist/image_generator/` 目录
+- `python-bridge.ts` 开发模式路径：`tools/dist/video_tools/video_tools.exe`
+- `python-bridge.ts` 打包模式路径：`resources/tools/video_tools.exe`
+
 ## 代码风格
 
 ### TypeScript/React

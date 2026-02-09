@@ -1,85 +1,61 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-PyInstaller spec file for video_tools
-将所有视频处理工具打包成一个 exe
-"""
 
 import os
-import sys
-from pathlib import Path
-
-# 获取目录
-# 直接硬编码路径以避免 SPECPATH 解析问题
-# SPECPATH 格式如 "C:\...\ai_video_maker\tools" (目录，不是文件)
 import pathlib
-_spec_path = pathlib.Path(SPECPATH)
-# 如果 SPECPATH 看起来像一个文件路径，取其父目录；否则直接使用
-if _spec_path.suffix:
-    TOOLS_DIR = str(_spec_path.parent.resolve())
-else:
-    # SPECPATH 已经是目录
-    TOOLS_DIR = str(_spec_path.resolve())
+
+TOOLS_DIR = str(pathlib.Path(SPECPATH).resolve()) if not pathlib.Path(SPECPATH).suffix else str(pathlib.Path(SPECPATH).parent.resolve())
 PROJECT_ROOT = str(pathlib.Path(TOOLS_DIR).parent.resolve())
-
-print(f"SPECPATH (raw): {SPECPATH}")
-print(f"TOOLS_DIR: {TOOLS_DIR}")
-print(f"PROJECT_ROOT: {PROJECT_ROOT}")
-
-# PySceneDetect 路径
-SCENEDETECT_PATH = os.path.join(PROJECT_ROOT, "submodules", "PySceneDetect", "scenedetect")
-
-# 收集 scenedetect 模块
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
-
-# 收集所有 scenedetect 子模块
-scenedetect_hiddenimports = collect_submodules('scenedetect')
-
-# 添加其他可能需要的隐藏导入
-hiddenimports = scenedetect_hiddenimports + [
-    'numpy',
-    'cv2',
-    'tqdm',
-    'av',
-    'video_splitter',
-    'video_upscaler',
-    'video_synthesizer',
-    'path_setup',
-]
-
-# 将工具模块作为数据文件包含
-tool_modules = [
-    (os.path.join(TOOLS_DIR, 'video_splitter.py'), '.'),
-    (os.path.join(TOOLS_DIR, 'video_upscaler.py'), '.'),
-    (os.path.join(TOOLS_DIR, 'video_synthesizer.py'), '.'),
-    (os.path.join(TOOLS_DIR, 'path_setup.py'), '.'),
-]
+SCENEDETECT_DIR = os.path.join(PROJECT_ROOT, 'submodules', 'PySceneDetect')
 
 a = Analysis(
     ['main.py'],
-    pathex=[
-        TOOLS_DIR,
-        os.path.join(PROJECT_ROOT, "submodules", "PySceneDetect"),
-    ],
+    pathex=[TOOLS_DIR, SCENEDETECT_DIR],
     binaries=[],
-    datas=tool_modules,
-    hiddenimports=hiddenimports,
+    datas=[
+        ('video_splitter.py', '.'),
+        ('video_upscaler.py', '.'),
+        ('video_synthesizer.py', '.'),
+        ('path_setup.py', '.'),
+    ],
+    hiddenimports=[
+        # scenedetect 核心模块
+        'scenedetect',
+        'scenedetect.common',
+        'scenedetect.detector',
+        'scenedetect.scene_detector',
+        'scenedetect.scene_manager',
+        'scenedetect.stats_manager',
+        'scenedetect.frame_timecode',
+        'scenedetect.video_stream',
+        'scenedetect.video_splitter',
+        'scenedetect.platform',
+        'scenedetect.output',
+        # detectors
+        'scenedetect.detectors',
+        'scenedetect.detectors.content_detector',
+        'scenedetect.detectors.adaptive_detector',
+        'scenedetect.detectors.threshold_detector',
+        'scenedetect.detectors.histogram_detector',
+        'scenedetect.detectors.hash_detector',
+        # backends
+        'scenedetect.backends',
+        'scenedetect.backends.opencv',
+        'scenedetect.backends.pyav',
+        # 依赖
+        'numpy',
+        'cv2',
+        'tqdm',
+        'av',
+        'click',
+        'platformdirs',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        'tkinter',
-        'matplotlib',
-        'PIL.ImageTk',
-        'scipy',
-        'pandas',
-        'IPython',
-        'jupyter',
-        'notebook',
-    ],
+    excludes=['scipy', 'matplotlib', 'tkinter', 'pandas', 'IPython', 'jupyter'],
     noarchive=False,
     optimize=0,
 )
-
 pyz = PYZ(a.pure)
 
 exe = EXE(

@@ -616,8 +616,9 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       return;
     }
 
-    // Handle regular file drops
-    const files = Array.from(e.dataTransfer.files);
+    // Handle regular file drops（按文件名排序，确保序号与文件名顺序一致）
+    const files = Array.from(e.dataTransfer.files)
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
     console.log('[ResourceSection] handleDrop: files count =', files.length, 'type =', type);
     if (files.length === 0) return;
 

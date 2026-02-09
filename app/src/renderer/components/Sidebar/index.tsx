@@ -13,7 +13,7 @@ interface WorkspaceInfo {
 
 const Sidebar: React.FC = () => {
   const { message } = App.useApp();
-  const { createDraft, selectDraft, loadDrafts, sortBy, sortOrder, setSortBy } = useDraftStore();
+  const { createDraft, selectDraft, loadDrafts, loadResources, selectedDraftId, sortBy, sortOrder, setSortBy } = useDraftStore();
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
 
   // 加载工作目录信息
@@ -99,6 +99,9 @@ const Sidebar: React.FC = () => {
             onClick={async () => {
               await loadWorkspace();
               await loadDrafts();
+              if (selectedDraftId) {
+                await loadResources(selectedDraftId);
+              }
               message.success('已刷新');
             }}
           >
