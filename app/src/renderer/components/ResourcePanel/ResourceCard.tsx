@@ -1,13 +1,43 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, VideoCameraOutlined } from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
+import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, VideoCameraOutlined, LoadingOutlined } from '@ant-design/icons';
 import { App } from 'antd';
-import type { Resource } from '@shared/types';
+import type { Resource, OperationResult } from '@shared/types';
 import { isVideoMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
 import { useSceneLinkStore } from '../../stores/sceneLink';
 import { useFullscreenPreviewStore } from '../../stores/fullscreenPreview';
 import styles from './ResourceCard.module.css';
+
+// 缩略图缓存（resourceId -> thumbnailPath）
+const thumbnailCache = new Map<string, string>();
+// 正在请求中的缩略图（防止重复请求）
+const pendingRequests = new Map<string, Promise<string | null>>();
+
+/**
+ * 清除指定前缀的缩略图缓存
+ * 用于重排序后刷新缓存
+ * @param prefix 资源 ID 前缀，如 '分镜源视频/'
+ */
+export function clearThumbnailCache(prefix?: string): void {
+  if (!prefix) {
+    thumbnailCache.clear();
+    pendingRequests.clear();
+    return;
+  }
+
+  // 清除匹配前缀的缓存
+  for (const key of thumbnailCache.keys()) {
+    if (key.startsWith(prefix)) {
+      thumbnailCache.delete(key);
+    }
+  }
+  for (const key of pendingRequests.keys()) {
+    if (key.startsWith(prefix)) {
+      pendingRequests.delete(key);
+    }
+  }
+}
 
 interface ResourceCardProps {
   resource: Resource;
@@ -24,112 +54,113 @@ interface ResourceCardProps {
   onDragEnd?: () => void;
 }
 
-// Video thumbnail component that displays the first frame
-const VideoThumbnail: React.FC<{ src: string; alt: string }> = ({ src, alt }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [hasError, setHasError] = useState(false);
-  const retryCountRef = useRef(0);
-  const maxRetries = 3;
-  const retryDelayMs = 500;
+// 缓存的缩略图组件 - 使用后端生成的缩略图
+interface CachedThumbnailProps {
+  resource: Resource;
+  isVideo: boolean;
+}
 
+const CachedThumbnail: React.FC<CachedThumbnailProps> = ({ resource, isVideo }) => {
+  const [thumbnailPath, setThumbnailPath] = useState<string | null>(() => {
+    // 检查内存缓存
+    return thumbnailCache.get(resource.id) || null;
+  });
+  const [isLoading, setIsLoading] = useState(!thumbnailPath);
+  const [hasError, setHasError] = useState(false);
+
+  // 获取缩略图
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
+    // 如果已经有缓存的缩略图，不需要请求
+    if (thumbnailPath) {
+      return;
+    }
 
     let isMounted = true;
-    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    const loadVideo = () => {
-      if (!isMounted) return;
+    const fetchThumbnail = async () => {
+      // 检查是否已有正在进行的请求
+      const existingRequest = pendingRequests.get(resource.id);
+      if (existingRequest) {
+        const path = await existingRequest;
+        if (isMounted && path) {
+          setThumbnailPath(path);
+          setIsLoading(false);
+        }
+        return;
+      }
 
-      // Reset state
-      setIsLoaded(false);
-      setHasError(false);
+      // 创建新请求
+      const requestPromise = (async () => {
+        try {
+          const result: OperationResult<string> = await window.api.resource.getThumbnail({
+            draftId: resource.draftId,
+            resourceId: resource.id,
+          });
 
-      // Clear and reload
-      video.pause();
-      video.removeAttribute('src');
-      video.src = src;
-      video.load();
-    };
-
-    const handleLoadedMetadata = () => {
-      if (!isMounted) return;
-      video.currentTime = 0.1;
-    };
-
-    const handleSeeked = () => {
-      if (!isMounted) return;
-      retryCountRef.current = 0; // Reset retry count on success
-      setIsLoaded(true);
-    };
-
-    const handleError = () => {
-      if (!isMounted) return;
-      console.error('[VideoThumbnail] Failed to load video:', src, 'retry:', retryCountRef.current);
-
-      // Retry loading if we haven't exceeded max retries
-      if (retryCountRef.current < maxRetries) {
-        retryCountRef.current++;
-        retryTimeout = setTimeout(() => {
-          if (isMounted) {
-            loadVideo();
+          if (result.success && result.data) {
+            thumbnailCache.set(resource.id, result.data);
+            return result.data;
           }
-        }, retryDelayMs * retryCountRef.current);
-      } else {
-        setHasError(true);
+          return null;
+        } catch (err) {
+          console.error('[CachedThumbnail] Failed to get thumbnail:', resource.id, err);
+          return null;
+        } finally {
+          pendingRequests.delete(resource.id);
+        }
+      })();
+
+      pendingRequests.set(resource.id, requestPromise);
+
+      const path = await requestPromise;
+      if (isMounted) {
+        if (path) {
+          setThumbnailPath(path);
+        } else {
+          setHasError(true);
+        }
+        setIsLoading(false);
       }
     };
 
-    // Register listeners BEFORE setting src
-    video.addEventListener('loadedmetadata', handleLoadedMetadata);
-    video.addEventListener('seeked', handleSeeked);
-    video.addEventListener('error', handleError);
-
-    // Reset retry count for new src
-    retryCountRef.current = 0;
-
-    // Initial load with a small delay to ensure file is ready
-    retryTimeout = setTimeout(loadVideo, 100);
+    fetchThumbnail();
 
     return () => {
       isMounted = false;
-      if (retryTimeout) {
-        clearTimeout(retryTimeout);
-      }
-      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      video.removeEventListener('seeked', handleSeeked);
-      video.removeEventListener('error', handleError);
-      // Release file reference to prevent file locking
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
     };
-  }, [src]);
+  }, [resource.id, resource.draftId, thumbnailPath]);
+
+  // 构建缩略图 URL
+  const getThumbnailUrl = (filePath: string) => {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    // 使用资源文件大小作为缓存破坏参数
+    return `local-file:///${normalizedPath}?v=${resource.fileSize}`;
+  };
+
+  if (isLoading) {
+    return (
+      <div className={styles.videoPlaceholder}>
+        <LoadingOutlined className={styles.playIcon} />
+      </div>
+    );
+  }
+
+  if (hasError || !thumbnailPath) {
+    return (
+      <div className={styles.videoPlaceholder}>
+        {isVideo ? <PlayCircleOutlined className={styles.playIcon} /> : null}
+      </div>
+    );
+  }
 
   return (
-    <>
-      {/* Always render video element, hide with CSS when not loaded */}
-      <video
-        ref={videoRef}
-        className={styles.thumbnail}
-        preload="auto"
-        muted
-        playsInline
-        crossOrigin="anonymous"
-        draggable={false}
-        style={{
-          opacity: isLoaded && !hasError ? 1 : 0,
-          position: isLoaded && !hasError ? 'relative' : 'absolute',
-        }}
-      />
-      {(!isLoaded || hasError) && (
-        <div className={styles.videoPlaceholder} style={{ position: 'absolute', inset: 0 }}>
-          <PlayCircleOutlined className={styles.playIcon} />
-        </div>
-      )}
-    </>
+    <img
+      src={getThumbnailUrl(thumbnailPath)}
+      alt={resource.fileName}
+      className={styles.thumbnail}
+      draggable={false}
+      onError={() => setHasError(true)}
+    />
   );
 };
 
@@ -240,42 +271,19 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Build local file URL - need triple slash for Windows paths
-  // Add cache busting parameter using fileSize to force reload on content change
-  const getLocalFileUrl = (filePath: string) => {
-    // On Windows, paths start with drive letter like C:\
-    // URL format should be: local-file:///C:/path/to/file
-    const normalizedPath = filePath.replace(/\\/g, '/');
-    // 使用资源文件大小作为缓存破坏参数，确保文件更新后重新加载（如 resplit 后）
-    return `local-file:///${normalizedPath}?v=${resource.fileSize}`;
-  };
-
   const getThumbnail = () => {
-    if (isImage) {
+    // 对于图片和视频，使用缓存的缩略图
+    if (isImage || isVideo) {
       return (
-        <img
-          src={getLocalFileUrl(resource.filePath)}
-          alt={resource.fileName}
-          className={styles.thumbnail}
-          draggable={false}
+        <CachedThumbnail
+          key={`${resource.id}_${resource.fileSize}`}
+          resource={resource}
+          isVideo={isVideo}
         />
       );
     }
 
-    // For video, show first frame as thumbnail
-    if (isVideo) {
-      // 使用 fileSize 和 duration 作为 key，确保视频更新后重新加载缩略图
-      const videoDuration = isVideoMetadata(resource.metadata) ? resource.metadata.duration : 0;
-      return (
-        <VideoThumbnail
-          key={`${resource.id}_${resource.fileSize}_${videoDuration}`}
-          src={getLocalFileUrl(resource.filePath)}
-          alt={resource.fileName}
-        />
-      );
-    }
-
-    // Fallback placeholder
+    // Fallback placeholder for other types
     return (
       <div className={styles.videoPlaceholder}>
         <PlayCircleOutlined className={styles.playIcon} />

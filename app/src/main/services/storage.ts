@@ -218,49 +218,17 @@ export function getResourceTypeFromPath(relativePath: string): ResourceType | nu
 }
 
 // ============================================
-// 元数据缓存
-// ============================================
-
-interface MetadataCacheEntry {
-  metadata: ResourceMetadata;
-  mtimeMs: number; // 文件修改时间戳
-  size: number;    // 文件大小
-}
-
-// 内存缓存：draftId -> relativePath -> cache entry
-const metadataCache = new Map<string, Map<string, MetadataCacheEntry>>();
-
-/**
- * 清除指定草稿的元数据缓存
- */
-export function clearMetadataCache(draftId: string): void {
-  metadataCache.delete(draftId);
-}
-
-/**
- * 清除所有元数据缓存
- */
-export function clearAllMetadataCache(): void {
-  metadataCache.clear();
-}
-
-// ============================================
 // 扫描资源文件系统
 // ============================================
 
 /**
  * 扫描草稿的 files 目录获取所有资源
  * 资源 ID 为相对路径（如 '分镜源视频/001.mp4'）
+ * 元数据使用持久化缓存（thumbnails 文件夹）
  */
 export async function scanResources(draftId: string, type?: ResourceType): Promise<Resource[]> {
   const filesDir = getFilesPath(draftId);
   const resources: Resource[] = [];
-
-  // 获取或创建该草稿的缓存
-  if (!metadataCache.has(draftId)) {
-    metadataCache.set(draftId, new Map());
-  }
-  const draftCache = metadataCache.get(draftId)!;
 
   try {
     await fs.access(filesDir);
@@ -296,8 +264,7 @@ export async function scanResources(draftId: string, type?: ResourceType): Promi
             relativePath,
             filePath,
             resourceType as ResourceType,
-            entry.name,
-            draftCache
+            entry.name
           );
 
           if (resource) {
@@ -326,8 +293,7 @@ export async function scanResources(draftId: string, type?: ResourceType): Promi
               relativePath,
               filePath,
               resourceType as ResourceType,
-              entry.name,
-              draftCache
+              entry.name
             );
 
             if (resource) {
@@ -356,36 +322,21 @@ export async function scanResources(draftId: string, type?: ResourceType): Promi
 
 /**
  * 构建单个资源对象
+ * 使用持久化缓存（thumbnails 文件夹）存储元数据
  */
 async function buildResource(
   draftId: string,
   relativePath: string,
   filePath: string,
   resourceType: ResourceType,
-  fileName: string,
-  cache: Map<string, MetadataCacheEntry>
+  fileName: string
 ): Promise<Resource | null> {
   try {
     const stat = await fs.stat(filePath);
+    const draftPath = getDraftPath(draftId);
 
-    // 检查缓存
-    const cached = cache.get(relativePath);
-    let metadata: ResourceMetadata;
-
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
-      // 缓存命中
-      metadata = cached.metadata;
-    } else {
-      // 提取元数据
-      metadata = await extractMetadata(filePath, resourceType);
-
-      // 更新缓存
-      cache.set(relativePath, {
-        metadata,
-        mtimeMs: stat.mtimeMs,
-        size: stat.size,
-      });
-    }
+    // 提取元数据（会自动使用持久化缓存）
+    const metadata = await extractMetadata(filePath, resourceType, draftPath);
 
     const resource: Resource = {
       id: relativePath, // 使用相对路径作为 ID
@@ -483,54 +434,60 @@ export function makeSequencedFileName(sequence: number, originalName: string, ex
  * @param draftId 草稿ID
  * @param resourceType 资源类型
  * @param orderedResourceIds 按新顺序排列的资源ID数组（相对路径）
- * @returns 更新后的资源列表
+ * @returns 新的资源ID列表（相对路径）
  */
 export async function reorderResourceFiles(
   draftId: string,
   resourceType: ResourceType,
   orderedResourceIds: string[]
-): Promise<Resource[]> {
-  // 通过扫描获取当前资源列表
-  const allResources = await scanResources(draftId, resourceType);
+): Promise<string[]> {
+  console.log('[Storage] reorderResourceFiles START:', { draftId, resourceType, orderedResourceIds });
 
-  // 获取要重排序的资源
-  const targetResources = allResources.filter(r => orderedResourceIds.includes(r.id));
-
-  // 按新顺序排序
-  const sortedResources = orderedResourceIds
-    .map(id => targetResources.find(r => r.id === id))
-    .filter((r): r is Resource => r !== undefined);
-
-  if (sortedResources.length === 0) {
+  if (orderedResourceIds.length === 0) {
+    console.log('[Storage] reorderResourceFiles: Empty list, returning');
     return [];
   }
 
   const folderPath = getResourceFolderPath(draftId, resourceType);
+  console.log('[Storage] reorderResourceFiles: folderPath =', folderPath);
   if (!folderPath) {
-    return sortedResources;
+    console.log('[Storage] reorderResourceFiles: No folder path, returning original IDs');
+    return orderedResourceIds;
   }
 
+  const filesDir = getFilesPath(draftId);
   const config = RESOURCE_PATH_CONFIG[resourceType];
+  console.log('[Storage] reorderResourceFiles: filesDir =', filesDir, 'config.name =', config.name);
 
   // 第一步：将所有文件重命名为临时名称，避免冲突
-  const tempRenames: Array<{ resource: Resource; tempPath: string; originalName: string }> = [];
-  for (const resource of sortedResources) {
-    const ext = path.extname(resource.filePath);
+  // 直接从资源 ID（相对路径）构建文件路径，不需要扫描
+  const tempRenames: Array<{ oldId: string; oldPath: string; tempPath: string; originalName: string; ext: string }> = [];
+
+  console.log('[Storage] reorderResourceFiles: Step 1 - Renaming to temp files');
+  for (const resourceId of orderedResourceIds) {
+    const oldPath = path.join(filesDir, resourceId);
+    const fileName = path.basename(resourceId);
+    const ext = path.extname(fileName);
     const tempFileName = `_temp_${uuidv4()}${ext}`;
     const tempPath = path.join(folderPath, tempFileName);
-    const originalName = getOriginalNameFromFileName(resource.fileName);
+    const originalName = getOriginalNameFromFileName(fileName);
+
+    console.log('[Storage] Step 1:', { resourceId, oldPath, tempPath, originalName });
 
     try {
-      await fs.rename(resource.filePath, tempPath);
-      tempRenames.push({ resource, tempPath, originalName });
+      await fs.rename(oldPath, tempPath);
+      console.log('[Storage] Step 1 SUCCESS:', oldPath, '->', tempPath);
+      tempRenames.push({ oldId: resourceId, oldPath, tempPath, originalName, ext });
     } catch (err) {
-      console.error('[Storage] Failed to rename to temp:', resource.filePath, err);
+      console.error('[Storage] Step 1 FAILED:', oldPath, '->', tempPath, err);
       // 回滚已重命名的文件
-      for (const { resource: r, tempPath: tp } of tempRenames) {
+      console.log('[Storage] Rolling back', tempRenames.length, 'files');
+      for (const item of tempRenames) {
         try {
-          await fs.rename(tp, r.filePath);
-        } catch {
-          // 忽略回滚失败
+          await fs.rename(item.tempPath, item.oldPath);
+          console.log('[Storage] Rollback SUCCESS:', item.tempPath, '->', item.oldPath);
+        } catch (rollbackErr) {
+          console.error('[Storage] Rollback FAILED:', item.tempPath, rollbackErr);
         }
       }
       throw err;
@@ -540,39 +497,38 @@ export async function reorderResourceFiles(
   // 第二步：按新顺序重命名为最终名称，同时构建 ID 映射
   const oldToNewIdMap = new Map<string, string>();
   const newResourceIds: string[] = [];
+
+  console.log('[Storage] reorderResourceFiles: Step 2 - Renaming to final names');
   for (let i = 0; i < tempRenames.length; i++) {
-    const { resource, tempPath, originalName } = tempRenames[i];
+    const { oldId, tempPath, originalName, ext } = tempRenames[i];
     const newSequence = i + 1;
-    const ext = path.extname(tempPath);
     const newFileName = makeSequencedFileName(newSequence, originalName, ext);
     const newPath = path.join(folderPath, newFileName);
     const newRelativePath = `${config.name}/${newFileName}`;
 
+    console.log('[Storage] Step 2:', { i, tempPath, newPath, newRelativePath });
+
     try {
       await fs.rename(tempPath, newPath);
+      console.log('[Storage] Step 2 SUCCESS:', tempPath, '->', newPath);
       newResourceIds.push(newRelativePath);
-      // 记录旧 ID -> 新 ID 映射
-      oldToNewIdMap.set(resource.id, newRelativePath);
+      oldToNewIdMap.set(oldId, newRelativePath);
     } catch (err) {
-      console.error('[Storage] Failed to rename to final:', tempPath, '->', newPath, err);
+      console.error('[Storage] Step 2 FAILED:', tempPath, '->', newPath, err);
       throw err;
     }
   }
 
   // 第三步：如果是 scene_source 或 scene_new，更新 links.json 中的引用
   if (resourceType === 'scene_source' || resourceType === 'scene_new') {
+    console.log('[Storage] reorderResourceFiles: Step 3 - Updating links');
     await updateLinksOnReorder(draftId, resourceType, oldToNewIdMap);
   }
 
-  // 清除缓存，让下次扫描重新加载
-  clearMetadataCache(draftId);
-  await updateDraft(draftId, {});
+  // 注意：持久化缓存基于文件指纹（内容哈希），文件重命名不影响缓存
 
-  // 重新扫描获取更新后的资源
-  const updatedResources = await scanResources(draftId, resourceType);
-  console.log('[Storage] Reordered', updatedResources.length, 'resources of type', resourceType);
-
-  return updatedResources;
+  console.log('[Storage] reorderResourceFiles DONE:', newResourceIds.length, 'resources of type', resourceType);
+  return newResourceIds;
 }
 
 /**
@@ -584,18 +540,29 @@ export async function renumberResourceFiles(
   draftId: string,
   resourceType: ResourceType
 ): Promise<void> {
-  const resources = await listResources(draftId, resourceType);
-  if (resources.length === 0) {
-    return;
+  const folderPath = getResourceFolderPath(draftId, resourceType);
+  if (!folderPath) return;
+
+  const config = RESOURCE_PATH_CONFIG[resourceType];
+
+  try {
+    // 直接读取文件夹，获取文件名列表
+    const entries = await fs.readdir(folderPath, { withFileTypes: true });
+    const fileNames = entries
+      .filter(e => e.isFile() && !e.name.startsWith('.') && !e.name.startsWith('_temp_'))
+      .map(e => e.name)
+      .sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true }));
+
+    if (fileNames.length === 0) return;
+
+    // 构建资源 ID 列表
+    const resourceIds = fileNames.map(name => `${config.name}/${name}`);
+
+    // 重新排序
+    await reorderResourceFiles(draftId, resourceType, resourceIds);
+  } catch {
+    // 文件夹可能不存在
   }
-
-  // 按当前文件名排序
-  const sorted = [...resources].sort((a, b) =>
-    a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true })
-  );
-
-  // 重新排序
-  await reorderResourceFiles(draftId, resourceType, sorted.map(r => r.id));
 }
 
 /**
@@ -866,39 +833,96 @@ export async function listResources(draftId: string, type?: ResourceType): Promi
 /**
  * 获取单个资源
  * resourceId 为相对路径（如 '分镜源视频/001.mp4'）
+ * 优化：直接根据路径读取单个文件，不扫描整个目录
  */
 export async function getResource(draftId: string, resourceId: string): Promise<Resource | null> {
-  const resources = await listResources(draftId);
-  return resources.find((r) => r.id === resourceId) || null;
+  const filesDir = getFilesPath(draftId);
+  const filePath = path.join(filesDir, resourceId);
+
+  try {
+    // 检查文件是否存在
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) {
+      return null;
+    }
+
+    // 获取资源类型
+    const resourceType = getResourceTypeFromPath(resourceId);
+    if (!resourceType) {
+      return null;
+    }
+
+    // 提取元数据（使用持久化缓存）
+    const draftPath = getDraftPath(draftId);
+    const metadata = await extractMetadata(filePath, resourceType, draftPath);
+
+    const resource: Resource = {
+      id: resourceId,
+      draftId,
+      type: resourceType,
+      fileName: path.basename(filePath),
+      filePath,
+      fileSize: stat.size,
+      mimeType: getMimeType(filePath),
+      metadata,
+      createdAt: stat.birthtime.toISOString(),
+    };
+
+    return resource;
+  } catch {
+    // 文件不存在或读取失败
+    return null;
+  }
 }
 
 /**
  * 删除资源
  * 直接删除文件，不再需要更新 resources.json
+ * 注意：缩略图缓存基于文件指纹，文件删除后缓存会自然成为孤立文件，可通过 cleanupOrphanedCache 清理
  */
 export async function deleteResource(draftId: string, resourceId: string): Promise<boolean> {
   const filesDir = getFilesPath(draftId);
   const filePath = path.join(filesDir, resourceId);
 
   try {
-    await fs.unlink(filePath);
+    // 尝试删除文件，如果文件被占用则等待后重试
+    let retries = 3;
+    let lastError: Error | null = null;
 
-    // 清除该资源的缓存
-    const draftCache = metadataCache.get(draftId);
-    if (draftCache) {
-      draftCache.delete(resourceId);
+    while (retries > 0) {
+      try {
+        await fs.unlink(filePath);
+        break; // 成功删除
+      } catch (err) {
+        lastError = err as Error;
+        const errorCode = (err as NodeJS.ErrnoException).code;
+
+        // EBUSY: 文件被占用（Windows）
+        // ENOENT: 文件不存在（可能已被删除）
+        if (errorCode === 'ENOENT') {
+          // 文件已不存在，视为成功
+          break;
+        }
+
+        if (errorCode === 'EBUSY' || errorCode === 'EPERM') {
+          retries--;
+          if (retries > 0) {
+            console.log('[Storage] File busy, retrying delete:', filePath, 'retries left:', retries);
+            await new Promise(resolve => setTimeout(resolve, 500)); // 等待 500ms 后重试
+          }
+        } else {
+          // 其他错误直接抛出
+          throw err;
+        }
+      }
     }
 
-    // 同时尝试删除缩略图
-    const thumbnailsDir = getThumbnailsPath(draftId);
-    const thumbnailPath = path.join(thumbnailsDir, resourceId.replace(/[/\\]/g, '_') + '.jpg');
-    try {
-      await fs.unlink(thumbnailPath);
-    } catch {
-      // 缩略图可能不存在
+    if (retries === 0 && lastError) {
+      throw lastError;
     }
 
     await updateDraft(draftId, {});
+    console.log('[Storage] Deleted resource:', filePath);
     return true;
   } catch (err) {
     console.error('[Storage] Failed to delete resource:', filePath, err);
@@ -1175,8 +1199,6 @@ export const storage = {
   getResourceTypeFromPath,
   getNextSequenceNumber,
   cleanupOrphanedFiles,
-  clearMetadataCache,
-  clearAllMetadataCache,
   scanResources,
   // 文件序号命名相关
   getSequenceFromFileName,

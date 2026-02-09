@@ -24,6 +24,7 @@ export interface ElectronAPI {
     reorder: (params: { draftId: string; type: string; orderedIds: string[] }) => Promise<any>;
     openFolder: (params: { id: string }) => Promise<any>;
     captureFrame: (params: { videoResourceId: string; timestamp: number; outputType: string }) => Promise<any>;
+    getThumbnail: (params: { draftId: string; resourceId: string }) => Promise<any>;
     deleteSplitFolders: (params: { draftId: string }) => Promise<any>;
     saveSplitPoints: (params: { draftId: string; videoId: string; duration: number; fps: number; splitPoints: any[] }) => Promise<any>;
     loadSplitPoints: (params: { draftId: string; videoId: string }) => Promise<any>;
@@ -82,6 +83,7 @@ const api: ElectronAPI = {
     reorder: (params) => ipcRenderer.invoke('resource:reorder', params),
     openFolder: (params) => ipcRenderer.invoke('resource:openFolder', params),
     captureFrame: (params) => ipcRenderer.invoke('resource:captureFrame', params),
+    getThumbnail: (params) => ipcRenderer.invoke('resource:getThumbnail', params),
     deleteSplitFolders: (params) => ipcRenderer.invoke('resource:deleteSplitFolders', params),
     saveSplitPoints: (params) => ipcRenderer.invoke('resource:saveSplitPoints', params),
     loadSplitPoints: (params) => ipcRenderer.invoke('resource:loadSplitPoints', params),

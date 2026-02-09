@@ -30,6 +30,7 @@ export const RESOURCE_CHANNELS = {
   REORDER: 'resource:reorder',              // 重新排序资源（通过重命名文件）
   OPEN_FOLDER: 'resource:openFolder',
   CAPTURE_FRAME: 'resource:captureFrame',
+  GET_THUMBNAIL: 'resource:getThumbnail',   // 获取缓存的缩略图
   DELETE_SPLIT_FOLDERS: 'resource:deleteSplitFolders',
   SAVE_SPLIT_POINTS: 'resource:saveSplitPoints',
   LOAD_SPLIT_POINTS: 'resource:loadSplitPoints',

@@ -6,7 +6,7 @@ import { useDraftStore } from '../../stores/draft';
 import { useSceneLinkStore } from '../../stores/sceneLink';
 
 // 支持拖动排序的资源类型（通过重命名文件实现）
-const SORTABLE_TYPES: ResourceType[] = ['scene_source', 'scene_new', 'scene_hd', 'lipsync', 'source_character', 'new_character', 'prompt'];
+const SORTABLE_TYPES: ResourceType[] = ['scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized', 'source_character', 'new_character', 'prompt'];
 
 // 支持拖拽复制的资源类型（所有非文本类型）
 const DRAGGABLE_TYPES: ResourceType[] = ['source_video', 'source_character', 'new_character', 'scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized'];

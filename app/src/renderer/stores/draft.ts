@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Draft, Resource, ResourceType, OperationResult } from '@shared/types';
 import { useSceneLinkStore } from './sceneLink';
+import { clearThumbnailCache } from '../components/ResourcePanel/ResourceCard';
 
 // ============================================
 // Types
@@ -340,10 +341,12 @@ export const useDraftStore = create<DraftState>((set, get) => ({
   },
 
   copyResource: async (id: string, targetType?: ResourceType) => {
+    const { selectedDraftId } = get();
     try {
       const result: OperationResult<Resource> = await window.api.resource.copy({
         resourceId: id,
         targetType,
+        sourceDraftId: selectedDraftId || undefined, // 传递源草稿 ID，避免后端遍历
       });
       if (result.success && result.data) {
         set((state) => ({
@@ -395,6 +398,17 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       });
 
       if (result.success && result.data) {
+        // 清除该类型资源的缩略图缓存（因为文件内容位置变了）
+        // 从第一个资源 ID 中提取文件夹前缀（如 '分镜源视频/'）
+        if (result.data.length > 0) {
+          const firstId = result.data[0].id;
+          const slashIndex = firstId.indexOf('/');
+          if (slashIndex > 0) {
+            const folderPrefix = firstId.substring(0, slashIndex + 1);
+            clearThumbnailCache(folderPrefix);
+          }
+        }
+
         // 重排序后资源 ID 会变化（因为文件名变了）
         // 所以需要完全替换该类型的所有资源，而不是尝试匹配旧 ID
         set((state) => {

@@ -4,6 +4,7 @@ import * as fs from 'fs/promises';
 import { RESOURCE_CHANNELS } from '@shared/ipc-channels';
 import storage from '../services/storage';
 import { extractMetadata, getResourceTypeFromMime, getMimeType } from '../services/metadata';
+import thumbnailCache from '../services/thumbnailCache';
 import type { Resource, ResourceType, OperationResult } from '@shared/types';
 
 // ============================================
@@ -63,12 +64,18 @@ interface ResourceCopyRequest {
   resourceId: string;
   targetType?: ResourceType; // 目标资源类型（用于跨类型复制，如 scene_source -> scene_new）
   targetDraftId?: string; // 目标草稿 ID（默认为原资源所在草稿）
+  sourceDraftId?: string; // 源草稿 ID（如果提供则直接使用，避免遍历所有草稿）
 }
 
 interface ResourceReorderRequest {
   draftId: string;
   type: ResourceType;
   orderedIds: string[]; // 按新顺序排列的资源 ID 数组
+}
+
+interface ResourceThumbnailRequest {
+  draftId: string;
+  resourceId: string;
 }
 
 // ============================================
@@ -447,9 +454,7 @@ export function registerResourceHandlers(): void {
           try {
             await fs.writeFile(foundResource.filePath, textContent, 'utf-8');
             console.log('[Resource] Updated text file:', foundResource.filePath);
-
-            // 清除缓存以便下次获取最新内容
-            storage.clearMetadataCache(foundDraftId);
+            // 注意：文本资源不使用缓存，每次都从文件读取
           } catch (err) {
             console.error('[Resource] Failed to update text file:', err);
             return { success: false, error: 'Failed to update text file' };
@@ -478,16 +483,26 @@ export function registerResourceHandlers(): void {
     async (_, request: ResourceCopyRequest): Promise<OperationResult<Resource>> => {
       try {
         // Find the resource and its draft
-        const drafts = await storage.draft.list();
         let foundDraftId: string | null = null;
         let foundResource: Resource | null = null;
 
-        for (const draft of drafts) {
-          const resource = await storage.resource.get(draft.id, request.resourceId);
+        // 如果提供了 sourceDraftId，直接使用，避免遍历所有草稿
+        if (request.sourceDraftId) {
+          const resource = await storage.resource.get(request.sourceDraftId, request.resourceId);
           if (resource) {
-            foundDraftId = draft.id;
+            foundDraftId = request.sourceDraftId;
             foundResource = resource;
-            break;
+          }
+        } else {
+          // 后备：遍历所有草稿查找（较慢）
+          const drafts = await storage.draft.list();
+          for (const draft of drafts) {
+            const resource = await storage.resource.get(draft.id, request.resourceId);
+            if (resource) {
+              foundDraftId = draft.id;
+              foundResource = resource;
+              break;
+            }
           }
         }
 
@@ -503,6 +518,8 @@ export function registerResourceHandlers(): void {
         const ext = path.extname(foundResource.filePath);
         const sequenceNumber = await storage.getNextSequenceNumber(targetDraftId, targetType);
 
+        console.log('[Resource] COPY: source =', foundResource.filePath, 'targetType =', targetType, 'seq =', sequenceNumber);
+
         // 获取原始文件名（去掉序号前缀）用于新文件
         const originalName = storage.getOriginalNameFromFileName(foundResource.fileName);
         const newFileName = storage.makeSequencedFileName(sequenceNumber, originalName, ext);
@@ -511,11 +528,14 @@ export function registerResourceHandlers(): void {
           ? path.join(folderPath, newFileName)
           : storage.getResourceFilePath(targetDraftId, targetType, ext, sequenceNumber);
 
+        console.log('[Resource] COPY: folderPath =', folderPath, 'newFilePath =', newFilePath);
+
         // Ensure directory exists
         await fs.mkdir(path.dirname(newFilePath), { recursive: true });
 
         // Copy the file
         await fs.copyFile(foundResource.filePath, newFilePath);
+        console.log('[Resource] COPY: File copied successfully');
 
         // Get new file stats
         const stats = await fs.stat(newFilePath);
@@ -553,21 +573,29 @@ export function registerResourceHandlers(): void {
   ipcMain.handle(
     RESOURCE_CHANNELS.REORDER,
     async (_, request: ResourceReorderRequest): Promise<OperationResult<Resource[]>> => {
+      console.log('[Resource] REORDER request:', JSON.stringify(request, null, 2));
       try {
         // Verify draft exists
         const draft = await storage.draft.get(request.draftId);
         if (!draft) {
+          console.log('[Resource] REORDER: Draft not found:', request.draftId);
           return { success: false, error: 'DRAFT_NOT_FOUND' };
         }
 
-        // Reorder the resources by renaming files
-        const updatedResources = await storage.reorderResourceFiles(
+        console.log('[Resource] REORDER: Calling reorderResourceFiles...');
+        // Reorder the resources by renaming files (只重命名，返回新 ID 列表)
+        const newResourceIds = await storage.reorderResourceFiles(
           request.draftId,
           request.type,
           request.orderedIds
         );
+        console.log('[Resource] REORDER: newResourceIds =', newResourceIds);
 
-        console.log('[Resource] Reordered', updatedResources.length, 'resources of type', request.type);
+        // 使用缓存快速获取完整资源列表（缓存 key 已在 reorderResourceFiles 中更新）
+        console.log('[Resource] REORDER: Scanning resources...');
+        const updatedResources = await storage.scanResources(request.draftId, request.type);
+
+        console.log('[Resource] REORDER SUCCESS:', updatedResources.length, 'resources of type', request.type);
         return { success: true, data: updatedResources };
       } catch (error) {
         console.error('[Resource] Reorder failed:', error);
@@ -774,6 +802,54 @@ export function registerResourceHandlers(): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to load split points',
+        };
+      }
+    }
+  );
+
+  // Get thumbnail for a resource (cached or generated)
+  ipcMain.handle(
+    RESOURCE_CHANNELS.GET_THUMBNAIL,
+    async (_, request: ResourceThumbnailRequest): Promise<OperationResult<string>> => {
+      try {
+        // Get the resource
+        const resource = await storage.resource.get(request.draftId, request.resourceId);
+        if (!resource) {
+          return { success: false, error: 'RESOURCE_NOT_FOUND' };
+        }
+
+        // Determine media type
+        let mediaType: 'video' | 'image' | null = null;
+        if (resource.mimeType.startsWith('video/')) {
+          mediaType = 'video';
+        } else if (resource.mimeType.startsWith('image/')) {
+          mediaType = 'image';
+        }
+
+        if (!mediaType) {
+          return { success: false, error: 'UNSUPPORTED_MEDIA_TYPE' };
+        }
+
+        // Get draft path
+        const draftPath = storage.getDraftPath(request.draftId);
+
+        // Get or generate thumbnail
+        const thumbnailPath = await thumbnailCache.getOrGenerateThumbnail(
+          draftPath,
+          resource.filePath,
+          mediaType
+        );
+
+        if (!thumbnailPath) {
+          return { success: false, error: 'THUMBNAIL_GENERATION_FAILED' };
+        }
+
+        return { success: true, data: thumbnailPath };
+      } catch (error) {
+        console.error('[Resource] GET_THUMBNAIL error:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to get thumbnail',
         };
       }
     }

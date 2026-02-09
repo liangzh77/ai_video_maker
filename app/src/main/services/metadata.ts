@@ -4,6 +4,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { ResourceType, ResourceMetadata, VideoMetadata, ImageMetadata, TextMetadata } from '@shared/types';
 import { getFFmpegPath, getFFprobePath } from './python-bridge';
+import thumbnailCache from './thumbnailCache';
 
 const execAsync = promisify(exec);
 
@@ -177,31 +178,52 @@ async function extractTextMetadata(filePath: string): Promise<TextMetadata> {
 // Main Extraction Function
 // ============================================
 
+/**
+ * 提取文件元数据
+ * @param filePath 文件路径
+ * @param resourceType 资源类型
+ * @param draftPath 草稿路径（可选，提供时会使用持久化缓存）
+ */
 export async function extractMetadata(
   filePath: string,
-  resourceType: ResourceType
+  resourceType: ResourceType,
+  draftPath?: string
 ): Promise<ResourceMetadata> {
   const mimeType = getMimeType(filePath);
   const generalType = getResourceTypeFromMime(mimeType);
 
+  // 文本类型不缓存（内容需要实时读取）
+  if (generalType === 'text' || resourceType === 'prompt') {
+    return extractTextMetadata(filePath);
+  }
+
+  // 如果提供了 draftPath，先检查持久化缓存
+  if (draftPath) {
+    const cached = await thumbnailCache.getMetadata(draftPath, filePath);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  // 提取元数据
+  let metadata: ResourceMetadata;
   switch (generalType) {
     case 'video':
-      return extractVideoMetadata(filePath);
+      metadata = await extractVideoMetadata(filePath);
+      break;
     case 'image':
-      return extractImageMetadata(filePath);
-    case 'text':
-      return extractTextMetadata(filePath);
+      metadata = await extractImageMetadata(filePath);
+      break;
     default:
-      // For prompt type or unknown, check if it's a text file
-      if (resourceType === 'prompt') {
-        return extractTextMetadata(filePath);
-      }
-      // Return empty metadata for unknown types
-      return {
-        content: '',
-        encoding: 'utf-8',
-      } as TextMetadata;
+      metadata = { content: '', encoding: 'utf-8' } as TextMetadata;
   }
+
+  // 保存到持久化缓存
+  if (draftPath && (generalType === 'video' || generalType === 'image')) {
+    await thumbnailCache.saveMetadata(draftPath, filePath, metadata);
+  }
+
+  return metadata;
 }
 
 // ============================================
