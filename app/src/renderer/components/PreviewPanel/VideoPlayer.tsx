@@ -88,13 +88,21 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   }, [src, autoPlay]);
 
   // 组件卸载时清理 video src，释放文件句柄
+  // 使用 setTimeout + isConnected 检查，避免 React StrictMode 双重调用导致的问题：
+  // StrictMode 会模拟卸载并重新挂载 effects，但 DOM 保持不变，
+  // 如果直接在 cleanup 中清除 src，会导致视频加载失败
   useEffect(() => {
     const video = videoRef.current;
     return () => {
       if (video) {
         video.pause();
-        video.src = '';
-        video.load(); // 强制释放资源
+        setTimeout(() => {
+          // 只在元素真正从 DOM 移除后才清理（排除 StrictMode 模拟卸载）
+          if (!video.isConnected) {
+            video.src = '';
+            video.load();
+          }
+        }, 0);
       }
     };
   }, []);
@@ -175,6 +183,7 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       if (video.error?.code === 3 && isSeekingRef.current) {
         return;
       }
+      console.error('[VideoPlayer] 视频加载错误:', video.error?.code, video.error?.message);
       setHasError(true);
       setIsPlaying(false);
       stopPlaying(playerType);

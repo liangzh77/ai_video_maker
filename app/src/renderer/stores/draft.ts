@@ -416,6 +416,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
         }));
         return result.data;
       }
+      console.warn('[DraftStore] copyResource 失败:', result.error);
       return null;
     } catch (err) {
       console.error('[DraftStore] copyResource exception:', err);

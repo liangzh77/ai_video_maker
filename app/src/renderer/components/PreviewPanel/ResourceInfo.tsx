@@ -90,6 +90,10 @@ const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
               <span className={styles.label}>帧率</span>
               <span className={styles.value}>{resource.metadata.fps} fps</span>
             </div>
+            <div className={styles.item}>
+              <span className={styles.label}>总帧数</span>
+              <span className={styles.value}>{Math.round(resource.metadata.duration * resource.metadata.fps)}</span>
+            </div>
           </>
         )}
 

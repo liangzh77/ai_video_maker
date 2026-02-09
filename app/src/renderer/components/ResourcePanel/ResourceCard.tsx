@@ -61,9 +61,11 @@ interface CachedThumbnailProps {
 }
 
 const CachedThumbnail: React.FC<CachedThumbnailProps> = ({ resource, isVideo }) => {
+  // 缓存 key 包含 fileSize，确保同 ID 不同文件不会命中旧缓存
+  const cacheKey = `${resource.id}_${resource.fileSize}`;
   const [thumbnailPath, setThumbnailPath] = useState<string | null>(() => {
     // 检查内存缓存
-    return thumbnailCache.get(resource.id) || null;
+    return thumbnailCache.get(cacheKey) || null;
   });
   const [isLoading, setIsLoading] = useState(!thumbnailPath);
   const [hasError, setHasError] = useState(false);
@@ -79,7 +81,7 @@ const CachedThumbnail: React.FC<CachedThumbnailProps> = ({ resource, isVideo }) 
 
     const fetchThumbnail = async () => {
       // 检查是否已有正在进行的请求
-      const existingRequest = pendingRequests.get(resource.id);
+      const existingRequest = pendingRequests.get(cacheKey);
       if (existingRequest) {
         const path = await existingRequest;
         if (isMounted && path) {
@@ -98,7 +100,7 @@ const CachedThumbnail: React.FC<CachedThumbnailProps> = ({ resource, isVideo }) 
           });
 
           if (result.success && result.data) {
-            thumbnailCache.set(resource.id, result.data);
+            thumbnailCache.set(cacheKey, result.data);
             return result.data;
           }
           return null;
@@ -106,11 +108,11 @@ const CachedThumbnail: React.FC<CachedThumbnailProps> = ({ resource, isVideo }) 
           console.error('[CachedThumbnail] Failed to get thumbnail:', resource.id, err);
           return null;
         } finally {
-          pendingRequests.delete(resource.id);
+          pendingRequests.delete(cacheKey);
         }
       })();
 
-      pendingRequests.set(resource.id, requestPromise);
+      pendingRequests.set(cacheKey, requestPromise);
 
       const path = await requestPromise;
       if (isMounted) {

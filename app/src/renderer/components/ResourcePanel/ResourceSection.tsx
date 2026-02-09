@@ -405,12 +405,30 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     e.preventDefault();
     e.stopPropagation();
 
+    setDragOverCardId(null);
+    setDraggingCardId(null);
+
+    // 检查是否是视频帧拖拽（从 VideoPlayer 拖拽截图）
+    const frameDataStr = e.dataTransfer.getData(FRAME_DATA_MIME);
+    if (frameDataStr && canDrop && selectedDraftId) {
+      try {
+        const frameData = JSON.parse(frameDataStr) as { imageData: string; fileName: string };
+        const result = await addFrameAsResource(selectedDraftId, type, frameData.imageData, frameData.fileName);
+        if (result) {
+          message.success('已添加视频帧截图');
+        } else {
+          message.error('添加视频帧失败');
+        }
+      } catch (error) {
+        console.error('Failed to add frame:', error);
+        message.error('添加视频帧失败');
+      }
+      return;
+    }
+
     // 从 dataTransfer 读取数据（支持跨 section 拖拽）
     const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
     const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
-
-    setDragOverCardId(null);
-    setDraggingCardId(null);
 
     if (!fromId || !isDraggable) return;
 
@@ -437,7 +455,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     } else {
       message.error('复制失败');
     }
-  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource]);
+  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource, canDrop, selectedDraftId, addFrameAsResource]);
 
   const handleCardDragEnd = useCallback(() => {
     setDragOverCardId(null);
@@ -510,6 +528,24 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     e.preventDefault();
     e.stopPropagation();
 
+    // 检查是否是视频帧拖拽（从 VideoPlayer 拖拽截图）
+    const frameDataStr = e.dataTransfer.getData(FRAME_DATA_MIME);
+    if (frameDataStr && canDrop && selectedDraftId) {
+      try {
+        const frameData = JSON.parse(frameDataStr) as { imageData: string; fileName: string };
+        const result = await addFrameAsResource(selectedDraftId, type, frameData.imageData, frameData.fileName);
+        if (result) {
+          message.success('已添加视频帧截图');
+        } else {
+          message.error('添加视频帧失败');
+        }
+      } catch (error) {
+        console.error('Failed to add frame:', error);
+        message.error('添加视频帧失败');
+      }
+      return;
+    }
+
     // 从 dataTransfer 读取数据（支持跨 section 拖拽）
     const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
     const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
@@ -542,7 +578,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     } else {
       message.error('复制失败');
     }
-  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource]);
+  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource, canDrop, selectedDraftId, addFrameAsResource]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
