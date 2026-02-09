@@ -87,6 +87,18 @@ const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     wasPlayingRef.current = false;
   }, [src, autoPlay]);
 
+  // 组件卸载时清理 video src，释放文件句柄
+  useEffect(() => {
+    const video = videoRef.current;
+    return () => {
+      if (video) {
+        video.pause();
+        video.src = '';
+        video.load(); // 强制释放资源
+      }
+    };
+  }, []);
+
   // 监听其他播放器开始播放时，暂停当前播放器
   const prevPauseRequestIdRef = useRef(pauseRequestId);
   useEffect(() => {

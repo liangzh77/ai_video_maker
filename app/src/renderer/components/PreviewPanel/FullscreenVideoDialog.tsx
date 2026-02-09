@@ -43,6 +43,18 @@ const FullscreenVideoDialog: React.FC<FullscreenVideoDialogProps> = ({
     }
   }, [visible]);
 
+  // 组件卸载或关闭时清理 video src，释放文件句柄
+  useEffect(() => {
+    const video = videoRef.current;
+    return () => {
+      if (video) {
+        video.pause();
+        video.src = '';
+        video.load();
+      }
+    };
+  }, []);
+
   // 监听其他播放器开始播放时，暂停当前播放器
   const prevPauseRequestIdRef = useRef(pauseRequestId);
   useEffect(() => {

@@ -19,7 +19,7 @@ export interface ElectronAPI {
     addFrame: (params: { draftId: string; type: string; imageData: string; fileName: string }) => Promise<any>;
     addText: (params: { draftId: string; type: string; content: string }) => Promise<any>;
     update: (params: { id: string; metadata?: any }) => Promise<any>;
-    delete: (params: { id: string }) => Promise<any>;
+    delete: (params: { draftId: string; id: string }) => Promise<any>;
     copy: (params: { resourceId: string; targetType?: string; targetDraftId?: string }) => Promise<any>;
     reorder: (params: { draftId: string; type: string; orderedIds: string[] }) => Promise<any>;
     openFolder: (params: { id: string }) => Promise<any>;

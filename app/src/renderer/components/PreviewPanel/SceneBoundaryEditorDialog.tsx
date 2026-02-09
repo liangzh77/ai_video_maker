@@ -110,12 +110,30 @@ const SceneBoundaryEditorDialog: React.FC<SceneBoundaryEditorDialogProps> = ({
     }
   }, [pauseRequestId, activePlayerType, isPlaying]);
 
-  // 对话框关闭时停止播放状态
+  // 对话框关闭时停止播放状态，释放文件句柄
   useEffect(() => {
     if (!visible) {
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        video.src = '';
+        video.load();
+      }
       stopPlaying(PLAYER_TYPE);
     }
   }, [visible, stopPlaying]);
+
+  // 组件卸载时清理 video src
+  useEffect(() => {
+    return () => {
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        video.src = '';
+        video.load();
+      }
+    };
+  }, []);
 
   // 视频事件监听
   useEffect(() => {

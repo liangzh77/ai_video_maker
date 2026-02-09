@@ -40,6 +40,7 @@ interface ResourceUpdateRequest {
 }
 
 interface ResourceDeleteRequest {
+  draftId: string;
   id: string;
 }
 
@@ -612,40 +613,11 @@ export function registerResourceHandlers(): void {
     RESOURCE_CHANNELS.DELETE,
     async (_, request: ResourceDeleteRequest): Promise<OperationResult> => {
       try {
-        // Find the resource and its draft
-        const drafts = await storage.draft.list();
-        let foundDraftId: string | null = null;
-        let foundResource: Resource | null = null;
-
-        for (const draft of drafts) {
-          const resource = await storage.resource.get(draft.id, request.id);
-          if (resource) {
-            foundDraftId = draft.id;
-            foundResource = resource;
-            break;
-          }
-        }
-
-        if (!foundDraftId || !foundResource) {
-          return { success: false, error: 'RESOURCE_NOT_FOUND' };
-        }
-
-        const resourceType = foundResource.type;
-
-        // storage.resource.delete 现在会直接删除文件
-        const deleted = await storage.resource.delete(foundDraftId, request.id);
+        // 直接删除文件，不需要先扫描资源（避免 ffprobe 占用文件）
+        const deleted = await storage.resource.delete(request.draftId, request.id);
         if (!deleted) {
           return { success: false, error: 'Failed to delete resource' };
         }
-
-        // 删除后重新整理同类型资源的序号
-        try {
-          await storage.renumberResourceFiles(foundDraftId, resourceType);
-        } catch (err) {
-          console.warn('[Resource] Failed to renumber after delete:', err);
-          // 不影响删除操作的成功返回
-        }
-
         return { success: true };
       } catch (error) {
         return {

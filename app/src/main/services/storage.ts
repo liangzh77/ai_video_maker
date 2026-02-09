@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Draft, Resource, ResourceType, ProcessingTask, ResourceMetadata } from '@shared/types';
 import { loadConfig, saveConfig } from './config';
 import { extractMetadata, getMimeType } from './metadata';
+import { clearIndexCache as clearThumbnailIndexCache } from './thumbnailCache';
 
 // ============================================
 // Storage Paths
@@ -64,6 +65,69 @@ export async function saveStorageRootToConfig(newPath: string): Promise<void> {
   config.workspacePath = newPath;
   await saveConfig(config);
   await setStorageRoot(newPath);
+}
+
+// ============================================
+// Folder Name Utilities
+// ============================================
+
+/**
+ * 清理文件夹名中的非法字符（Windows）
+ * @param name 原始名字
+ * @returns 清理后的文件夹名
+ */
+function sanitizeFolderName(name: string): string {
+  return name
+    .replace(/[\\/:*?"<>|]/g, '_')  // 替换非法字符
+    .replace(/\s+/g, ' ')            // 合并连续空格
+    .trim()
+    .substring(0, 200);              // 限制长度
+}
+
+/**
+ * 检查目录是否存在
+ */
+async function directoryExists(dirPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(dirPath);
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 生成唯一的文件夹名（处理重名）
+ * @param baseName 基础名字
+ * @param excludeId 排除的 ID（用于重命名时跳过自己）
+ * @returns 唯一的文件夹名
+ */
+async function getUniqueFolderName(baseName: string, excludeId?: string): Promise<string> {
+  const sanitized = sanitizeFolderName(baseName);
+  if (!sanitized) {
+    // 如果名字清理后为空，使用默认名
+    return getUniqueFolderName('未命名草稿', excludeId);
+  }
+
+  const storageRoot = getStorageRoot();
+
+  let folderName = sanitized;
+  let counter = 1;
+
+  while (true) {
+    const folderPath = path.join(storageRoot, folderName);
+    const exists = await directoryExists(folderPath);
+
+    // 如果不存在，或者是自己（重命名场景），则可用
+    if (!exists || (excludeId && folderName === excludeId)) {
+      break;
+    }
+
+    folderName = `${sanitized} (${counter})`;
+    counter++;
+  }
+
+  return folderName;
 }
 
 function getDraftPath(draftId: string): string {
@@ -657,17 +721,59 @@ export async function listDrafts(): Promise<Draft[]> {
     const drafts: Draft[] = [];
 
     for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const metaPath = getMetaPath(entry.name);
-        try {
-          const meta = await readJson<Draft>(metaPath, null as unknown as Draft);
-          if (meta) {
-            drafts.push(meta);
+      if (!entry.isDirectory()) continue;
+
+      // 跳过隐藏文件夹和系统文件夹
+      if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
+
+      const metaPath = getMetaPath(entry.name);
+
+      try {
+        // 尝试读取现有的 meta.json
+        const meta = await readJson<Draft | null>(metaPath, null);
+        if (meta) {
+          // 文件夹名 = id = name，始终用文件夹名覆盖
+          const needsUpdate = meta.id !== entry.name || meta.name !== entry.name;
+          meta.id = entry.name;
+          meta.name = entry.name;
+          meta.storagePath = entry.name;
+          if (needsUpdate) {
+            await writeJson(metaPath, meta);
+            console.log('[Storage] Fixed draft to match folder name:', entry.name);
           }
-        } catch {
-          // Skip invalid draft directories
+          drafts.push(meta);
+          continue;
         }
+      } catch {
+        // meta.json 不存在或无效
       }
+
+      // 自动创建草稿元数据（把文件夹识别为草稿）
+      const now = new Date().toISOString();
+      const newDraft: Draft = {
+        id: entry.name,
+        name: entry.name,  // 用文件夹名作为草稿名
+        createdAt: now,
+        updatedAt: now,
+        storagePath: entry.name,
+      };
+
+      // 确保必要的子目录存在
+      await fs.mkdir(getFilesPath(entry.name), { recursive: true });
+      await fs.mkdir(getThumbnailsPath(entry.name), { recursive: true });
+      await writeJson(metaPath, newDraft);
+      await writeJson(getTasksPath(entry.name), { tasks: [] });
+
+      // 检查是否需要创建 关联.json
+      const linksPath = getLinksPath(entry.name);
+      try {
+        await fs.access(linksPath);
+      } catch {
+        await writeJson(linksPath, DEFAULT_LINKS);
+      }
+
+      console.log('[Storage] Auto-created draft for folder:', entry.name);
+      drafts.push(newDraft);
     }
 
     // Sort by updatedAt descending
@@ -687,42 +793,86 @@ export async function getDraft(id: string): Promise<Draft | null> {
 }
 
 export async function createDraft(name: string): Promise<Draft> {
-  const id = uuidv4();
+  // 生成唯一的文件夹名（用草稿名，处理非法字符和重名）
+  const folderName = await getUniqueFolderName(name);
   const now = new Date().toISOString();
 
+  // 文件夹名 = id = name
   const draft: Draft = {
-    id,
-    name,
+    id: folderName,
+    name: folderName,
     createdAt: now,
     updatedAt: now,
-    storagePath: id,
+    storagePath: folderName,
   };
 
-  const draftPath = getDraftPath(id);
+  const draftPath = getDraftPath(folderName);
   await fs.mkdir(draftPath, { recursive: true });
-  await fs.mkdir(getThumbnailsPath(id), { recursive: true });
-  await fs.mkdir(getFilesPath(id), { recursive: true });
+  await fs.mkdir(getThumbnailsPath(folderName), { recursive: true });
+  await fs.mkdir(getFilesPath(folderName), { recursive: true });
 
-  await writeJson(getMetaPath(id), draft);
+  await writeJson(getMetaPath(folderName), draft);
   // 注意：resources.json 已废弃，资源列表通过扫描文件系统获取
-  await writeJson(getTasksPath(id), { tasks: [] });
-  await writeJson(getLinksPath(id), DEFAULT_LINKS);
+  await writeJson(getTasksPath(folderName), { tasks: [] });
+  await writeJson(getLinksPath(folderName), DEFAULT_LINKS);
 
   return draft;
 }
 
 export async function updateDraft(id: string, updates: Partial<Draft>): Promise<Draft | null> {
   const draft = await getDraft(id);
-  if (!draft) return null;
+  if (!draft) {
+    return null;
+  }
 
+  let newId = id;
+
+  // 如果名字改变，重命名文件夹（文件夹名 = 草稿名 = ID）
+  if (updates.name && updates.name !== id) {
+    // 生成新的文件夹名
+    const newFolderName = await getUniqueFolderName(updates.name, id);
+    console.log('[Storage] updateDraft: renaming', id, '->', newFolderName);
+
+    if (newFolderName !== id) {
+      const oldPath = getDraftPath(id);
+      const newPath = getDraftPath(newFolderName);
+
+      // 清除缩略图索引缓存（释放可能的内存引用）
+      clearThumbnailIndexCache(oldPath);
+
+      // 尝试重命名，最多重试 5 次，逐渐增加等待时间
+      let lastError: Error | null = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await fs.rename(oldPath, newPath);
+          newId = newFolderName;
+          console.log('[Storage] Draft folder renamed:', id, '->', newFolderName);
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err as Error;
+          const waitTime = 500 * (attempt + 1); // 500ms, 1s, 1.5s, 2s, 2.5s
+          console.log('[Storage] Rename attempt', attempt + 1, 'failed, waiting', waitTime, 'ms...');
+          await new Promise((resolve) => setTimeout(resolve, waitTime));
+        }
+      }
+
+      if (lastError) {
+        throw new Error('重命名失败，请关闭正在播放的视频后重试');
+      }
+    }
+  }
+
+  // 草稿名 = 文件夹名 = ID
   const updatedDraft: Draft = {
-    ...draft,
-    ...updates,
-    id, // Ensure ID cannot be changed
+    id: newId,
+    name: newId,
+    createdAt: draft.createdAt,
     updatedAt: new Date().toISOString(),
+    storagePath: newId,
   };
 
-  await writeJson(getMetaPath(id), updatedDraft);
+  await writeJson(getMetaPath(newId), updatedDraft);
   return updatedDraft;
 }
 
@@ -749,23 +899,24 @@ export async function copyDraft(sourceId: string, newName: string): Promise<Draf
     throw new Error('Source draft not found');
   }
 
-  const newId = uuidv4();
+  // 生成唯一的文件夹名（用新草稿名）
+  const newFolderName = await getUniqueFolderName(newName);
   const now = new Date().toISOString();
   const sourcePath = getDraftPath(sourceId);
-  const targetPath = getDraftPath(newId);
+  const targetPath = getDraftPath(newFolderName);
 
   // 递归复制整个草稿文件夹
   await copyDirectory(sourcePath, targetPath);
 
-  // 更新新草稿的 meta.json
+  // 更新新草稿的 meta.json（文件夹名 = id = name）
   const newDraft: Draft = {
-    id: newId,
-    name: newName,
+    id: newFolderName,
+    name: newFolderName,
     createdAt: now,
     updatedAt: now,
-    storagePath: newId,
+    storagePath: newFolderName,
   };
-  await writeJson(getMetaPath(newId), newDraft);
+  await writeJson(getMetaPath(newFolderName), newDraft);
 
   // 删除复制过来的旧文件（如果存在）
   // resources.json 已废弃
@@ -785,13 +936,13 @@ export async function copyDraft(sourceId: string, newName: string): Promise<Draf
   }
 
   // 清空 tasks.json（任务不需要复制）
-  await writeJson(getTasksPath(newId), { tasks: [] });
+  await writeJson(getTasksPath(newFolderName), { tasks: [] });
 
   // 复制关联关系到新位置 files/关联.json
   const sourceLinks = await loadLinks(sourceId);
-  await writeJson(getLinksPath(newId), sourceLinks);
+  await writeJson(getLinksPath(newFolderName), sourceLinks);
 
-  console.log('[Storage] Copied draft:', sourceId, '->', newId);
+  console.log('[Storage] Copied draft:', sourceId, '->', newFolderName);
   return newDraft;
 }
 
@@ -877,55 +1028,22 @@ export async function getResource(draftId: string, resourceId: string): Promise<
 
 /**
  * 删除资源
- * 直接删除文件，不再需要更新 resources.json
- * 注意：缩略图缓存基于文件指纹，文件删除后缓存会自然成为孤立文件，可通过 cleanupOrphanedCache 清理
+ * 直接删除文件
  */
 export async function deleteResource(draftId: string, resourceId: string): Promise<boolean> {
   const filesDir = getFilesPath(draftId);
   const filePath = path.join(filesDir, resourceId);
 
   try {
-    // 尝试删除文件，如果文件被占用则等待后重试
-    let retries = 3;
-    let lastError: Error | null = null;
-
-    while (retries > 0) {
-      try {
-        await fs.unlink(filePath);
-        break; // 成功删除
-      } catch (err) {
-        lastError = err as Error;
-        const errorCode = (err as NodeJS.ErrnoException).code;
-
-        // EBUSY: 文件被占用（Windows）
-        // ENOENT: 文件不存在（可能已被删除）
-        if (errorCode === 'ENOENT') {
-          // 文件已不存在，视为成功
-          break;
-        }
-
-        if (errorCode === 'EBUSY' || errorCode === 'EPERM') {
-          retries--;
-          if (retries > 0) {
-            console.log('[Storage] File busy, retrying delete:', filePath, 'retries left:', retries);
-            await new Promise(resolve => setTimeout(resolve, 500)); // 等待 500ms 后重试
-          }
-        } else {
-          // 其他错误直接抛出
-          throw err;
-        }
-      }
-    }
-
-    if (retries === 0 && lastError) {
-      throw lastError;
-    }
-
+    await fs.unlink(filePath);
     await updateDraft(draftId, {});
-    console.log('[Storage] Deleted resource:', filePath);
     return true;
   } catch (err) {
-    console.error('[Storage] Failed to delete resource:', filePath, err);
+    const errorCode = (err as NodeJS.ErrnoException).code;
+    if (errorCode === 'ENOENT') {
+      return true; // 文件不存在视为成功
+    }
+    console.error('[Storage] Failed to delete:', filePath, err);
     return false;
   }
 }

@@ -43,6 +43,18 @@ const FullscreenPreviewModal: React.FC = () => {
     }
   }, [resourceId, previewType]);
 
+  // 组件卸载或关闭时清理 video src，释放文件句柄
+  useEffect(() => {
+    const video = videoRef.current;
+    return () => {
+      if (video) {
+        video.pause();
+        video.src = '';
+        video.load();
+      }
+    };
+  }, []);
+
   // 获取同类型资源列表
   const getSiblingResources = useCallback(() => {
     if (!resourceType) return [];

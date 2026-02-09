@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Draft, Resource, ResourceType, OperationResult } from '@shared/types';
 import { useSceneLinkStore } from './sceneLink';
+import { usePlaybackStore } from './playback';
 import { clearThumbnailCache } from '../components/ResourcePanel/ResourceCard';
 
 // ============================================
@@ -165,15 +166,73 @@ export const useDraftStore = create<DraftState>((set, get) => ({
 
   updateDraft: async (id: string, name: string) => {
     try {
+      const { selectedDraftId } = get();
+      const isCurrentDraft = selectedDraftId === id;
+
+      // 如果正在重命名当前选中的草稿，先释放资源以避免文件句柄占用
+      if (isCurrentDraft) {
+        // 停止所有播放
+        usePlaybackStore.getState().stopPlaying(usePlaybackStore.getState().activePlayerType);
+
+        // 清除资源状态，这会导致组件卸载并释放文件句柄
+        set({ resources: [], selectedResourceId: null });
+
+        // 清除缩略图缓存
+        clearThumbnailCache();
+
+        // 先取消选中草稿，强制卸载所有组件
+        set({ selectedDraftId: null });
+
+        // 等待足够时间让 React 组件卸载并释放文件句柄
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
       const result: OperationResult<Draft> = await window.api.draft.update({ id, name });
       if (result.success && result.data) {
-        set((state) => ({
-          drafts: state.drafts.map((d) => (d.id === id ? result.data! : d)),
-        }));
-        return result.data;
+        const updatedDraft = result.data;
+        const newId = updatedDraft.id;
+        const idChanged = newId !== id;
+
+        set((state) => {
+          const newDrafts = state.drafts.map((d) => (d.id === id ? updatedDraft : d));
+
+          // 如果当前选中的草稿 ID 变了，更新选中状态
+          const newSelectedId = state.selectedDraftId === id ? newId : state.selectedDraftId;
+
+          return {
+            drafts: newDrafts,
+            selectedDraftId: newSelectedId,
+          };
+        });
+
+        // 如果是当前草稿或 ID 变化了，需要重新加载资源
+        if (isCurrentDraft || (idChanged && get().selectedDraftId === newId)) {
+          await get().loadResources(newId);
+          // 重新加载分镜关联关系
+          await useSceneLinkStore.getState().loadFromStorage(newId);
+        }
+
+        return updatedDraft;
       }
+
+      // 如果更新失败但之前清除了资源，需要恢复
+      if (isCurrentDraft) {
+        await get().loadResources(id);
+        await useSceneLinkStore.getState().loadFromStorage(id);
+      }
+
       return null;
     } catch {
+      // 如果发生异常且清除了资源，尝试恢复
+      const { selectedDraftId } = get();
+      if (selectedDraftId === id) {
+        try {
+          await get().loadResources(id);
+          await useSceneLinkStore.getState().loadFromStorage(id);
+        } catch {
+          // 忽略恢复失败
+        }
+      }
       return null;
     }
   },
@@ -325,8 +384,10 @@ export const useDraftStore = create<DraftState>((set, get) => ({
   },
 
   deleteResource: async (id: string) => {
+    const { selectedDraftId } = get();
+    if (!selectedDraftId) return false;
     try {
-      const result: OperationResult = await window.api.resource.delete({ id });
+      const result: OperationResult = await window.api.resource.delete({ draftId: selectedDraftId, id });
       if (result.success) {
         set((state) => ({
           resources: state.resources.filter((r) => r.id !== id),
@@ -456,33 +517,42 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       }
     }
 
-    // Step 1: Update UI first to unmount components and release file locks
+    // Step 1: 停止所有播放，释放视频句柄
+    usePlaybackStore.getState().stopPlaying(usePlaybackStore.getState().activePlayerType);
+
+    // Step 2: 清除缩略图缓存
+    clearThumbnailCache();
+
+    // Step 3: Update UI first to unmount components and release file locks
     set((state) => ({
       resources: state.resources.filter((r) => r.type !== type),
       selectedResourceId: newSelectedId,
     }));
 
-    // Step 2: Wait for components to unmount and release file locks
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Step 4: Wait for components to unmount and release file locks
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Step 3: Now delete files from disk
+    // Step 5: Now delete files from disk (同步逐个删除)
     let successCount = 0;
     let failedCount = 0;
+    const failedFiles: string[] = [];
 
     for (const resource of toDelete) {
       try {
-        const result: OperationResult = await window.api.resource.delete({ id: resource.id });
+        const result: OperationResult = await window.api.resource.delete({ draftId: selectedDraftId, id: resource.id });
         if (result.success) {
           successCount++;
         } else {
           failedCount++;
+          failedFiles.push(resource.fileName);
         }
       } catch {
         failedCount++;
+        failedFiles.push(resource.fileName);
       }
     }
 
-    // Step 4: If deleting scene_source, also delete split folders
+    // Step 6: If deleting scene_source, also delete split folders
     if (type === 'scene_source' && selectedDraftId) {
       try {
         await window.api.resource.deleteSplitFolders({ draftId: selectedDraftId });
@@ -491,10 +561,15 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       }
     }
 
-    // Reload resources to ensure sync with disk
+    // Step 7: Reload resources to ensure sync with disk
     const { loadResources } = get();
     if (selectedDraftId) {
       await loadResources(selectedDraftId);
+    }
+
+    // 如果有删除失败的文件，打印警告
+    if (failedCount > 0) {
+      console.warn('[Draft] Failed to delete files:', failedFiles);
     }
 
     return { success: successCount, failed: failedCount };

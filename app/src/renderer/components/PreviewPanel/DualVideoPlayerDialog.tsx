@@ -147,16 +147,44 @@ const DualVideoPlayerDialog: React.FC<DualVideoPlayerDialogProps> = ({
     };
   }, [visible, togglePlay]);
 
-  // 关闭时停止播放并重置状态
+  // 关闭时停止播放并重置状态，释放文件句柄
   useEffect(() => {
     if (!visible) {
-      sourceVideoRef.current?.pause();
-      newVideoRef.current?.pause();
+      const sourceVideo = sourceVideoRef.current;
+      const newVideo = newVideoRef.current;
+      if (sourceVideo) {
+        sourceVideo.pause();
+        sourceVideo.src = '';
+        sourceVideo.load();
+      }
+      if (newVideo) {
+        newVideo.pause();
+        newVideo.src = '';
+        newVideo.load();
+      }
       setIsPlaying(false);
       setCurrentTime(0);
       setDuration(0);
     }
   }, [visible]);
+
+  // 组件卸载时清理所有 video src
+  useEffect(() => {
+    return () => {
+      const sourceVideo = sourceVideoRef.current;
+      const newVideo = newVideoRef.current;
+      if (sourceVideo) {
+        sourceVideo.pause();
+        sourceVideo.src = '';
+        sourceVideo.load();
+      }
+      if (newVideo) {
+        newVideo.pause();
+        newVideo.src = '';
+        newVideo.load();
+      }
+    };
+  }, []);
 
   return (
     <Modal

@@ -95,6 +95,30 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
     }
   }, [visible]);
 
+  // 对话框关闭时释放文件句柄
+  useEffect(() => {
+    if (!visible) {
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        video.src = '';
+        video.load();
+      }
+    }
+  }, [visible]);
+
+  // 组件卸载时清理 video src
+  useEffect(() => {
+    return () => {
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        video.src = '';
+        video.load();
+      }
+    };
+  }, []);
+
   // Setup video event listeners
   useEffect(() => {
     const video = videoRef.current;

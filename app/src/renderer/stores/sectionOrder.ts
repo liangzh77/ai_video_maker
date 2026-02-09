@@ -52,6 +52,7 @@ export const SECTION_CONFIGS: Record<ResourceType, SectionConfig> = {
   scene_source: {
     type: 'scene_source',
     title: '分镜源视频',
+    acceptFormats: ['video/*'],
   },
   scene_new: {
     type: 'scene_new',

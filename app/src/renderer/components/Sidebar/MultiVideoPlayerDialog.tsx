@@ -153,16 +153,35 @@ const MultiVideoPlayerDialog: React.FC<MultiVideoPlayerDialogProps> = ({
     };
   }, [visible, togglePlay]);
 
-  // 关闭时停止播放并重置状态
+  // 关闭时停止播放并重置状态，释放文件句柄
   useEffect(() => {
     if (!visible) {
-      videoRefs.current.forEach(v => v?.pause());
+      videoRefs.current.forEach(v => {
+        if (v) {
+          v.pause();
+          v.src = '';
+          v.load();
+        }
+      });
       setIsPlaying(false);
       setCurrentTime(0);
       setDuration(0);
       stopPlaying('multi-video');
     }
   }, [visible, stopPlaying]);
+
+  // 组件卸载时清理所有 video src
+  useEffect(() => {
+    return () => {
+      videoRefs.current.forEach(v => {
+        if (v) {
+          v.pause();
+          v.src = '';
+          v.load();
+        }
+      });
+    };
+  }, []);
 
   // 根据视频数量和方向决定布局类名
   const getLayoutClass = () => {
