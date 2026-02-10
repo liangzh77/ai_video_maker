@@ -1,6 +1,6 @@
 import React from 'react';
 import { App } from 'antd';
-import { CloseOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { CloseOutlined, ThunderboltOutlined, CopyOutlined } from '@ant-design/icons';
 import type { Resource, PromptTag } from '@shared/types';
 import { isTextMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
@@ -65,6 +65,17 @@ const PromptCard: React.FC<PromptCardProps> = ({
     setPendingGenerate(resource.id);
   };
 
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const text = tag ? `#tag:${tag}\n${content}` : content;
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success('已复制');
+    } catch {
+      message.error('复制失败');
+    }
+  };
+
   return (
     <div
       className={`${styles.card} ${isSelected ? styles.selected : ''} ${isDragOver ? styles.dragOver : ''} ${draggable ? styles.draggable : ''}`}
@@ -93,6 +104,10 @@ const PromptCard: React.FC<PromptCardProps> = ({
       <button className={styles.generateButton} onClick={handleGenerate} title="生成">
         <ThunderboltOutlined />
         <span>生成</span>
+      </button>
+
+      <button className={styles.copyButton} onClick={handleCopy} title="复制">
+        <CopyOutlined />
       </button>
     </div>
   );

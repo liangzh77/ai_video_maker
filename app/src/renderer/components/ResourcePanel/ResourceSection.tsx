@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Empty, App, Popconfirm, Tooltip } from 'antd';
 import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined, ThunderboltOutlined, MergeCellsOutlined, HolderOutlined } from '@ant-design/icons';
-import type { Resource, ResourceType, UpscaleConfig, SynthesizeConfig } from '@shared/types';
+import type { Resource, ResourceType, UpscaleConfig, SynthesizeConfig, PromptTag } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import { useSceneLinkStore } from '../../stores/sceneLink';
 
@@ -132,7 +132,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [synthesizeProgress, setSynthesizeProgress] = useState(0);
   const [synthesizeTaskId, setSynthesizeTaskId] = useState<string | null>(null);
-  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, deleteResourcesByType, getResourcesByType, loadResources, copyResource, reorderResource, clearLocalResourcesByType } = useDraftStore();
+  const { selectedDraftId, addResource, addFrameAsResource, addTextResource, updateResource, deleteResourcesByType, getResourcesByType, loadResources, copyResource, reorderResource, clearLocalResourcesByType } = useDraftStore();
   const { batchLink } = useSceneLinkStore();
   const { message } = App.useApp();
 
@@ -347,23 +347,40 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   };
 
   const handleAddPrompt = async () => {
-    console.log('=== handleAddPrompt START ===');
-    console.log('handleAddPrompt params:', { selectedDraftId, type, isText });
     if (!selectedDraftId) {
-      console.error('handleAddPrompt: No selectedDraftId - aborting');
       message.error('请先选择一个草稿');
       return;
     }
-    console.log('handleAddPrompt: Calling addTextResource...');
     try {
-      const result = await addTextResource(selectedDraftId, type, '');
-      console.log('handleAddPrompt result:', result);
+      // 读取剪贴板文本，自动填入新卡片
+      let clipboardText = '';
+      try {
+        clipboardText = (await navigator.clipboard.readText()).trim();
+      } catch {
+        // 剪贴板无权限或无文本内容，忽略
+      }
+
+      // 解析第一行的 tag 指令，格式：#tag:image / #tag:text / #tag:video
+      let parsedTag: PromptTag | '' = '';
+      let content = clipboardText;
+      if (clipboardText) {
+        const firstLine = clipboardText.split('\n')[0].trim();
+        const tagMatch = firstLine.match(/^#tag:(text|image|video)$/i);
+        if (tagMatch) {
+          parsedTag = tagMatch[1].toLowerCase() as PromptTag;
+          content = clipboardText.substring(clipboardText.indexOf('\n') + 1).trim();
+        }
+      }
+
+      const result = await addTextResource(selectedDraftId, type, content);
       if (result) {
-        message.success('已添加提示词');
-        console.log('=== handleAddPrompt SUCCESS ===');
+        // 如果解析到了 tag，立即更新资源的 tag（保存状态）
+        if (parsedTag) {
+          await updateResource(result.id, { content, encoding: 'utf-8', tag: parsedTag });
+        }
+        message.success(clipboardText ? '已添加提示词（已粘贴剪贴板内容）' : '已添加提示词');
       } else {
         message.error('添加失败');
-        console.error('=== handleAddPrompt FAILED (null result) ===');
       }
     } catch (error) {
       console.error('handleAddPrompt exception:', error);
