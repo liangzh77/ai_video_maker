@@ -618,6 +618,77 @@ export async function runVideoSynthesizer(
 }
 
 // ============================================
+// Text Generator
+// ============================================
+
+export interface TextGenerateResult {
+  text: string;
+}
+
+function getTextGeneratorPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'tools', 'text_generator.exe');
+  }
+  return path.join(process.cwd(), '..', 'tools', 'dist', 'text_generator', 'text_generator.exe');
+}
+
+export async function runTextGenerator(
+  modelId: string,
+  prompt: string,
+  systemPrompt?: string,
+  appConfig?: AppConfig
+): Promise<TextGenerateResult> {
+  const outputLines: string[] = [];
+
+  const useExe = shouldUseExe();
+
+  let command: string;
+  let args: string[];
+
+  if (useExe) {
+    command = getTextGeneratorPath();
+    args = ['--model', modelId, '--prompt', prompt];
+  } else {
+    command = getPythonPath(appConfig);
+    args = [path.join(getToolsPath(), 'text_generator.py'), '--model', modelId, '--prompt', prompt];
+  }
+
+  if (systemPrompt) {
+    args.push('--system', systemPrompt);
+  }
+
+  const envFilePath = app.isPackaged
+    ? path.join(process.resourcesPath, '..', '.env.local')
+    : path.join(process.cwd(), '.env.local');
+
+  console.log('[TextGenerator] Starting with command:', command);
+  console.log('[TextGenerator] Args:', args);
+  console.log('[TextGenerator] ENV_FILE:', envFilePath);
+
+  await runProcess({
+    command,
+    args,
+    env: {
+      ENV_FILE: envFilePath,
+    },
+    onStdoutLine: (message: string) => {
+      console.log('[TextGenerator]', message);
+      outputLines.push(message);
+    },
+    onStderrLine: (stderr: string) => {
+      console.log('[TextGenerator stderr]', stderr);
+    },
+  });
+
+  const text = outputLines.join('\n');
+  if (!text.trim()) {
+    throw new Error('文本生成结果为空');
+  }
+
+  return { text };
+}
+
+// ============================================
 // Image Generator
 // ============================================
 
@@ -727,6 +798,7 @@ export const pythonBridge = {
   upscaleVideo: runVideoUpscaler,
   synthesizeVideo: runVideoSynthesizer,
   generateImage: runImageGenerator,
+  generateText: runTextGenerator,
 };
 
 export default pythonBridge;

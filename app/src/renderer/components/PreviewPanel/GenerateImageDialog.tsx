@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Progress, App, Empty, Select, Radio, Button, Input } from 'antd';
+import { Modal, Progress, App, Empty, Select, Radio, Button, Input, Segmented } from 'antd';
 import { CopyOutlined, CloseCircleOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import type { Resource, ImageResolution } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
@@ -9,6 +9,8 @@ interface ModelInfo {
   id: string;
   name: string;
 }
+
+type GenerateMode = 'image' | 'text';
 
 interface GenerateImageDialogProps {
   visible: boolean;
@@ -24,8 +26,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   onClose,
 }) => {
   const { message } = App.useApp();
-  const { selectedDraftId, resources, loadResources } = useDraftStore();
+  const { selectedDraftId, resources, loadResources, addTextResource } = useDraftStore();
 
+  const [mode, setMode] = useState<GenerateMode>('text');
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [selectedResolution, setSelectedResolution] = useState<ImageResolution>('2K');
@@ -37,6 +40,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const [errorModalVisible, setErrorModalVisible] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [editedPrompt, setEditedPrompt] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
 
   // 卡片大小比例，从 localStorage 读取缓存
   const CARD_SCALE_KEY = 'generateImageDialog_cardScale';
@@ -58,7 +62,6 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     if (currentIndex > 0) {
       updateCardScale(SCALE_STEPS[currentIndex - 1]);
     } else if (currentIndex === -1) {
-      // 当前值不在预设步骤中，找到最近的较小值
       const smaller = SCALE_STEPS.filter(s => s < cardScale);
       if (smaller.length > 0) {
         updateCardScale(smaller[smaller.length - 1]);
@@ -72,7 +75,6 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     if (currentIndex >= 0 && currentIndex < SCALE_STEPS.length - 1) {
       updateCardScale(SCALE_STEPS[currentIndex + 1]);
     } else if (currentIndex === -1) {
-      // 当前值不在预设步骤中，找到最近的较大值
       const larger = SCALE_STEPS.filter(s => s > cardScale);
       if (larger.length > 0) {
         updateCardScale(larger[0]);
@@ -137,6 +139,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setStatusText('');
       setElapsedSeconds(0);
       setEditedPrompt(promptContent);
+      setSystemPrompt('');
     }
   }, [visible, promptContent]);
 
@@ -154,12 +157,12 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     return () => clearInterval(timer);
   }, [isGenerating]);
 
-  // Listen for task progress events
+  // Listen for task progress events (image generation only)
   useEffect(() => {
-    if (!isGenerating) return;
+    if (!isGenerating || mode !== 'image') return;
 
     const handleProgress = (_: any, event: { taskId: string; progress: number; status: string; error?: string }) => {
-      console.log('[GenerateImageDialog] Progress event:', event);
+      console.log('[GenerateDialog] Progress event:', event);
       setProgress(event.progress);
 
       if (event.status === 'failed') {
@@ -181,7 +184,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     };
 
     const handleCompleted = (_: any, event: { taskId: string; outputResourceIds: string[] }) => {
-      console.log('[GenerateImageDialog] Completed event:', event);
+      console.log('[GenerateDialog] Completed event:', event);
       setProgress(100);
       setStatusText('生成完成!');
       setIsGenerating(false);
@@ -206,9 +209,10 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       unsubProgress();
       unsubCompleted();
     };
-  }, [isGenerating, selectedDraftId, loadResources, message, onClose]);
+  }, [isGenerating, mode, selectedDraftId, loadResources, message, onClose]);
 
-  const handleGenerate = async () => {
+  // 生成图片
+  const handleGenerateImage = async () => {
     if (!selectedDraftId || selectedImageIds.length === 0) {
       message.error('请先选择至少一张参考图片');
       return;
@@ -251,15 +255,86 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     }
   };
 
+  // 生成文本
+  const handleGenerateText = async () => {
+    if (!selectedDraftId) {
+      message.error('请先选择草稿');
+      return;
+    }
+
+    if (!selectedModel) {
+      message.error('请先选择模型');
+      return;
+    }
+
+    if (!editedPrompt || editedPrompt.trim().length === 0) {
+      message.error('提示词内容不能为空');
+      return;
+    }
+
+    setIsGenerating(true);
+    setStatusText('正在生成文本...');
+
+    try {
+      const result = await window.api.task.generateText({
+        draftId: selectedDraftId,
+        prompt: editedPrompt,
+        systemPrompt: systemPrompt.trim() || undefined,
+        modelEndpoint: selectedModel,
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || '生成失败');
+      }
+
+      const generatedText = result.data.text;
+
+      // 创建新的提示词卡片
+      const newResource = await addTextResource(selectedDraftId, 'prompt', generatedText);
+      if (newResource) {
+        message.success('文本生成成功，已创建新提示词卡片');
+      } else {
+        message.warning('文本已生成，但创建卡片失败');
+      }
+
+      setIsGenerating(false);
+
+      // Close dialog after a short delay
+      setTimeout(() => {
+        onClose();
+      }, 500);
+    } catch (error) {
+      console.error('Generate text error:', error);
+      showError(error instanceof Error ? error.message : '生成失败');
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGenerate = () => {
+    if (mode === 'image') {
+      handleGenerateImage();
+    } else {
+      handleGenerateText();
+    }
+  };
+
   const getImageUrl = (resource: Resource) => {
-    // Use triple slash for Windows paths: local-file:///C:/path/to/file
     const normalizedPath = resource.filePath.replace(/\\/g, '/');
     return `local-file:///${normalizedPath}`;
   };
 
+  // 根据模式判断确定按钮是否可用
+  const isOkDisabled = (() => {
+    if (isGenerating || !selectedModel) return true;
+    if (mode === 'image') return selectedImageIds.length === 0;
+    return false;
+  })();
+
+  const dialogTitle = mode === 'image' ? '生成新角色图片' : '生成文本';
+
   return (
     <Modal
-      title="生成新角色图片"
+      title={dialogTitle}
       open={visible}
       onCancel={isGenerating ? undefined : onClose}
       closable={!isGenerating}
@@ -268,7 +343,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       cancelText="取消"
       onOk={handleGenerate}
       okButtonProps={{
-        disabled: selectedImageIds.length === 0 || !selectedModel || isGenerating,
+        disabled: isOkDisabled,
         loading: isGenerating,
       }}
       cancelButtonProps={{ disabled: isGenerating }}
@@ -283,6 +358,19 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       centered
     >
       <div className={styles.content}>
+        {/* Mode Selection */}
+        <div className={styles.section}>
+          <Segmented
+            options={[
+              { label: '生成图片', value: 'image' },
+              { label: '生成文本', value: 'text' },
+            ]}
+            value={mode}
+            onChange={(val) => setMode(val as GenerateMode)}
+            disabled={isGenerating}
+          />
+        </div>
+
         {/* Model Selection */}
         <div className={styles.section}>
           <div className={styles.sectionTitle}>选择模型</div>
@@ -296,18 +384,35 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           />
         </div>
 
-        {/* Resolution Selection */}
-        <div className={styles.section}>
-          <div className={styles.sectionTitle}>分辨率</div>
-          <Radio.Group
-            value={selectedResolution}
-            onChange={(e) => setSelectedResolution(e.target.value)}
-            disabled={isGenerating}
-          >
-            <Radio value="2K">2K</Radio>
-            <Radio value="4K">4K</Radio>
-          </Radio.Group>
-        </div>
+        {/* Resolution Selection - Image mode only */}
+        {mode === 'image' && (
+          <div className={styles.section}>
+            <div className={styles.sectionTitle}>分辨率</div>
+            <Radio.Group
+              value={selectedResolution}
+              onChange={(e) => setSelectedResolution(e.target.value)}
+              disabled={isGenerating}
+            >
+              <Radio value="2K">2K</Radio>
+              <Radio value="4K">4K</Radio>
+            </Radio.Group>
+          </div>
+        )}
+
+        {/* System Prompt - Text mode only */}
+        {mode === 'text' && (
+          <div className={styles.section}>
+            <div className={styles.sectionTitle}>系统提示词（可选）</div>
+            <Input.TextArea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder="设定 AI 的角色或行为，例如：你是一位专业的文案编辑"
+              disabled={isGenerating}
+              className={styles.promptInput}
+              autoSize={{ minRows: 2, maxRows: 4 }}
+            />
+          </div>
+        )}
 
         {/* Prompt Editor */}
         <div className={styles.section}>
@@ -322,76 +427,87 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           />
         </div>
 
-        {/* Image Selection - 支持多选 */}
-        <div className={styles.section}>
-          <div className={styles.sectionTitle}>
-            选择参考图片（支持多选）
-            <span className={styles.count}>
-              已选 {selectedImageIds.length} / 共 {allImages.length} 张
-            </span>
-            <span className={styles.scaleControls}>
-              <Button
-                type="text"
-                size="small"
-                icon={<MinusOutlined />}
-                onClick={handleDecreaseScale}
-                disabled={cardScale <= SCALE_STEPS[0]}
-              />
-              <Button
-                type="text"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={handleIncreaseScale}
-                disabled={cardScale >= SCALE_STEPS[SCALE_STEPS.length - 1]}
-              />
-            </span>
-          </div>
-
-          {allImages.length === 0 ? (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="暂无角色图片，请先添加"
-              className={styles.empty}
-            />
-          ) : (
-            <div className={styles.imageGrid}>
-              {allImages.map((img) => (
-                <div
-                  key={img.id}
-                  className={`${styles.imageItem} ${selectedImageIds.includes(img.id) ? styles.selected : ''}`}
-                  onClick={() => toggleImageSelection(img.id)}
-                >
-                  <img
-                    src={getImageUrl(img)}
-                    alt={img.fileName}
-                    className={styles.thumbnail}
-                    style={{
-                      height: `calc(37.5vh * ${cardScale})`,
-                      maxWidth: `calc(52.5vw * ${cardScale})`,
-                    }}
-                  />
-                  {selectedImageIds.includes(img.id) && (
-                    <div className={styles.selectedBadge}>
-                      {selectedImageIds.indexOf(img.id) + 1}
-                    </div>
-                  )}
-                  <div className={styles.imageName} title={img.fileName}>
-                    {img.fileName}
-                  </div>
-                  {/* 显示图片类型标签 */}
-                  <div className={`${styles.typeTag} ${img.type === 'source_character' ? styles.sourceTag : styles.newTag}`}>
-                    {img.type === 'source_character' ? '源' : '新'}
-                  </div>
-                </div>
-              ))}
+        {/* Image Selection - Image mode only */}
+        {mode === 'image' && (
+          <div className={styles.section}>
+            <div className={styles.sectionTitle}>
+              选择参考图片（支持多选）
+              <span className={styles.count}>
+                已选 {selectedImageIds.length} / 共 {allImages.length} 张
+              </span>
+              <span className={styles.scaleControls}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<MinusOutlined />}
+                  onClick={handleDecreaseScale}
+                  disabled={cardScale <= SCALE_STEPS[0]}
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={handleIncreaseScale}
+                  disabled={cardScale >= SCALE_STEPS[SCALE_STEPS.length - 1]}
+                />
+              </span>
             </div>
-          )}
-        </div>
 
-        {/* Progress */}
-        {isGenerating && (
+            {allImages.length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="暂无角色图片，请先添加"
+                className={styles.empty}
+              />
+            ) : (
+              <div className={styles.imageGrid}>
+                {allImages.map((img) => (
+                  <div
+                    key={img.id}
+                    className={`${styles.imageItem} ${selectedImageIds.includes(img.id) ? styles.selected : ''}`}
+                    onClick={() => toggleImageSelection(img.id)}
+                  >
+                    <img
+                      src={getImageUrl(img)}
+                      alt={img.fileName}
+                      className={styles.thumbnail}
+                      style={{
+                        height: `calc(37.5vh * ${cardScale})`,
+                        maxWidth: `calc(52.5vw * ${cardScale})`,
+                      }}
+                    />
+                    {selectedImageIds.includes(img.id) && (
+                      <div className={styles.selectedBadge}>
+                        {selectedImageIds.indexOf(img.id) + 1}
+                      </div>
+                    )}
+                    <div className={styles.imageName} title={img.fileName}>
+                      {img.fileName}
+                    </div>
+                    {/* 显示图片类型标签 */}
+                    <div className={`${styles.typeTag} ${img.type === 'source_character' ? styles.sourceTag : styles.newTag}`}>
+                      {img.type === 'source_character' ? '源' : '新'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Progress - Image generation */}
+        {isGenerating && mode === 'image' && (
           <div className={styles.progressSection}>
             <Progress percent={progress} status="active" />
+            <div className={styles.statusText}>
+              {statusText} <span className={styles.timer}>({elapsedSeconds}秒)</span>
+            </div>
+          </div>
+        )}
+
+        {/* Progress - Text generation */}
+        {isGenerating && mode === 'text' && (
+          <div className={styles.progressSection}>
             <div className={styles.statusText}>
               {statusText} <span className={styles.timer}>({elapsedSeconds}秒)</span>
             </div>

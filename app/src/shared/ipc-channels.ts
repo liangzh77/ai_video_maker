@@ -49,6 +49,7 @@ export const TASK_CHANNELS = {
   EXTRACT_AUDIO: 'task:extractAudio',           // 从视频中提取音频
   UPSCALE_VIDEO: 'task:upscaleVideo',
   GENERATE_IMAGE: 'task:generateImage',
+  GENERATE_TEXT: 'task:generateText',
   SYNTHESIZE_VIDEO: 'task:synthesizeVideo',
   CANCEL: 'task:cancel',
   GET_MODELS: 'task:getModels',

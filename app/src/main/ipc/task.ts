@@ -13,7 +13,7 @@ const execAsync = promisify(exec);
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import imageApi from '../services/image-api';
-import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, getFFmpegPath } from '../services/python-bridge';
+import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, getFFmpegPath } from '../services/python-bridge';
 import storage from '../services/storage';
 import appConfigService from '../services/config';
 import type {
@@ -109,6 +109,13 @@ interface TaskResplitSceneRequest {
 interface TaskExtractAudioRequest {
   draftId: string;
   videoResourceId: string;
+}
+
+interface TaskGenerateTextRequest {
+  draftId: string;
+  prompt: string;
+  systemPrompt?: string;
+  modelEndpoint: string;
 }
 
 // ============================================
@@ -1101,6 +1108,48 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'EXTRACT_AUDIO_ERROR',
+        };
+      }
+    }
+  );
+
+  // Generate text (direct call, not task queue)
+  ipcMain.handle(
+    TASK_CHANNELS.GENERATE_TEXT,
+    async (_, request: TaskGenerateTextRequest): Promise<OperationResult<{ text: string }>> => {
+      console.log('[TaskIPC] Received generate text request:', request);
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Verify model endpoint
+        if (!request.modelEndpoint) {
+          return { success: false, error: '请先选择模型' };
+        }
+
+        // Verify prompt
+        if (!request.prompt || request.prompt.trim().length === 0) {
+          return { success: false, error: '提示词内容不能为空' };
+        }
+
+        // Generate text
+        const result = await runTextGenerator(
+          request.modelEndpoint,
+          request.prompt,
+          request.systemPrompt
+        );
+
+        console.log('[TaskIPC] Text generated, length:', result.text.length);
+
+        return { success: true, data: { text: result.text } };
+      } catch (error) {
+        console.error('[TaskIPC] Failed to generate text:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'TEXT_GENERATION_ERROR',
         };
       }
     }

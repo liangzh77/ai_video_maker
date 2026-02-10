@@ -3,6 +3,7 @@ Provider 配置模块
 从环境变量或 .env.local 文件读取配置
 """
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 from pathlib import Path
@@ -23,7 +24,7 @@ def load_env_file():
     if env_path_from_env:
         env_file = Path(env_path_from_env)
         if not env_file.exists():
-            print(f"[Config] Warning: ENV_FILE specified but not found: {env_file}")
+            print(f"[Config] Warning: ENV_FILE specified but not found: {env_file}", file=sys.stderr)
             env_file = None
 
     # 2. 从当前脚本目录向上查找
@@ -39,7 +40,7 @@ def load_env_file():
             env_file = None
 
     if env_file and env_file.exists():
-        print(f"[Config] Loading .env.local from: {env_file}")
+        print(f"[Config] Loading .env.local from: {env_file}", file=sys.stderr)
         with open(env_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -50,7 +51,7 @@ def load_env_file():
                     if key and value:
                         os.environ.setdefault(key, value)
     else:
-        print(f"[Config] Warning: .env.local not found")
+        print(f"[Config] Warning: .env.local not found", file=sys.stderr)
 
 
 # 在模块加载时自动加载环境变量
