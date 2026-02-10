@@ -14,9 +14,25 @@ const TAG_CONFIG: Record<PromptTag, { label: string; className: string }> = {
 
 interface PromptCardProps {
   resource: Resource;
+  draggable?: boolean;
+  isDragOver?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onDragEnd?: () => void;
 }
 
-const PromptCard: React.FC<PromptCardProps> = ({ resource }) => {
+const PromptCard: React.FC<PromptCardProps> = ({
+  resource,
+  draggable = false,
+  isDragOver = false,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd,
+}) => {
   const { selectedResourceId, selectResource, deleteResource, setPendingGenerate } = useDraftStore();
   const { message } = App.useApp();
   const isSelected = selectedResourceId === resource.id;
@@ -51,8 +67,14 @@ const PromptCard: React.FC<PromptCardProps> = ({ resource }) => {
 
   return (
     <div
-      className={`${styles.card} ${isSelected ? styles.selected : ''}`}
+      className={`${styles.card} ${isSelected ? styles.selected : ''} ${isDragOver ? styles.dragOver : ''} ${draggable ? styles.draggable : ''}`}
       onClick={handleClick}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
     >
       <button className={styles.deleteButton} onClick={handleDelete} title="删除">
         <CloseOutlined />

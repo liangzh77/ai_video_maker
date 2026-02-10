@@ -19,6 +19,19 @@
   outline-offset: 2px;
 }
 
+.card.draggable {
+  cursor: grab;
+}
+
+.card.draggable:active {
+  cursor: grabbing;
+}
+
+.card.dragOver {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: 2px;
+}
+
 /* 删除按钮 - 左上角圆形叉子（同 ResourceCard） */
 .deleteButton {
   position: absolute;

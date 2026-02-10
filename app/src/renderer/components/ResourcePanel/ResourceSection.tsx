@@ -463,6 +463,65 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     setDragOverEndZone(false);
   }, []);
 
+  // 提示词卡片拖动排序处理
+  const handlePromptDragStart = useCallback((e: React.DragEvent, resourceId: string) => {
+    setDraggingCardId(resourceId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', resourceId);
+    e.dataTransfer.setData('application/x-resource-type', type);
+  }, [type]);
+
+  const handlePromptDragOver = useCallback((e: React.DragEvent, resourceId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (draggingCardId && resourceId === draggingCardId) return;
+    setDragOverCardId(resourceId);
+  }, [draggingCardId]);
+
+  const handlePromptDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverCardId(null);
+  }, []);
+
+  const handlePromptDrop = useCallback(async (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverCardId(null);
+
+    const fromId = draggingCardId;
+    setDraggingCardId(null);
+
+    if (!fromId || fromId === targetId) return;
+    await reorderResource(type, fromId, targetId);
+  }, [draggingCardId, type, reorderResource]);
+
+  const handlePromptDragEnd = useCallback(() => {
+    setDragOverCardId(null);
+    setDraggingCardId(null);
+    setDragOverEndZone(false);
+  }, []);
+
+  // 提示词末尾拖放区域
+  const handlePromptEndZoneDragOver = useCallback((e: React.DragEvent) => {
+    if (!draggingCardId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverEndZone(true);
+  }, [draggingCardId]);
+
+  const handlePromptEndZoneDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const fromId = draggingCardId;
+    setDragOverCardId(null);
+    setDraggingCardId(null);
+    setDragOverEndZone(false);
+
+    if (!fromId) return;
+    await reorderResource(type, fromId, null);
+  }, [draggingCardId, type, reorderResource]);
+
   // 处理拖拽到末尾占位区域
   const handleEndZoneDragOver = useCallback((e: React.DragEvent) => {
     // 支持跨 section 拖拽
@@ -819,7 +878,17 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           >
             {resources.map((resource) =>
               isText ? (
-                <PromptCard key={resource.id} resource={resource} />
+                <PromptCard
+                  key={resource.id}
+                  resource={resource}
+                  draggable={isSortable}
+                  isDragOver={dragOverCardId === resource.id}
+                  onDragStart={(e) => handlePromptDragStart(e, resource.id)}
+                  onDragOver={(e) => handlePromptDragOver(e, resource.id)}
+                  onDragLeave={handlePromptDragLeave}
+                  onDrop={(e) => handlePromptDrop(e, resource.id)}
+                  onDragEnd={handlePromptDragEnd}
+                />
               ) : (
                 <ResourceCard
                   key={`${resource.id}_${resource.fileSize}_${(resource.metadata as any)?.duration ?? ''}`}
@@ -844,6 +913,16 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
                 onDragOver={handleEndZoneDragOver}
                 onDragLeave={handleEndZoneDragLeave}
                 onDrop={handleEndZoneDrop}
+              >
+                末尾
+              </div>
+            )}
+            {draggingCardId && isText && isSortable && (
+              <div
+                className={`${styles.dropEndZone} ${dragOverEndZone ? styles.dragOver : ''}`}
+                onDragOver={handlePromptEndZoneDragOver}
+                onDragLeave={handleEndZoneDragLeave}
+                onDrop={handlePromptEndZoneDrop}
               >
                 末尾
               </div>
