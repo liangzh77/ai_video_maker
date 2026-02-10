@@ -1113,6 +1113,110 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
     }
   );
 
+  // 序号分配锁：防止并发请求拿到相同序号
+  // key = "draftId:resourceType"，value = 当前锁的 Promise 链
+  const sequenceLocks = new Map<string, Promise<void>>();
+  // 内存计数器：记录已分配的最大序号，避免创建占位文件
+  const allocatedSequenceNumbers = new Map<string, number>();
+
+  async function withSequenceLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const existing = sequenceLocks.get(key) || Promise.resolve();
+    let release: () => void;
+    const lock = new Promise<void>((r) => { release = r; });
+    sequenceLocks.set(key, lock);
+    await existing;
+    try {
+      return await fn();
+    } finally {
+      release!();
+      if (sequenceLocks.get(key) === lock) {
+        sequenceLocks.delete(key);
+      }
+    }
+  }
+
+  // Generate image directly (no task queue, supports concurrent calls)
+  ipcMain.handle(
+    TASK_CHANNELS.GENERATE_IMAGE_DIRECT,
+    async (_, request: TaskGenerateImageRequest): Promise<OperationResult<{ resourceId: string }>> => {
+      console.log('[TaskIPC] Received direct image generation request');
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Verify source images exist
+        if (!request.sourceImageIds || request.sourceImageIds.length === 0) {
+          return { success: false, error: 'No source images provided' };
+        }
+
+        const sourcePaths: string[] = [];
+        for (const sourceImageId of request.sourceImageIds) {
+          const sourceImage = await storage.resource.get(request.draftId, sourceImageId);
+          if (!sourceImage) {
+            return { success: false, error: `Source image not found: ${sourceImageId}` };
+          }
+          sourcePaths.push(sourceImage.filePath);
+        }
+
+        // Get prompt content
+        const promptResource = await storage.resource.get(request.draftId, request.promptResourceId);
+        if (!promptResource) {
+          return { success: false, error: 'Prompt resource not found' };
+        }
+        const promptMeta = promptResource.metadata as TextMetadata;
+        const prompt = request.prompt || promptMeta?.content;
+        if (!prompt || prompt.trim().length === 0) {
+          return { success: false, error: 'Prompt content cannot be empty' };
+        }
+
+        if (!request.modelEndpoint) {
+          return { success: false, error: 'Please select a model' };
+        }
+
+        const resolution = request.resolution || '2K';
+
+        // 使用锁 + 内存计数器分配唯一序号，不创建占位文件
+        const lockKey = `${request.draftId}:new_character`;
+        const filePath = await withSequenceLock(
+          lockKey,
+          async () => {
+            const nextFromFs = await storage.getNextSequenceNumber(request.draftId, 'new_character');
+            const nextFromMemory = (allocatedSequenceNumbers.get(lockKey) || 0) + 1;
+            const sequenceNumber = Math.max(nextFromFs, nextFromMemory);
+            allocatedSequenceNumbers.set(lockKey, sequenceNumber);
+            const fp = storage.getResourceFilePath(request.draftId, 'new_character', '.png', sequenceNumber);
+            await fs.mkdir(path.dirname(fp), { recursive: true });
+            return fp;
+          },
+        );
+
+        // Call Python image generator directly (锁已释放，可并发执行)
+        await runImageGenerator(
+          request.modelEndpoint,
+          sourcePaths,
+          prompt,
+          resolution,
+          filePath,
+        );
+
+        // Build resource ID
+        const resourceId = buildResourceId(request.draftId, filePath);
+        console.log('[TaskIPC] Direct image generated:', resourceId);
+
+        return { success: true, data: { resourceId } };
+      } catch (error) {
+        console.error('[TaskIPC] Direct image generation failed:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'IMAGE_GENERATION_ERROR',
+        };
+      }
+    }
+  );
+
   // Generate text (direct call, not task queue)
   ipcMain.handle(
     TASK_CHANNELS.GENERATE_TEXT,

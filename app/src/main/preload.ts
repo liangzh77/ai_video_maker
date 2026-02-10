@@ -39,6 +39,7 @@ export interface ElectronAPI {
     resplitScene: (params: { draftId: string; sceneResourceId: string; newStartTime: number; newEndTime: number }) => Promise<any>;
     upscaleVideo: (params: { draftId: string; sourceVideoIds: string[]; config: any }) => Promise<any>;
     generateImage: (params: { draftId: string; sourceImageIds: string[]; promptResourceId: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K' }) => Promise<any>;
+    generateImageDirect: (params: { draftId: string; sourceImageIds: string[]; promptResourceId: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K' }) => Promise<any>;
     generateText: (params: { draftId: string; prompt: string; systemPrompt?: string; modelEndpoint: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any }) => Promise<any>;
     extractAudio: (params: { draftId: string; videoResourceId: string }) => Promise<any>;
@@ -99,6 +100,7 @@ const api: ElectronAPI = {
     resplitScene: (params) => ipcRenderer.invoke('task:resplitScene', params),
     upscaleVideo: (params) => ipcRenderer.invoke('task:upscaleVideo', params),
     generateImage: (params) => ipcRenderer.invoke('task:generateImage', params),
+    generateImageDirect: (params) => ipcRenderer.invoke('task:generateImageDirect', params),
     generateText: (params) => ipcRenderer.invoke('task:generateText', params),
     synthesizeVideo: (params) => ipcRenderer.invoke('task:synthesizeVideo', params),
     extractAudio: (params) => ipcRenderer.invoke('task:extractAudio', params),

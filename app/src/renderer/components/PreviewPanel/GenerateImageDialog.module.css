@@ -14,9 +14,10 @@
   flex-shrink: 0;
 }
 
-/* 图片选择区域需要填充剩余空间 */
+/* 图片选择区域和文本结果区域需要填充剩余空间 */
 .section:has(.imageGrid),
-.section:has(.empty) {
+.section:has(.empty),
+.section:has(.textResultsGrid) {
   flex: 1;
   min-height: 0;
 }
@@ -162,4 +163,58 @@
 .timer {
   color: var(--color-primary);
   font-weight: 500;
+}
+
+/* 批量控件 */
+.batchControls {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.batchLabel {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* 文本结果网格 */
+.textResultsGrid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--spacing-xs);
+}
+
+.textResultCard {
+  display: flex;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  background-color: var(--color-bg-main);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
+.textResultIndex {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+  flex-shrink: 0;
+  min-width: 24px;
+}
+
+.textResultContent {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  word-break: break-word;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.failedText {
+  color: var(--color-error);
 }

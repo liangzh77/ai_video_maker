@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Modal, Progress, App, Empty, Select, Radio, Button, Input, Segmented } from 'antd';
+import React, { useState, useEffect, useRef } from 'react';
+import { Modal, Progress, App, Empty, Select, Radio, Button, Input, Segmented, InputNumber } from 'antd';
 import { CopyOutlined, CloseCircleOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
-import type { Resource, ImageResolution } from '@shared/types';
+import type { Resource, ImageResolution, TextMetadata } from '@shared/types';
+import { isTextMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
 import styles from './GenerateImageDialog.module.css';
 
@@ -11,6 +12,34 @@ interface ModelInfo {
 }
 
 type GenerateMode = 'image' | 'text';
+
+// 并发池：创建 N 个任务，最多同时运行 M 个
+async function runWithConcurrency<T>(
+  tasks: (() => Promise<T>)[],
+  concurrency: number,
+  onTaskComplete: (result: T, index: number) => void,
+  onTaskError: (error: Error, index: number) => void,
+  abortSignal?: { aborted: boolean },
+): Promise<void> {
+  let nextIndex = 0;
+  const runNext = async (): Promise<void> => {
+    const index = nextIndex++;
+    if (index >= tasks.length) return;
+    if (abortSignal?.aborted) return;
+    try {
+      const result = await tasks[index]();
+      onTaskComplete(result, index);
+    } catch (err) {
+      onTaskError(err instanceof Error ? err : new Error(String(err)), index);
+    }
+    if (!abortSignal?.aborted) {
+      await runNext();
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, tasks.length) }, () => runNext())
+  );
+}
 
 interface GenerateImageDialogProps {
   visible: boolean;
@@ -28,19 +57,32 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const { message } = App.useApp();
   const { selectedDraftId, resources, loadResources, addTextResource } = useDraftStore();
 
-  const [mode, setMode] = useState<GenerateMode>('text');
+  const [mode, setMode] = useState<GenerateMode>('image');
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [selectedResolution, setSelectedResolution] = useState<ImageResolution>('2K');
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [statusText, setStatusText] = useState('');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [errorModalVisible, setErrorModalVisible] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [editedPrompt, setEditedPrompt] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
+
+  // 批量生成状态
+  const [batchCount, setBatchCount] = useState(1);
+  const [threadCount, setThreadCount] = useState(2);
+  const [completedCount, setCompletedCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
+  const [textResults, setTextResults] = useState<string[]>([]);
+
+  const [isStopping, setIsStopping] = useState(false);
+
+  // 用于取消正在进行的生成
+  const abortRef = useRef<{ aborted: boolean }>({ aborted: false });
+
+  // debounce loadResources，避免并发完成时多次刷新竞争
+  const loadResourcesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 卡片大小比例，从 localStorage 读取缓存
   const CARD_SCALE_KEY = 'generateImageDialog_cardScale';
@@ -135,13 +177,23 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     if (visible) {
       setSelectedImageIds([]);
       setIsGenerating(false);
-      setProgress(0);
-      setStatusText('');
       setElapsedSeconds(0);
       setEditedPrompt(promptContent);
       setSystemPrompt('');
+      setCompletedCount(0);
+      setFailedCount(0);
+      setTextResults([]);
+      setIsStopping(false);
+      abortRef.current = { aborted: false };
+      // 根据 prompt 的 tag 设置默认生成模式
+      const meta = promptResource.metadata;
+      if (meta && isTextMetadata(meta) && meta.tag === 'text') {
+        setMode('text');
+      } else {
+        setMode('image');
+      }
     }
-  }, [visible, promptContent]);
+  }, [visible, promptContent, promptResource]);
 
   // Timer for elapsed time during generation
   useEffect(() => {
@@ -157,61 +209,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     return () => clearInterval(timer);
   }, [isGenerating]);
 
-  // Listen for task progress events (image generation only)
-  useEffect(() => {
-    if (!isGenerating || mode !== 'image') return;
-
-    const handleProgress = (_: any, event: { taskId: string; progress: number; status: string; error?: string }) => {
-      console.log('[GenerateDialog] Progress event:', event);
-      setProgress(event.progress);
-
-      if (event.status === 'failed') {
-        setStatusText(`失败: ${event.error || '未知错误'}`);
-        setIsGenerating(false);
-        showError(event.error || '生成失败');
-        return;
-      }
-
-      if (event.status === 'processing') {
-        if (event.progress < 30) {
-          setStatusText('准备中...');
-        } else if (event.progress < 90) {
-          setStatusText('生成中...');
-        } else {
-          setStatusText('保存中...');
-        }
-      }
-    };
-
-    const handleCompleted = (_: any, event: { taskId: string; outputResourceIds: string[] }) => {
-      console.log('[GenerateDialog] Completed event:', event);
-      setProgress(100);
-      setStatusText('生成完成!');
-      setIsGenerating(false);
-
-      // Reload resources to show new image
-      if (selectedDraftId) {
-        loadResources(selectedDraftId);
-      }
-
-      message.success('图片生成成功');
-
-      // Close dialog after a short delay
-      setTimeout(() => {
-        onClose();
-      }, 1000);
-    };
-
-    const unsubProgress = window.api.on('task:progress', handleProgress);
-    const unsubCompleted = window.api.on('task:completed', handleCompleted);
-
-    return () => {
-      unsubProgress();
-      unsubCompleted();
-    };
-  }, [isGenerating, mode, selectedDraftId, loadResources, message, onClose]);
-
-  // 生成图片
+  // 生成图片（批量）
   const handleGenerateImage = async () => {
     if (!selectedDraftId || selectedImageIds.length === 0) {
       message.error('请先选择至少一张参考图片');
@@ -229,33 +227,71 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     }
 
     setIsGenerating(true);
-    setProgress(0);
-    setStatusText('提交任务...');
+    setIsStopping(false);
+    setCompletedCount(0);
+    setFailedCount(0);
+    abortRef.current = { aborted: false };
 
     try {
-      const result = await window.api.task.generateImage({
-        draftId: selectedDraftId,
-        sourceImageIds: selectedImageIds,
-        promptResourceId: promptResource.id,
-        prompt: editedPrompt,
-        modelEndpoint: selectedModel,
-        resolution: selectedResolution,
+      const tasks = Array.from({ length: batchCount }, () => async () => {
+        const result = await window.api.task.generateImageDirect({
+          draftId: selectedDraftId,
+          sourceImageIds: selectedImageIds,
+          promptResourceId: promptResource.id,
+          prompt: editedPrompt,
+          modelEndpoint: selectedModel!,
+          resolution: selectedResolution,
+        });
+        if (!result.success) throw new Error(result.error || '生成失败');
+        return result.data;
       });
 
-      if (!result.success) {
-        throw new Error(result.error || '生成失败');
+      await runWithConcurrency(
+        tasks,
+        threadCount,
+        (_result, _index) => {
+          setCompletedCount((prev) => prev + 1);
+          // debounce 刷新资源列表，避免并发完成时多次刷新竞争
+          if (selectedDraftId) {
+            if (loadResourcesTimerRef.current) {
+              clearTimeout(loadResourcesTimerRef.current);
+            }
+            loadResourcesTimerRef.current = setTimeout(() => {
+              loadResources(selectedDraftId);
+            }, 300);
+          }
+        },
+        (error, index) => {
+          setFailedCount((prev) => prev + 1);
+          console.error(`Image task ${index} failed:`, error);
+        },
+        abortRef.current,
+      );
+
+      // 全部完成后最终刷新一次，确保所有结果都显示
+      if (loadResourcesTimerRef.current) {
+        clearTimeout(loadResourcesTimerRef.current);
+      }
+      if (selectedDraftId) {
+        await loadResources(selectedDraftId);
       }
 
-      // Task created, wait for progress events
-      setStatusText('任务已创建，等待处理...');
+      setIsGenerating(false);
+      setIsStopping(false);
+      if (abortRef.current.aborted) {
+        message.info('已停止生成');
+      } else {
+        message.success('图片生成完成');
+      }
     } catch (error) {
-      console.error('Generate image error:', error);
+      console.error('Batch image generation error:', error);
       showError(error instanceof Error ? error.message : '生成失败');
       setIsGenerating(false);
+      setIsStopping(false);
     }
   };
 
-  // 生成文本
+  // 生成文本（批量）
   const handleGenerateText = async () => {
     if (!selectedDraftId) {
       message.error('请先选择草稿');
@@ -273,40 +309,52 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     }
 
     setIsGenerating(true);
-    setStatusText('正在生成文本...');
+    setIsStopping(false);
+    setCompletedCount(0);
+    setFailedCount(0);
+    setTextResults([]);
+    abortRef.current = { aborted: false };
 
     try {
-      const result = await window.api.task.generateText({
-        draftId: selectedDraftId,
-        prompt: editedPrompt,
-        systemPrompt: systemPrompt.trim() || undefined,
-        modelEndpoint: selectedModel,
+      const tasks = Array.from({ length: batchCount }, () => async () => {
+        const result = await window.api.task.generateText({
+          draftId: selectedDraftId,
+          prompt: editedPrompt,
+          systemPrompt: systemPrompt.trim() || undefined,
+          modelEndpoint: selectedModel!,
+        });
+        if (!result.success) throw new Error(result.error || '生成失败');
+        return result.data.text;
       });
 
-      if (!result.success) {
-        throw new Error(result.error || '生成失败');
-      }
-
-      const generatedText = result.data.text;
-
-      // 创建新的提示词卡片
-      const newResource = await addTextResource(selectedDraftId, 'prompt', generatedText);
-      if (newResource) {
-        message.success('文本生成成功，已创建新提示词卡片');
-      } else {
-        message.warning('文本已生成，但创建卡片失败');
-      }
+      await runWithConcurrency(
+        tasks,
+        threadCount,
+        async (text, _index) => {
+          setCompletedCount((prev) => prev + 1);
+          setTextResults((prev) => [...prev, text]);
+          // 创建新的提示词卡片
+          await addTextResource(selectedDraftId, 'prompt', text);
+        },
+        (error, index) => {
+          setFailedCount((prev) => prev + 1);
+          console.error(`Text task ${index} failed:`, error);
+        },
+        abortRef.current,
+      );
 
       setIsGenerating(false);
-
-      // Close dialog after a short delay
-      setTimeout(() => {
-        onClose();
-      }, 500);
+      setIsStopping(false);
+      if (abortRef.current.aborted) {
+        message.info('已停止生成');
+      } else {
+        message.success('文本生成完成');
+      }
     } catch (error) {
-      console.error('Generate text error:', error);
+      console.error('Batch text generation error:', error);
       showError(error instanceof Error ? error.message : '生成失败');
       setIsGenerating(false);
+      setIsStopping(false);
     }
   };
 
@@ -332,21 +380,25 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   const dialogTitle = mode === 'image' ? '生成新角色图片' : '生成文本';
 
+  // 计算进度百分比
+  const totalTasks = batchCount;
+  const progressPercent = totalTasks > 0 ? Math.round(((completedCount + failedCount) / totalTasks) * 100) : 0;
+
   return (
     <Modal
       title={dialogTitle}
       open={visible}
-      onCancel={isGenerating ? undefined : onClose}
-      closable={!isGenerating}
+      onCancel={isGenerating ? () => { abortRef.current.aborted = true; setIsStopping(true); } : onClose}
+      closable={!isStopping}
       maskClosable={!isGenerating}
       okText={isGenerating ? '生成中...' : '生成'}
-      cancelText="取消"
+      cancelText={isStopping ? '停止中...' : isGenerating ? '停止生成' : '取消'}
       onOk={handleGenerate}
       okButtonProps={{
         disabled: isOkDisabled,
         loading: isGenerating,
       }}
-      cancelButtonProps={{ disabled: isGenerating }}
+      cancelButtonProps={{ danger: isGenerating, disabled: isStopping }}
       width="85vw"
       styles={{
         body: {
@@ -382,6 +434,32 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             className={styles.modelSelect}
             options={models.map((m) => ({ value: m.id, label: m.name }))}
           />
+        </div>
+
+        {/* Batch Controls */}
+        <div className={styles.section}>
+          <div className={styles.batchControls}>
+            <span className={styles.batchLabel}>生成份数</span>
+            <InputNumber
+              min={1}
+              max={50}
+              value={batchCount}
+              onChange={(v) => setBatchCount(v || 1)}
+              disabled={isGenerating}
+              size="small"
+              style={{ width: 70 }}
+            />
+            <span className={styles.batchLabel}>线程数</span>
+            <InputNumber
+              min={1}
+              max={8}
+              value={threadCount}
+              onChange={(v) => setThreadCount(v || 1)}
+              disabled={isGenerating}
+              size="small"
+              style={{ width: 70 }}
+            />
+          </div>
         </div>
 
         {/* Resolution Selection - Image mode only */}
@@ -495,21 +573,43 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           </div>
         )}
 
-        {/* Progress - Image generation */}
-        {isGenerating && mode === 'image' && (
-          <div className={styles.progressSection}>
-            <Progress percent={progress} status="active" />
-            <div className={styles.statusText}>
-              {statusText} <span className={styles.timer}>({elapsedSeconds}秒)</span>
+        {/* Text Results - Text mode, show generated text cards */}
+        {mode === 'text' && textResults.length > 0 && (
+          <div className={styles.section}>
+            <div className={styles.sectionTitle}>
+              生成结果
+              <span className={styles.count}>{textResults.length} 条</span>
+            </div>
+            <div className={styles.textResultsGrid}>
+              {textResults.map((text, index) => (
+                <div key={index} className={styles.textResultCard}>
+                  <div className={styles.textResultIndex}>#{index + 1}</div>
+                  <div className={styles.textResultContent}>{text}</div>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* Progress - Text generation */}
-        {isGenerating && mode === 'text' && (
+        {/* Progress */}
+        {isGenerating && (
+          <div className={styles.progressSection}>
+            <Progress percent={progressPercent} status="active" />
+            <div className={styles.statusText}>
+              生成中: {completedCount}/{totalTasks} 完成
+              {failedCount > 0 && <span className={styles.failedText}>，{failedCount} 失败</span>}
+              <span className={styles.timer}> ({elapsedSeconds}秒)</span>
+            </div>
+          </div>
+        )}
+
+        {/* Completed summary (after generation) */}
+        {!isGenerating && (completedCount > 0 || failedCount > 0) && (
           <div className={styles.progressSection}>
             <div className={styles.statusText}>
-              {statusText} <span className={styles.timer}>({elapsedSeconds}秒)</span>
+              生成完成: {completedCount} 成功
+              {failedCount > 0 && <span className={styles.failedText}>，{failedCount} 失败</span>}
+              <span className={styles.timer}> (耗时 {elapsedSeconds}秒)</span>
             </div>
           </div>
         )}

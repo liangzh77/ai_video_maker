@@ -403,7 +403,6 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
   const handleCardDrop = useCallback(async (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
-    e.stopPropagation();
 
     setDragOverCardId(null);
     setDraggingCardId(null);
@@ -411,6 +410,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     // 检查是否是视频帧拖拽（从 VideoPlayer 拖拽截图）
     const frameDataStr = e.dataTransfer.getData(FRAME_DATA_MIME);
     if (frameDataStr && canDrop && selectedDraftId) {
+      e.stopPropagation();
       try {
         const frameData = JSON.parse(frameDataStr) as { imageData: string; fileName: string };
         const result = await addFrameAsResource(selectedDraftId, type, frameData.imageData, frameData.fileName);
@@ -430,7 +430,10 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
     const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
 
+    // 不是资源拖拽也不是帧拖拽 → 不阻止冒泡，让外层 handleDrop 处理文件拖入
     if (!fromId || !isDraggable) return;
+
+    e.stopPropagation();
 
     // 同区域拖拽 -> 调整顺序（通过重命名文件）
     if (fromType === type) {
@@ -585,11 +588,11 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
   const handleGridDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
 
     // 检查是否是视频帧拖拽（从 VideoPlayer 拖拽截图）
     const frameDataStr = e.dataTransfer.getData(FRAME_DATA_MIME);
     if (frameDataStr && canDrop && selectedDraftId) {
+      e.stopPropagation();
       try {
         const frameData = JSON.parse(frameDataStr) as { imageData: string; fileName: string };
         const result = await addFrameAsResource(selectedDraftId, type, frameData.imageData, frameData.fileName);
@@ -609,9 +612,10 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
     const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
 
-    // 如果没有资源 ID 或不支持拖拽，则返回
+    // 不是资源拖拽也不是帧拖拽 → 不阻止冒泡，让外层 handleDrop 处理文件拖入
     if (!fromId || !isDraggable) return;
 
+    e.stopPropagation();
     setDragOverCardId(null);
     setDraggingCardId(null);
 
