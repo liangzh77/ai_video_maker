@@ -3,10 +3,14 @@
 
 a = Analysis(
     ['image_generator.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=[],
-    datas=[],
-    hiddenimports=['PIL', 'google.generativeai', 'httpx', 'anyio', 'anyio._backends', 'anyio._backends._asyncio'],
+    datas=[('providers', 'providers')],
+    hiddenimports=[
+        'PIL', 'google.generativeai', 'httpx', 'anyio', 'anyio._backends', 'anyio._backends._asyncio',
+        'providers', 'providers.base', 'providers.config', 'providers.utils', 'providers.http_client',
+        'providers.gemini', 'providers.gemini_proxy', 'providers.openrouter', 'providers.doubao', 'providers.wanxiang',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
