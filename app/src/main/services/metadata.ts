@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import type { ResourceType, ResourceMetadata, VideoMetadata, ImageMetadata, TextMetadata } from '@shared/types';
+import type { ResourceType, ResourceMetadata, VideoMetadata, ImageMetadata, TextMetadata, PromptTag } from '@shared/types';
 import { getFFmpegPath, getFFprobePath } from './python-bridge';
 import thumbnailCache from './thumbnailCache';
 
@@ -159,11 +159,23 @@ async function extractImageMetadata(filePath: string): Promise<ImageMetadata> {
 // Text Metadata Extraction
 // ============================================
 
+const TAG_LINE_REGEX = /^#tag:(text|image|video)\n/;
+
 async function extractTextMetadata(filePath: string): Promise<TextMetadata> {
   try {
-    const content = await fs.readFile(filePath, 'utf-8');
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const tagMatch = raw.match(TAG_LINE_REGEX);
+
+    if (tagMatch) {
+      return {
+        content: raw.slice(tagMatch[0].length),
+        encoding: 'utf-8',
+        tag: tagMatch[1] as PromptTag,
+      };
+    }
+
     return {
-      content,
+      content: raw,
       encoding: 'utf-8',
     };
   } catch {
@@ -172,6 +184,16 @@ async function extractTextMetadata(filePath: string): Promise<TextMetadata> {
       encoding: 'utf-8',
     };
   }
+}
+
+/**
+ * 将 TextMetadata 序列化为文件内容（包含 tag 前缀行）
+ */
+export function serializeTextContent(content: string, tag?: PromptTag): string {
+  if (tag) {
+    return `#tag:${tag}\n${content}`;
+  }
+  return content;
 }
 
 // ============================================

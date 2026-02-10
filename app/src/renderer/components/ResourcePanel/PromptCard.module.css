@@ -1,6 +1,7 @@
 .card {
   position: relative;
   padding: var(--spacing-md);
+  padding-bottom: 32px;
   border-radius: var(--radius-md);
   background-color: var(--color-bg-main);
   cursor: pointer;
@@ -18,6 +19,64 @@
   outline-offset: 2px;
 }
 
+/* 删除按钮 - 左上角圆形叉子（同 ResourceCard） */
+.deleteButton {
+  position: absolute;
+  top: var(--spacing-xs);
+  left: var(--spacing-xs);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.6);
+  color: white;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s;
+  z-index: 1;
+}
+
+.card:hover .deleteButton {
+  opacity: 1;
+}
+
+.deleteButton:hover {
+  background-color: var(--color-error);
+}
+
+/* 标签 - 右上角 */
+.tag {
+  position: absolute;
+  top: var(--spacing-xs);
+  right: var(--spacing-xs);
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.tagText {
+  background-color: #e6f7ff;
+  color: #1890ff;
+}
+
+.tagImage {
+  background-color: #fff7e6;
+  color: #fa8c16;
+}
+
+.tagVideo {
+  background-color: #f6ffed;
+  color: #52c41a;
+}
+
+/* 内容区 */
 .content {
   font-size: 13px;
   line-height: 1.6;
@@ -37,57 +96,30 @@
   font-style: italic;
 }
 
-.actions {
+/* 生成按钮 - 左下角 */
+.generateButton {
   position: absolute;
-  top: var(--spacing-sm);
-  right: var(--spacing-sm);
+  bottom: var(--spacing-xs);
+  left: var(--spacing-xs);
   display: flex;
+  align-items: center;
   gap: 4px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background-color: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 11px;
+  cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, background-color 0.15s;
 }
 
-.card:hover .actions {
+.card:hover .generateButton {
   opacity: 1;
 }
 
-.actionButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  color: var(--color-text-tertiary);
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.actionButton:hover {
-  background-color: var(--color-border);
-  color: var(--color-text-primary);
-}
-
-.actionButton.deleteButton:hover {
-  background-color: var(--color-error);
+.generateButton:hover {
+  background-color: var(--color-primary);
   color: white;
-}
-
-.editMode {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-}
-
-.textarea {
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.editActions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--spacing-sm);
 }

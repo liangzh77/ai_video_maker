@@ -43,6 +43,7 @@ interface DraftState {
   error: string | null;
   sortBy: DraftSortBy;
   sortOrder: DraftSortOrder;
+  pendingGenerateResourceId: string | null;
 
   // Draft Actions
   loadDrafts: () => Promise<void>;
@@ -66,6 +67,7 @@ interface DraftState {
   deleteResourcesByType: (type: ResourceType) => Promise<{ success: number; failed: number }>;
   clearLocalResourcesByType: (type: ResourceType) => void;
   openResourceFolder: (id: string) => Promise<void>;
+  setPendingGenerate: (id: string | null) => void;
 
   // Computed
   getSelectedDraft: () => Draft | null;
@@ -90,6 +92,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
   error: null,
   sortBy: initialSort.sortBy,
   sortOrder: initialSort.sortOrder,
+  pendingGenerateResourceId: null,
 
   // Draft Actions
   loadDrafts: async () => {
@@ -595,6 +598,10 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     } catch {
       // Silently fail
     }
+  },
+
+  setPendingGenerate: (id: string | null) => {
+    set({ pendingGenerateResourceId: id });
   },
 
   // Computed

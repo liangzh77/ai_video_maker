@@ -79,9 +79,12 @@ export interface ImageMetadata {
   format: 'png' | 'jpg' | 'webp';
 }
 
+export type PromptTag = 'text' | 'image' | 'video';
+
 export interface TextMetadata {
   content: string;
   encoding: 'utf-8';
+  tag?: PromptTag;
 }
 
 // Type guards for metadata

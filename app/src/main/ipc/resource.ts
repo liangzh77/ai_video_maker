@@ -4,9 +4,9 @@ import * as fs from 'fs/promises';
 import { constants as fsConstants } from 'fs';
 import { RESOURCE_CHANNELS } from '@shared/ipc-channels';
 import storage from '../services/storage';
-import { extractMetadata, getResourceTypeFromMime, getMimeType } from '../services/metadata';
+import { extractMetadata, getResourceTypeFromMime, getMimeType, serializeTextContent } from '../services/metadata';
 import thumbnailCache from '../services/thumbnailCache';
-import type { Resource, ResourceType, OperationResult } from '@shared/types';
+import type { Resource, ResourceType, OperationResult, PromptTag } from '@shared/types';
 
 // ============================================
 // Request Types
@@ -451,12 +451,12 @@ export function registerResourceHandlers(): void {
         }
 
         // 如果是文本资源（提示词），更新文件内容
-        if (foundResource.mimeType === 'text/plain' && request.metadata && 'content' in request.metadata) {
-          const textContent = request.metadata.content as string;
+        if (foundResource.mimeType === 'text/plain' && request.metadata && ('content' in request.metadata || 'tag' in request.metadata)) {
+          const textContent = ('content' in request.metadata ? request.metadata.content : (foundResource.metadata as any).content) as string;
+          const tag = ('tag' in request.metadata ? request.metadata.tag : (foundResource.metadata as any).tag) as PromptTag | undefined;
           try {
-            await fs.writeFile(foundResource.filePath, textContent, 'utf-8');
+            await fs.writeFile(foundResource.filePath, serializeTextContent(textContent, tag), 'utf-8');
             console.log('[Resource] Updated text file:', foundResource.filePath);
-            // 注意：文本资源不使用缓存，每次都从文件读取
           } catch (err) {
             console.error('[Resource] Failed to update text file:', err);
             return { success: false, error: 'Failed to update text file' };
