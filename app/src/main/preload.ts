@@ -38,8 +38,8 @@ export interface ElectronAPI {
     splitVideoWithPoints: (params: { draftId: string; sourceVideoId: string; splitPoints: any[]; targetSectionId?: string }) => Promise<any>;
     resplitScene: (params: { draftId: string; sceneResourceId: string; newStartTime: number; newEndTime: number }) => Promise<any>;
     upscaleVideo: (params: { draftId: string; sourceVideoIds: string[]; config: any; targetSectionId?: string }) => Promise<any>;
-    generateImage: (params: { draftId: string; sourceImageIds: string[]; promptResourceId: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K'; targetSectionId?: string }) => Promise<any>;
-    generateImageDirect: (params: { draftId: string; sourceImageIds: string[]; promptResourceId: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K'; targetSectionId?: string }) => Promise<any>;
+    generateImage: (params: { draftId: string; sourceImageIds: string[]; promptResourceId?: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K'; targetSectionId?: string }) => Promise<any>;
+    generateImageDirect: (params: { draftId: string; sourceImageIds: string[]; promptResourceId?: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K'; targetSectionId?: string }) => Promise<any>;
     generateText: (params: { draftId: string; prompt: string; systemPrompt?: string; modelEndpoint: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any; targetSectionId?: string }) => Promise<any>;
     extractAudio: (params: { draftId: string; videoResourceId: string }) => Promise<any>;
@@ -62,6 +62,11 @@ export interface ElectronAPI {
   links: {
     load: (params: { draftId: string }) => Promise<any>;
     save: (params: { draftId: string; links: { sourceToNew: Record<string, string> } }) => Promise<any>;
+  };
+  promptHistory: {
+    load: (params: { draftId: string }) => Promise<any>;
+    save: (params: { draftId: string; prompt: string }) => Promise<any>;
+    remove: (params: { draftId: string; prompt: string }) => Promise<any>;
   };
   on: (channel: string, callback: (event: IpcRendererEvent, ...args: any[]) => void) => () => void;
   off: (channel: string, callback: (...args: any[]) => void) => void;
@@ -130,6 +135,11 @@ const api: ElectronAPI = {
   links: {
     load: (params) => ipcRenderer.invoke('links:load', params),
     save: (params) => ipcRenderer.invoke('links:save', params),
+  },
+  promptHistory: {
+    load: (params) => ipcRenderer.invoke('promptHistory:load', params),
+    save: (params) => ipcRenderer.invoke('promptHistory:save', params),
+    remove: (params) => ipcRenderer.invoke('promptHistory:remove', params),
   },
   on: (channel, callback) => {
     ipcRenderer.on(channel, callback);

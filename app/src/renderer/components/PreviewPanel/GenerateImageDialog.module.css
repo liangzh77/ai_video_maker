@@ -53,6 +53,37 @@
   line-height: 1.6;
 }
 
+.promptActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.historyOption {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 400px;
+}
+
+.historyText {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyDelete {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  opacity: 0;
+}
+
+.historyOption:hover .historyDelete {
+  opacity: 1;
+}
+
 .imageGrid {
   display: flex;
   flex-wrap: wrap;

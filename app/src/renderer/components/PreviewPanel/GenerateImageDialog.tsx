@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Modal, Progress, App, Empty, Select, Radio, Button, Input, Segmented, InputNumber } from 'antd';
-import { CopyOutlined, CloseCircleOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
+import { Modal, Progress, App, Empty, Select, Radio, Button, Input, Segmented, InputNumber, Checkbox } from 'antd';
+import { CopyOutlined, CloseCircleOutlined, MinusOutlined, PlusOutlined, HistoryOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { Resource, ImageResolution, TextMetadata } from '@shared/types';
 import { isTextMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
@@ -44,15 +44,17 @@ async function runWithConcurrency<T>(
 
 interface GenerateImageDialogProps {
   visible: boolean;
-  promptResource: Resource;
-  promptContent: string;
+  promptResource?: Resource;
+  promptContent?: string;
+  sectionId?: string; // 当没有 promptResource 时，用于文本生成的目标 section
   onClose: () => void;
 }
 
 const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   visible,
   promptResource,
-  promptContent,
+  promptContent = '',
+  sectionId,
   onClose,
 }) => {
   const { message } = App.useApp();
@@ -79,11 +81,52 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   const [isStopping, setIsStopping] = useState(false);
 
+  // 一图一任务模式
+  const [oneImagePerTask, setOneImagePerTask] = useState(false);
+
   // 用于取消正在进行的生成
   const abortRef = useRef<{ aborted: boolean }>({ aborted: false });
 
   // debounce loadResources，避免并发完成时多次刷新竞争
   const loadResourcesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 提示词历史
+  const [promptHistory, setPromptHistory] = useState<string[]>([]);
+
+  // 对话框打开时从文件加载提示词历史
+  useEffect(() => {
+    if (visible && selectedDraftId) {
+      window.api.promptHistory.load({ draftId: selectedDraftId }).then((result) => {
+        if (result.success) {
+          setPromptHistory(result.data.prompts || []);
+        }
+      }).catch(() => {});
+    }
+  }, [visible, selectedDraftId]);
+
+  const savePromptToHistory = async (prompt: string) => {
+    if (!selectedDraftId || !prompt.trim()) return;
+    const result = await window.api.promptHistory.save({ draftId: selectedDraftId, prompt });
+    if (result.success) {
+      setPromptHistory(result.data.prompts || []);
+    }
+  };
+
+  const removePromptFromHistory = async (prompt: string) => {
+    if (!selectedDraftId) return;
+    const result = await window.api.promptHistory.remove({ draftId: selectedDraftId, prompt });
+    if (result.success) {
+      setPromptHistory(result.data.prompts || []);
+    }
+  };
+
+  const handleCopyPrompt = () => {
+    navigator.clipboard.writeText(editedPrompt).then(() => {
+      message.success('提示词已复制到剪贴板');
+    }).catch(() => {
+      message.error('复制失败');
+    });
+  };
 
   // 卡片大小比例，从 localStorage 读取缓存
   const CARD_SCALE_KEY = 'generateImageDialog_cardScale';
@@ -190,11 +233,12 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setIsStopping(false);
       abortRef.current = { aborted: false };
       // 根据 prompt 的 tag 设置默认生成模式
-      const meta = promptResource.metadata;
-      if (meta && isTextMetadata(meta) && meta.tag === 'text') {
-        setMode('text');
-      } else {
+      // 只有明确标记为 image/video 的才默认图片模式，其他（包括无标签）默认文本模式
+      const meta = promptResource?.metadata;
+      if (meta && isTextMetadata(meta) && (meta.tag === 'image' || meta.tag === 'video')) {
         setMode('image');
+      } else {
+        setMode('text');
       }
     }
     prevVisibleRef.current = visible;
@@ -226,11 +270,17 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       return;
     }
 
+    if (oneImagePerTask && selectedImageIds.length === 0) {
+      message.error('一图一任务模式请先选择图片');
+      return;
+    }
+
     if (!editedPrompt || editedPrompt.trim().length === 0) {
       message.error('提示词内容不能为空');
       return;
     }
 
+    savePromptToHistory(editedPrompt);
     setIsGenerating(true);
     setIsStopping(false);
     setCompletedCount(0);
@@ -242,18 +292,37 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       let localFailed = 0;
       const errorMessages: string[] = [];
 
-      const tasks = Array.from({ length: batchCount }, () => async () => {
-        const result = await window.api.task.generateImageDirect({
-          draftId: selectedDraftId,
-          sourceImageIds: selectedImageIds,
-          promptResourceId: promptResource.id,
-          prompt: editedPrompt,
-          modelEndpoint: selectedModel!,
-          resolution: selectedResolution,
+      let tasks: (() => Promise<any>)[];
+
+      if (oneImagePerTask && selectedImageIds.length > 0) {
+        // 一图一任务：每张图片单独生成
+        tasks = selectedImageIds.map((imageId) => async () => {
+          const result = await window.api.task.generateImageDirect({
+            draftId: selectedDraftId,
+            sourceImageIds: [imageId],
+            promptResourceId: promptResource?.id,
+            prompt: editedPrompt,
+            modelEndpoint: selectedModel!,
+            resolution: selectedResolution,
+          });
+          if (!result.success) throw new Error(result.error || '生成失败');
+          return result.data;
         });
-        if (!result.success) throw new Error(result.error || '生成失败');
-        return result.data;
-      });
+      } else {
+        // 常规模式：所有选中图片作为一组输入，生成 batchCount 份
+        tasks = Array.from({ length: batchCount }, () => async () => {
+          const result = await window.api.task.generateImageDirect({
+            draftId: selectedDraftId,
+            sourceImageIds: selectedImageIds,
+            promptResourceId: promptResource?.id,
+            prompt: editedPrompt,
+            modelEndpoint: selectedModel!,
+            resolution: selectedResolution,
+          });
+          if (!result.success) throw new Error(result.error || '生成失败');
+          return result.data;
+        });
+      }
 
       await runWithConcurrency(
         tasks,
@@ -322,6 +391,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       return;
     }
 
+    savePromptToHistory(editedPrompt);
     setIsGenerating(true);
     setIsStopping(false);
     setCompletedCount(0);
@@ -352,8 +422,11 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           localCompleted++;
           setCompletedCount((prev) => prev + 1);
           setTextResults((prev) => [...prev, text]);
-          // 创建新的提示词卡片（在与源提示词同 section 下）
-          await addTextResource(selectedDraftId, promptResource.type, text);
+          // 创建新的提示词卡片（在与源提示词同 section 下，或使用传入的 sectionId）
+          const targetSection = promptResource?.type || sectionId;
+          if (targetSection) {
+            await addTextResource(selectedDraftId, targetSection, text);
+          }
         },
         (error, index) => {
           localFailed++;
@@ -408,7 +481,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const dialogTitle = mode === 'image' ? '生成新角色图片' : '生成文本';
 
   // 计算进度百分比
-  const totalTasks = batchCount;
+  const totalTasks = (mode === 'image' && oneImagePerTask && selectedImageIds.length > 0)
+    ? selectedImageIds.length
+    : batchCount;
   const progressPercent = totalTasks > 0 ? Math.round(((completedCount + failedCount) / totalTasks) * 100) : 0;
 
   return (
@@ -466,13 +541,25 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         {/* Batch Controls */}
         <div className={styles.section}>
           <div className={styles.batchControls}>
+            {mode === 'image' && (
+              <>
+                <Checkbox
+                  checked={oneImagePerTask}
+                  onChange={(e) => setOneImagePerTask(e.target.checked)}
+                  disabled={isGenerating}
+                >
+                  一图一任务
+                </Checkbox>
+                <span style={{ width: 8 }} />
+              </>
+            )}
             <span className={styles.batchLabel}>生成份数</span>
             <InputNumber
               min={1}
               max={50}
-              value={batchCount}
+              value={(mode === 'image' && oneImagePerTask) ? selectedImageIds.length || 1 : batchCount}
               onChange={(v) => setBatchCount(v || 1)}
-              disabled={isGenerating}
+              disabled={isGenerating || (mode === 'image' && oneImagePerTask)}
               size="small"
               style={{ width: 70 }}
             />
@@ -521,7 +608,49 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
         {/* Prompt Editor */}
         <div className={styles.section}>
-          <div className={styles.sectionTitle}>提示词</div>
+          <div className={styles.sectionTitle}>
+            提示词
+            <span className={styles.promptActions}>
+              {promptHistory.length > 0 && (
+                <Select
+                  placeholder="历史提示词"
+                  value={null as any}
+                  onChange={(val: string) => setEditedPrompt(val)}
+                  disabled={isGenerating}
+                  size="small"
+                  style={{ width: 160 }}
+                  suffixIcon={<HistoryOutlined />}
+                  popupMatchSelectWidth={false}
+                  options={promptHistory.map((p, i) => ({
+                    value: p,
+                    label: (
+                      <div className={styles.historyOption}>
+                        <span className={styles.historyText}>{p.length > 80 ? p.slice(0, 80) + '...' : p}</span>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          className={styles.historyDelete}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removePromptFromHistory(p);
+                          }}
+                        />
+                      </div>
+                    ),
+                  }))}
+                />
+              )}
+              <Button
+                type="text"
+                size="small"
+                icon={<CopyOutlined />}
+                onClick={handleCopyPrompt}
+                disabled={!editedPrompt}
+                title="复制提示词"
+              />
+            </span>
+          </div>
           <Input.TextArea
             value={editedPrompt}
             onChange={(e) => setEditedPrompt(e.target.value)}

@@ -155,6 +155,10 @@ function getLinksPath(draftId: string): string {
   return path.join(getFilesPath(draftId), '关联.json');
 }
 
+function getPromptHistoryPath(draftId: string): string {
+  return path.join(getFilesPath(draftId), '提示词历史.json');
+}
+
 /**
  * @deprecated 旧版 links.json 路径，仅用于迁移
  */
@@ -1313,6 +1317,45 @@ export async function saveLinks(draftId: string, links: LinksFile): Promise<void
 }
 
 // ============================================
+// 提示词历史
+// ============================================
+
+export interface PromptHistoryFile {
+  prompts: string[];
+}
+
+const DEFAULT_PROMPT_HISTORY: PromptHistoryFile = {
+  prompts: [],
+};
+
+const MAX_PROMPT_HISTORY = 50;
+
+export async function loadPromptHistory(draftId: string): Promise<PromptHistoryFile> {
+  const filePath = getPromptHistoryPath(draftId);
+  return await readJson<PromptHistoryFile>(filePath, DEFAULT_PROMPT_HISTORY);
+}
+
+export async function savePromptHistory(draftId: string, prompt: string): Promise<PromptHistoryFile> {
+  const trimmed = prompt.trim();
+  if (!trimmed) {
+    return await loadPromptHistory(draftId);
+  }
+  const history = await loadPromptHistory(draftId);
+  history.prompts = [trimmed, ...history.prompts.filter((p) => p !== trimmed)].slice(0, MAX_PROMPT_HISTORY);
+  const filePath = getPromptHistoryPath(draftId);
+  await writeJson(filePath, history);
+  return history;
+}
+
+export async function removePromptHistory(draftId: string, prompt: string): Promise<PromptHistoryFile> {
+  const history = await loadPromptHistory(draftId);
+  history.prompts = history.prompts.filter((p) => p !== prompt);
+  const filePath = getPromptHistoryPath(draftId);
+  await writeJson(filePath, history);
+  return history;
+}
+
+// ============================================
 // Exports
 // ============================================
 
@@ -1366,6 +1409,11 @@ export const storage = {
   links: {
     load: loadLinks,
     save: saveLinks,
+  },
+  promptHistory: {
+    load: loadPromptHistory,
+    save: savePromptHistory,
+    remove: removePromptHistory,
   },
   splitPoints: {
     save: saveSplitPoints,

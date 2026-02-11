@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
-import { DRAFT_CHANNELS, LINKS_CHANNELS } from '@shared/ipc-channels';
-import storage, { LinksFile } from '../services/storage';
+import { DRAFT_CHANNELS, LINKS_CHANNELS, PROMPT_HISTORY_CHANNELS } from '@shared/ipc-channels';
+import storage, { LinksFile, PromptHistoryFile } from '../services/storage';
 import { checkAndMigrate } from '../services/migration';
 import type { Draft, OperationResult, PaginatedResult } from '@shared/types';
 
@@ -289,6 +289,55 @@ export function registerDraftHandlers(): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to save links',
+        };
+      }
+    }
+  );
+
+  // ============================================
+  // Prompt History IPC Handlers (提示词历史)
+  // ============================================
+
+  ipcMain.handle(
+    PROMPT_HISTORY_CHANNELS.LOAD,
+    async (_, request: { draftId: string }): Promise<OperationResult<PromptHistoryFile>> => {
+      try {
+        const history = await storage.promptHistory.load(request.draftId);
+        return { success: true, data: history };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to load prompt history',
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    PROMPT_HISTORY_CHANNELS.SAVE,
+    async (_, request: { draftId: string; prompt: string }): Promise<OperationResult<PromptHistoryFile>> => {
+      try {
+        const history = await storage.promptHistory.save(request.draftId, request.prompt);
+        return { success: true, data: history };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to save prompt history',
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    PROMPT_HISTORY_CHANNELS.REMOVE,
+    async (_, request: { draftId: string; prompt: string }): Promise<OperationResult<PromptHistoryFile>> => {
+      try {
+        const history = await storage.promptHistory.remove(request.draftId, request.prompt);
+        return { success: true, data: history };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to remove prompt history',
         };
       }
     }

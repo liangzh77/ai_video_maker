@@ -59,7 +59,7 @@ interface TaskGetRequest {
 interface TaskGenerateImageRequest {
   draftId: string;
   sourceImageIds: string[];
-  promptResourceId: string;
+  promptResourceId?: string;
   prompt?: string;
   modelEndpoint?: string;
   resolution?: '4K' | '2K';
@@ -1182,12 +1182,17 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         }
 
         // Get prompt content
-        const promptResource = await storage.resource.get(request.draftId, request.promptResourceId);
-        if (!promptResource) {
-          return { success: false, error: 'Prompt resource not found' };
+        let prompt = request.prompt;
+        if (request.promptResourceId) {
+          const promptResource = await storage.resource.get(request.draftId, request.promptResourceId);
+          if (!promptResource) {
+            return { success: false, error: 'Prompt resource not found' };
+          }
+          const promptMeta = promptResource.metadata as TextMetadata;
+          if (!prompt) {
+            prompt = promptMeta?.content;
+          }
         }
-        const promptMeta = promptResource.metadata as TextMetadata;
-        const prompt = request.prompt || promptMeta?.content;
         if (!prompt || prompt.trim().length === 0) {
           return { success: false, error: 'Prompt content cannot be empty' };
         }

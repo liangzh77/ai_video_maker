@@ -95,6 +95,15 @@ export const LINKS_CHANNELS = {
 } as const;
 
 // ============================================
+// Prompt History Channels (提示词历史)
+// ============================================
+export const PROMPT_HISTORY_CHANNELS = {
+  LOAD: 'promptHistory:load',
+  SAVE: 'promptHistory:save',
+  REMOVE: 'promptHistory:remove',
+} as const;
+
+// ============================================
 // All Channels (for registration)
 // ============================================
 export const ALL_CHANNELS = {
@@ -105,6 +114,7 @@ export const ALL_CHANNELS = {
   ...CONFIG_CHANNELS,
   ...SECTION_CHANNELS,
   ...LINKS_CHANNELS,
+  ...PROMPT_HISTORY_CHANNELS,
 } as const;
 
 export type IpcChannel = (typeof ALL_CHANNELS)[keyof typeof ALL_CHANNELS];

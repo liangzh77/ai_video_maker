@@ -11,6 +11,7 @@ import ResourceCard from './ResourceCard';
 import PromptCard from './PromptCard';
 import UpscaleDialog from './UpscaleDialog';
 import SynthesizeDialog from './SynthesizeDialog';
+import GenerateImageDialog from '../PreviewPanel/GenerateImageDialog';
 import styles from './ResourceSection.module.css';
 
 // Custom MIME type for frame data transfer (must match VideoPlayer)
@@ -127,6 +128,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [synthesizeProgress, setSynthesizeProgress] = useState(0);
   const [synthesizeTaskId, setSynthesizeTaskId] = useState<string | null>(null);
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const { selectedDraftId, addResource, addFrameAsResource, addTextResource, updateResource, deleteResourcesByType, getResourcesByType, loadResources, copyResource, reorderResource, clearLocalResourcesByType } = useDraftStore();
   const { batchLink } = useSceneLinkStore();
   const { renameSection, deleteSection } = useSectionsStore();
@@ -866,7 +868,14 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         )}
         <span className={styles.count}>{resources.length}</span>
         {isText && (
-          <button className={styles.addButton} onClick={handleAddPrompt} title="添加提示词">
+          <Tooltip title="生成">
+            <button className={`${styles.addButton} ${styles.upscaleButton}`} onClick={() => setGenerateDialogOpen(true)}>
+              <ThunderboltOutlined />
+            </button>
+          </Tooltip>
+        )}
+        {isText && (
+          <button className={`${styles.addButton} ${styles.upscaleButton}`} onClick={handleAddPrompt} title="添加提示词">
             <PlusOutlined />
           </button>
         )}
@@ -1042,6 +1051,15 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         }}
         onOk={handleSynthesize}
       />
+
+      {/* 生成对话框（提示词栏直接打开） */}
+      {isText && (
+        <GenerateImageDialog
+          visible={generateDialogOpen}
+          sectionId={sectionId}
+          onClose={() => setGenerateDialogOpen(false)}
+        />
+      )}
     </div>
   );
 };
