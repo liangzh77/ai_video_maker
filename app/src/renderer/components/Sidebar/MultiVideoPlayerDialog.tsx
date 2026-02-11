@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { Modal, Slider, Button, Space } from 'antd';
 import { PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
 import type { Resource, VideoMetadata } from '@shared/types';
+import { parseFolderName } from '@shared/section-utils';
 import { usePlaybackStore } from '../../stores/playback';
 import styles from './MultiVideoPlayerDialog.module.css';
 
@@ -199,16 +200,8 @@ const MultiVideoPlayerDialog: React.FC<MultiVideoPlayerDialogProps> = ({
   const getVideoLabel = (index: number) => {
     const video = videos[index];
     if (!video) return '';
-    // 根据类型显示不同标签
-    const typeLabels: Record<string, string> = {
-      'source_video': '源视频',
-      'scene_source': '分镜源',
-      'scene_new': '分镜新',
-      'scene_hd': '高清',
-      'lipsync': '口型',
-      'synthesized': '合成',
-    };
-    return typeLabels[video.type] || video.fileName;
+    const desc = parseFolderName(video.type);
+    return desc?.label || video.fileName;
   };
 
   return (

@@ -54,7 +54,8 @@ class TaskQueue extends EventEmitter {
     draftId: string,
     type: TaskType,
     inputResourceIds: string[],
-    config: TaskConfig
+    config: TaskConfig,
+    targetSectionId?: string
   ): ProcessingTask {
     const task: ProcessingTask = {
       id: uuidv4(),
@@ -65,6 +66,7 @@ class TaskQueue extends EventEmitter {
       createdAt: new Date().toISOString(),
       inputResourceIds,
       outputResourceIds: [],
+      targetSectionId,
       config,
     };
 

@@ -55,6 +55,29 @@
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0;
+  cursor: default;
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+}
+
+.title:hover {
+  background-color: var(--color-bg-main);
+}
+
+.titleInput {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  outline: none;
+  background: var(--color-bg-main);
+  min-width: 60px;
+  max-width: 200px;
+  height: 24px;
+  line-height: 24px;
 }
 
 .count {
@@ -139,6 +162,16 @@
 .clearButton:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.deleteSectionButton {
+  margin-left: 0;
+}
+
+.deleteSectionButton:hover {
+  border-color: var(--color-error, #ff4d4f);
+  color: var(--color-error, #ff4d4f);
+  background-color: rgba(255, 77, 79, 0.05);
 }
 
 .content {

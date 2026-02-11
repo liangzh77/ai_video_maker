@@ -3,6 +3,7 @@ import { Button, Tooltip, Popconfirm, message } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import type { Resource } from '@shared/types';
 import { isVideoMetadata, isImageMetadata } from '@shared/types';
+import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import styles from './ResourceInfo.module.css';
 
@@ -28,18 +29,8 @@ const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
   };
 
   const getResourceTypeLabel = (type: string): string => {
-    const labels: Record<string, string> = {
-      source_video: '源视频',
-      source_character: '源角色图片',
-      prompt: '提示词',
-      new_character: '新角色图片',
-      scene_source: '分镜源视频',
-      scene_new: '分镜新视频',
-      scene_hd: '高清分镜新视频',
-      lipsync: '对口型新视频',
-      synthesized: '合成新视频',
-    };
-    return labels[type] || type;
+    const desc = parseFolderName(type);
+    return desc?.label || type;
   };
 
   const handleDelete = async () => {

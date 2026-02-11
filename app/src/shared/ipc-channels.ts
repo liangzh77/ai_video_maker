@@ -76,6 +76,17 @@ export const CONFIG_CHANNELS = {
 } as const;
 
 // ============================================
+// Section Channels (卡片栏管理)
+// ============================================
+export const SECTION_CHANNELS = {
+  LIST: 'section:list',
+  CREATE: 'section:create',
+  DELETE: 'section:delete',
+  RENAME: 'section:rename',
+  REORDER: 'section:reorder',
+} as const;
+
+// ============================================
 // Links Channels (分镜关联关系)
 // ============================================
 export const LINKS_CHANNELS = {
@@ -92,6 +103,7 @@ export const ALL_CHANNELS = {
   ...TASK_CHANNELS,
   ...TASK_EVENTS,
   ...CONFIG_CHANNELS,
+  ...SECTION_CHANNELS,
   ...LINKS_CHANNELS,
 } as const;
 

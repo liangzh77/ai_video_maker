@@ -6,7 +6,7 @@ import { RESOURCE_CHANNELS } from '@shared/ipc-channels';
 import storage from '../services/storage';
 import { extractMetadata, getResourceTypeFromMime, getMimeType, serializeTextContent } from '../services/metadata';
 import thumbnailCache from '../services/thumbnailCache';
-import type { Resource, ResourceType, OperationResult, PromptTag } from '@shared/types';
+import type { Resource, OperationResult, PromptTag } from '@shared/types';
 
 // ============================================
 // Request Types
@@ -196,28 +196,10 @@ async function createResourceFromFile(
 
   console.log('[createResourceFromFile] Starting:', { draftId, type, sourcePath, originalFileName });
 
-  // 某些资源类型保留原有文件名（仅限 isFolder=true 的类型）
-  const keepOriginalNameTypes: ResourceType[] = ['scene_new', 'scene_hd', 'lipsync'];
-  let destPath: string;
-  let folderName: string;
-
-  if (keepOriginalNameTypes.includes(type)) {
-    // 保留原有文件名
-    const folderPath = storage.getResourceFolderPath(draftId, type);
-    console.log('[createResourceFromFile] Using original name, folderPath:', folderPath);
-    if (!folderPath) {
-      throw new Error(`Cannot get folder path for type: ${type}`);
-    }
-    destPath = path.join(folderPath, originalFileName);
-    folderName = path.basename(folderPath);
-    console.log('[createResourceFromFile] destPath with original name:', destPath);
-  } else {
-    // 使用新的命名规范获取文件路径
-    const sequenceNumber = await storage.getNextSequenceNumber(draftId, type);
-    destPath = storage.getResourceFilePath(draftId, type, ext, sequenceNumber);
-    folderName = path.basename(path.dirname(destPath));
-    console.log('[createResourceFromFile] destPath with sequence:', destPath);
-  }
+  // 所有用户添加的文件都使用序号命名（任务工具直接写文件，不走此路径）
+  const sequenceNumber = await storage.getNextSequenceNumber(draftId, type);
+  const destPath = storage.getResourceFilePath(draftId, type, ext, sequenceNumber);
+  console.log('[createResourceFromFile] destPath with sequence:', destPath);
 
   // 确保目录存在
   await fs.mkdir(path.dirname(destPath), { recursive: true });

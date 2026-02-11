@@ -7,11 +7,13 @@
  * - 重命名文件夹：原角色图片 -> 源角色图片
  * - 移动并更新 links.json（从草稿根目录移到 files/关联.json）
  * - 更新 分割点.txt 中的 UUID 为相对路径
+ * - 将旧中文文件夹名迁移为 {序号}_{媒体类型}_{名称} 格式
  */
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { Resource } from '@shared/types';
+import type { Resource, MediaType } from '@shared/types';
+import { parseFolderName, buildFolderName } from '@shared/section-utils';
 
 // 旧的 resources.json 结构
 interface OldResourcesFile {
@@ -196,6 +198,197 @@ export async function migrateLinksLocation(draftPath: string): Promise<void> {
   }
 }
 
+// =============================================
+// Section 迁移：旧中文文件夹名 → {序号}_{媒体类型}_{名称}
+// =============================================
+
+/** 旧文件夹/文件名 → 新 section 信息映射 */
+const OLD_FOLDER_MIGRATION: Array<{
+  oldName: string;
+  isFolder: boolean;
+  order: number;
+  mediaType: MediaType;
+  label: string;
+}> = [
+  { oldName: '源视频', isFolder: false, order: 1, mediaType: '视频', label: '源视频' },
+  { oldName: '源角色图片', isFolder: true, order: 2, mediaType: '图片', label: '源角色图片' },
+  { oldName: '提示词', isFolder: true, order: 3, mediaType: '提示词', label: '提示词' },
+  { oldName: '新角色图片', isFolder: true, order: 4, mediaType: '图片', label: '新角色图片' },
+  { oldName: '分镜源视频', isFolder: true, order: 5, mediaType: '视频', label: '分镜源视频' },
+  { oldName: '分镜新视频', isFolder: true, order: 6, mediaType: '视频', label: '分镜新视频' },
+  { oldName: '高清分镜新视频', isFolder: true, order: 7, mediaType: '视频', label: '高清分镜新视频' },
+  { oldName: '对口型新视频', isFolder: true, order: 8, mediaType: '视频', label: '对口型新视频' },
+  { oldName: '合成新视频', isFolder: true, order: 9, mediaType: '视频', label: '合成新视频' },
+];
+
+/**
+ * 检查草稿是否需要 section 文件夹迁移
+ * 条件：files/ 下存在旧中文文件夹名，且没有新格式的文件夹
+ */
+export async function needsSectionMigration(draftPath: string): Promise<boolean> {
+  const filesPath = path.join(draftPath, 'files');
+  try {
+    const entries = await fs.readdir(filesPath, { withFileTypes: true });
+    const names = entries.map(e => e.name);
+
+    // 检查是否有旧格式的文件夹/文件
+    const hasOldFormat = OLD_FOLDER_MIGRATION.some(m => {
+      if (m.isFolder) {
+        return names.includes(m.oldName);
+      } else {
+        // 对于单文件（如 源视频），检查是否有以该名称开头的文件
+        return names.some(n => n.startsWith(m.oldName + '.'));
+      }
+    });
+
+    // 检查是否已经有新格式的文件夹
+    const hasNewFormat = names.some(n => parseFolderName(n) !== null);
+
+    // 有旧格式且没有新格式 → 需要迁移
+    return hasOldFormat && !hasNewFormat;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 将旧中文文件夹名迁移为 {序号}_{媒体类型}_{名称} 格式
+ */
+export async function migrateToSections(draftPath: string): Promise<void> {
+  console.log('[Migration] Starting section migration for:', draftPath);
+
+  const filesPath = path.join(draftPath, 'files');
+  const linksPath = path.join(filesPath, '关联.json');
+  const splitPointsPath = path.join(filesPath, '分割点.txt');
+  const tasksPath = path.join(filesPath, 'tasks.json');
+
+  // 构建路径映射表（旧路径前缀 → 新路径前缀）
+  const pathMapping = new Map<string, string>();
+
+  for (const migration of OLD_FOLDER_MIGRATION) {
+    const newFolderName = buildFolderName(migration.order, migration.mediaType, migration.label);
+    const newFolderPath = path.join(filesPath, newFolderName);
+
+    if (migration.isFolder) {
+      // 文件夹重命名
+      const oldFolderPath = path.join(filesPath, migration.oldName);
+      try {
+        await fs.access(oldFolderPath);
+        await fs.rename(oldFolderPath, newFolderPath);
+        console.log(`[Migration] Renamed folder: ${migration.oldName} → ${newFolderName}`);
+        // 映射：分镜源视频/xxx → 5_视频_分镜源视频/xxx
+        pathMapping.set(migration.oldName + '/', newFolderName + '/');
+      } catch {
+        // 文件夹不存在，跳过
+      }
+    } else {
+      // 单文件（源视频）→ 移入新文件夹
+      try {
+        const entries = await fs.readdir(filesPath);
+        const matchingFile = entries.find(e => e.startsWith(migration.oldName + '.'));
+        if (matchingFile) {
+          await fs.mkdir(newFolderPath, { recursive: true });
+          const ext = path.extname(matchingFile);
+          const oldFilePath = path.join(filesPath, matchingFile);
+          const newFilePath = path.join(newFolderPath, `001${ext}`);
+          await fs.rename(oldFilePath, newFilePath);
+          console.log(`[Migration] Moved file: ${matchingFile} → ${newFolderName}/001${ext}`);
+          // 映射：源视频.mp4 → 1_视频_源视频/001.mp4
+          pathMapping.set(matchingFile, `${newFolderName}/001${ext}`);
+        }
+      } catch {
+        // 文件不存在，跳过
+      }
+    }
+  }
+
+  if (pathMapping.size === 0) {
+    console.log('[Migration] No folders to migrate');
+    return;
+  }
+
+  // 更新 关联.json 中的路径
+  try {
+    const content = await fs.readFile(linksPath, 'utf-8');
+    const links: OldLinksFile = JSON.parse(content);
+    const newSourceToNew: Record<string, string> = {};
+    let changed = false;
+
+    for (const [sourceId, newId] of Object.entries(links.sourceToNew)) {
+      const newSourceId = replacePath(sourceId, pathMapping);
+      const newNewId = replacePath(newId, pathMapping);
+      newSourceToNew[newSourceId] = newNewId;
+      if (newSourceId !== sourceId || newNewId !== newId) changed = true;
+    }
+
+    if (changed) {
+      await fs.writeFile(linksPath, JSON.stringify({ sourceToNew: newSourceToNew }, null, 2), 'utf-8');
+      console.log('[Migration] Updated 关联.json paths');
+    }
+  } catch {
+    // 文件不存在或读取失败，跳过
+  }
+
+  // 更新 分割点.txt 中的路径
+  try {
+    const content = await fs.readFile(splitPointsPath, 'utf-8');
+    const splitPoints: OldSplitPointsFile = JSON.parse(content);
+    const newVideoId = replacePath(splitPoints.videoId, pathMapping);
+    if (newVideoId !== splitPoints.videoId) {
+      splitPoints.videoId = newVideoId;
+      await fs.writeFile(splitPointsPath, JSON.stringify(splitPoints, null, 2), 'utf-8');
+      console.log('[Migration] Updated 分割点.txt videoId:', newVideoId);
+    }
+  } catch {
+    // 文件不存在或读取失败，跳过
+  }
+
+  // 更新 tasks.json 中的路径
+  try {
+    const content = await fs.readFile(tasksPath, 'utf-8');
+    const tasks = JSON.parse(content);
+    let changed = false;
+
+    if (Array.isArray(tasks)) {
+      for (const task of tasks) {
+        if (Array.isArray(task.inputResourceIds)) {
+          task.inputResourceIds = task.inputResourceIds.map((id: string) => {
+            const newId = replacePath(id, pathMapping);
+            if (newId !== id) changed = true;
+            return newId;
+          });
+        }
+        if (Array.isArray(task.outputResourceIds)) {
+          task.outputResourceIds = task.outputResourceIds.map((id: string) => {
+            const newId = replacePath(id, pathMapping);
+            if (newId !== id) changed = true;
+            return newId;
+          });
+        }
+      }
+    }
+
+    if (changed) {
+      await fs.writeFile(tasksPath, JSON.stringify(tasks, null, 2), 'utf-8');
+      console.log('[Migration] Updated tasks.json paths');
+    }
+  } catch {
+    // 文件不存在或读取失败，跳过
+  }
+
+  console.log('[Migration] Section migration completed for:', draftPath);
+}
+
+/** 替换路径中的旧前缀为新前缀 */
+function replacePath(oldPath: string, mapping: Map<string, string>): string {
+  for (const [oldPrefix, newPrefix] of mapping) {
+    if (oldPath === oldPrefix || oldPath.startsWith(oldPrefix)) {
+      return newPrefix + oldPath.slice(oldPrefix.length);
+    }
+  }
+  return oldPath;
+}
+
 /**
  * 检查并迁移草稿（用于 selectDraft 时调用）
  */
@@ -204,7 +397,7 @@ export async function checkAndMigrate(draftPath: string): Promise<void> {
   if (await needsMigration(draftPath)) {
     console.log('[Migration] Draft needs full migration:', draftPath);
     await migrateDraft(draftPath);
-    return;
+    // 完整迁移后还需要检查 section 迁移
   }
 
   // 然后检查是否只需要移动 links.json
@@ -212,12 +405,20 @@ export async function checkAndMigrate(draftPath: string): Promise<void> {
     console.log('[Migration] Draft needs links.json move:', draftPath);
     await migrateLinksLocation(draftPath);
   }
+
+  // 最后检查是否需要 section 文件夹迁移
+  if (await needsSectionMigration(draftPath)) {
+    console.log('[Migration] Draft needs section folder migration:', draftPath);
+    await migrateToSections(draftPath);
+  }
 }
 
 export default {
   needsMigration,
   needsLinksMigration,
+  needsSectionMigration,
   migrateDraft,
   migrateLinksLocation,
+  migrateToSections,
   checkAndMigrate,
 };

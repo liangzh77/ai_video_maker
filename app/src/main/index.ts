@@ -23,6 +23,7 @@ import storage from './services/storage';
 import registerDraftHandlers from './ipc/draft';
 import registerResourceHandlers from './ipc/resource';
 import registerTaskHandlers from './ipc/task';
+import registerSectionHandlers from './ipc/section';
 import registerConfigHandlers from './ipc/config';
 
 /**
@@ -185,6 +186,7 @@ app.whenReady().then(async () => {
   // Register IPC handlers
   registerDraftHandlers();
   registerResourceHandlers();
+  registerSectionHandlers();
   registerConfigHandlers();
 
   // Set app user model id for Windows

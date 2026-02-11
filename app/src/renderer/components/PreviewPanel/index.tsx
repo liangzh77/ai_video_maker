@@ -3,10 +3,12 @@ import { Button, Tooltip, Space, App } from 'antd';
 import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined, EditOutlined, LinkOutlined, SoundOutlined, PlaySquareOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
 import { useSplitPointsStore } from '../../stores/splitPoints';
-import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
+import { usePlaybackStore, isContinuousPlayType } from '../../stores/playback';
 import { useSceneLinkStore } from '../../stores/sceneLink';
+import { useSectionsStore } from '../../stores/sections';
 import { isVideoMetadata, isImageMetadata, isTextMetadata } from '@shared/types';
-import type { ResourceType, VideoMetadata, Resource } from '@shared/types';
+import type { VideoMetadata, Resource } from '@shared/types';
+import { parseFolderName } from '@shared/section-utils';
 import VideoPlayer, { type VideoPlayerRef } from './VideoPlayer';
 import ImagePreview from './ImagePreview';
 import TextEditor from './TextEditor';
@@ -21,10 +23,11 @@ import styles from './PreviewPanel.module.css';
 
 const PreviewPanel: React.FC = () => {
   const { message } = App.useApp();
-  const { selectedDraftId, selectedResourceId, getSelectedResource, openResourceFolder, selectResource, getResourcesByType, loadResources } = useDraftStore();
+  const { selectedDraftId, selectedResourceId, getSelectedResource, openResourceFolder, selectResource, getResourcesByType, getResourceById, loadResources } = useDraftStore();
   const { splitPoints, videoId, loadSplitPoints, clearPoints } = useSplitPointsStore();
   const { shouldAutoPlay, setShouldAutoPlay, activePlayerType, startPlaying } = usePlaybackStore();
   const { getLinkedId } = useSceneLinkStore();
+  const { sections } = useSectionsStore();
   const selectedResource = getSelectedResource();
   const [splitDialogVisible, setSplitDialogVisible] = useState(false);
   const [analyzeDialogVisible, setAnalyzeDialogVisible] = useState(false);
@@ -35,24 +38,23 @@ const PreviewPanel: React.FC = () => {
   const videoPlayerRef = useRef<VideoPlayerRef>(null);
 
   // 获取按文件名排序的资源列表（getResourcesByType 已自动排序）
-  const getSortedResources = useCallback((resourceType: ResourceType) => {
-    return getResourcesByType(resourceType);
+  const getSortedResources = useCallback((sectionId: string) => {
+    return getResourcesByType(sectionId);
   }, [getResourcesByType]);
 
-  // 获取分镜源视频相关的信息（源视频、前后分镜）
+  // 获取分镜相关的信息（源视频、前后分镜）
   const getSceneRelatedResources = useCallback((sceneResource: Resource) => {
     const meta = sceneResource.metadata as VideoMetadata;
     if (!meta.sourceVideoId) {
       return { sourceVideo: null, prevScene: null, nextScene: null };
     }
 
-    // 获取源视频
-    const allResources = getResourcesByType('source_video');
-    const sourceVideo = allResources.find(r => r.id === meta.sourceVideoId) || null;
+    // 通过资源 ID 直接获取源视频
+    const sourceVideo = getResourceById(meta.sourceVideoId);
 
-    // 获取同一源视频的所有分镜
-    const sceneSourceResources = getResourcesByType('scene_source');
-    const relatedScenes = sceneSourceResources
+    // 获取同一 section 中同一源视频的所有分镜
+    const sameSectionResources = getResourcesByType(sceneResource.type);
+    const relatedScenes = sameSectionResources
       .filter(r => {
         const rMeta = r.metadata as VideoMetadata;
         return rMeta.sourceVideoId === meta.sourceVideoId;
@@ -68,7 +70,7 @@ const PreviewPanel: React.FC = () => {
     const nextScene = currentIndex < relatedScenes.length - 1 ? relatedScenes[currentIndex + 1] : null;
 
     return { sourceVideo, prevScene, nextScene };
-  }, [getResourcesByType]);
+  }, [getResourcesByType, getResourceById]);
 
   // 处理重切分镜
   const handleResplitScene = useCallback(async (startTime: number, endTime: number) => {
@@ -101,14 +103,13 @@ const PreviewPanel: React.FC = () => {
       return;
     }
 
-    // 只对支持连续播放的类型生效
-    const resourceType = selectedResource.type as ResourceType;
-    if (!CONTINUOUS_PLAY_TYPES.includes(resourceType as typeof CONTINUOUS_PLAY_TYPES[number])) {
+    // 只对视频类型 section 生效
+    if (!isContinuousPlayType(selectedResource.type)) {
       return;
     }
 
-    // 获取同类型的所有资源（使用自定义排序）
-    const resources = getSortedResources(resourceType);
+    // 获取同 section 的所有资源（使用自定义排序）
+    const resources = getSortedResources(selectedResource.type);
     const currentIndex = resources.findIndex((r) => r.id === selectedResource.id);
 
     // 找到下一个视频
@@ -167,14 +168,14 @@ const PreviewPanel: React.FC = () => {
     };
   }, [selectedResource, dualPlayerVisible, boundaryEditorVisible, editorDialogVisible, fullscreenVideoVisible, activePlayerType]);
 
-  // Auto-load split points when selecting a source video
+  // Auto-load split points when selecting a video
   useEffect(() => {
     if (!selectedDraftId || !selectedResourceId || !selectedResource) {
       return;
     }
 
-    // Only auto-load for source_video type
-    if (selectedResource.type !== 'source_video') {
+    // Only auto-load for video resources
+    if (!selectedResource.mimeType.startsWith('video/')) {
       return;
     }
 
@@ -197,8 +198,20 @@ const PreviewPanel: React.FC = () => {
   const handleLinkSourceVideo = useCallback(async () => {
     if (!selectedDraftId || !selectedResourceId || !selectedResource) return;
 
-    // 获取所有源视频
-    const sourceVideos = getResourcesByType('source_video');
+    // 在所有视频 section 中查找源视频（没有 sourceVideoId 的视频即为源视频）
+    const sourceVideos: Resource[] = [];
+    for (const section of sections) {
+      const desc = parseFolderName(section.id);
+      if (desc?.mediaType === '视频') {
+        const sectionResources = getResourcesByType(section.id);
+        for (const r of sectionResources) {
+          if (isVideoMetadata(r.metadata) && !r.metadata.sourceVideoId) {
+            sourceVideos.push(r);
+          }
+        }
+      }
+    }
+
     if (sourceVideos.length === 0) {
       message.warning('没有可用的源视频');
       return;
@@ -208,8 +221,8 @@ const PreviewPanel: React.FC = () => {
     const sourceVideo = sourceVideos[0];
     const meta = selectedResource.metadata as VideoMetadata;
 
-    // 获取该源视频的所有分镜，计算当前分镜的位置
-    const allScenes = getResourcesByType('scene_source');
+    // 获取同 section 中该源视频的所有分镜，计算当前分镜的位置
+    const allScenes = getResourcesByType(selectedResource.type);
     const sceneIndex = allScenes.findIndex(r => r.id === selectedResourceId) + 1;
 
     // 估算时间范围：使用分镜自身的 duration
@@ -245,7 +258,7 @@ const PreviewPanel: React.FC = () => {
     } catch (error) {
       message.error('关联失败: ' + (error instanceof Error ? error.message : '未知错误'));
     }
-  }, [selectedDraftId, selectedResourceId, selectedResource, getResourcesByType, loadResources, message]);
+  }, [selectedDraftId, selectedResourceId, selectedResource, sections, getResourcesByType, loadResources, message]);
 
   // 处理提取音频
   const handleExtractAudio = useCallback(async () => {
@@ -286,39 +299,22 @@ const PreviewPanel: React.FC = () => {
   // 注意：useMemo 必须在 early return 之前调用
   const linkedVideoResource = useMemo(() => {
     if (!selectedResource) return null;
-    const isSceneSourceType = selectedResource.type === 'scene_source';
-    const isSceneNewType = selectedResource.type === 'scene_new';
-    if (!isSceneSourceType && !isSceneNewType) return null;
+    if (!selectedResource.mimeType.startsWith('video/')) return null;
 
-    const linkedId = getLinkedId(
-      selectedResource.id,
-      isSceneSourceType ? 'scene_source' : 'scene_new'
-    );
+    const linkedId = getLinkedId(selectedResource.id);
     if (!linkedId) return null;
 
-    // 从对应类型中查找关联资源
-    const linkedType = isSceneSourceType ? 'scene_new' : 'scene_source';
-    const linkedResources = getResourcesByType(linkedType);
-    return linkedResources.find(r => r.id === linkedId) || null;
-  }, [selectedResource, getLinkedId, getResourcesByType]);
+    return getResourceById(linkedId) || null;
+  }, [selectedResource, getLinkedId, getResourceById]);
 
   // 准备双视频播放所需的资源
   const dualPlayerResources = useMemo(() => {
     if (!linkedVideoResource || !selectedResource) return null;
-
-    const isSceneSourceType = selectedResource.type === 'scene_source';
-    // 确保 sourceResource 是 scene_source，newResource 是 scene_new
-    if (isSceneSourceType) {
-      return {
-        sourceResource: selectedResource,
-        newResource: linkedVideoResource,
-      };
-    } else {
-      return {
-        sourceResource: linkedVideoResource,
-        newResource: selectedResource,
-      };
-    }
+    // 当前选中的为左侧（source），关联的为右侧（new）
+    return {
+      sourceResource: selectedResource,
+      newResource: linkedVideoResource,
+    };
   }, [selectedResource, linkedVideoResource]);
 
   if (!selectedResourceId || !selectedResource) {
@@ -335,20 +331,22 @@ const PreviewPanel: React.FC = () => {
   const isVideo = selectedResource.mimeType.startsWith('video/');
   const isImage = selectedResource.mimeType.startsWith('image/');
   const isText = isTextMetadata(selectedResource.metadata);
-  const isSourceVideo = selectedResource.type === 'source_video';
-  const isSceneSource = selectedResource.type === 'scene_source';
-  const isSceneNew = selectedResource.type === 'scene_new';
 
-  // 获取分镜相关资源（仅当选中分镜源视频时）
-  const sceneRelated = isSceneSource ? getSceneRelatedResources(selectedResource) : null;
-  const canEditBoundary = isSceneSource && sceneRelated?.sourceVideo;
+  // 视频 metadata
+  const videoMeta = isVideo && isVideoMetadata(selectedResource.metadata) ? selectedResource.metadata : null;
+  // 是否为场景片段（有源视频关联）
+  const isSceneClip = isVideo && !!videoMeta?.sourceVideoId;
+  // 是否可以进行视频分析和切分（非场景片段的视频）
+  const canAnalyzeAndSplit = isVideo && !isSceneClip;
+
+  // 获取分镜相关资源（仅当是场景片段时）
+  const sceneRelated = isSceneClip ? getSceneRelatedResources(selectedResource) : null;
+  const canEditBoundary = isSceneClip && sceneRelated?.sourceVideo;
 
   // 检查分镜是否缺少源视频关联（需要手动关联）
-  const sceneMeta = isSceneSource ? (selectedResource.metadata as VideoMetadata) : null;
-  const needsSourceLink = isSceneSource && !sceneMeta?.sourceVideoId;
+  const needsSourceLink = isSceneClip && !videoMeta?.sourceVideoId;
 
   // 检查视频是否有音频（用于显示保存音频按钮）
-  const videoMeta = isVideo && isVideoMetadata(selectedResource.metadata) ? selectedResource.metadata : null;
   const hasAudio = videoMeta?.hasAudio;
 
   return (
@@ -356,7 +354,7 @@ const PreviewPanel: React.FC = () => {
       <div className={styles.header}>
         <h3 className={styles.title}>预览</h3>
         <div className={styles.headerActions}>
-          {isSourceVideo && (
+          {canAnalyzeAndSplit && (
             <Space size={0}>
               {/* Analyze button */}
               <Tooltip title="分析视频场景">
@@ -450,9 +448,9 @@ const PreviewPanel: React.FC = () => {
               ref={videoPlayerRef}
               src={getLocalFileUrl(selectedResource.filePath, selectedResource.fileSize)}
               resource={selectedResource}
-              showSplitTimeline={isSourceVideo && hasSplitPoints}
+              showSplitTimeline={canAnalyzeAndSplit && hasSplitPoints}
               onEnded={handleVideoEnded}
-              autoPlay={shouldAutoPlay && CONTINUOUS_PLAY_TYPES.includes(selectedResource.type as typeof CONTINUOUS_PLAY_TYPES[number])}
+              autoPlay={shouldAutoPlay && isContinuousPlayType(selectedResource.type)}
             />
           </div>
         )}
@@ -472,7 +470,7 @@ const PreviewPanel: React.FC = () => {
       </div>
 
       {/* Analyze Video Dialog */}
-      {isSourceVideo && (
+      {canAnalyzeAndSplit && (
         <AnalyzeVideoDialog
           visible={analyzeDialogVisible}
           resource={selectedResource}
@@ -481,7 +479,7 @@ const PreviewPanel: React.FC = () => {
       )}
 
       {/* Split Video Dialog */}
-      {isSourceVideo && (
+      {canAnalyzeAndSplit && (
         <SplitVideoDialog
           visible={splitDialogVisible}
           resource={selectedResource}
@@ -490,7 +488,7 @@ const PreviewPanel: React.FC = () => {
       )}
 
       {/* Split Point Editor Dialog */}
-      {isSourceVideo && (
+      {canAnalyzeAndSplit && (
         <SplitPointEditorDialog
           visible={editorDialogVisible}
           src={getLocalFileUrl(selectedResource.filePath, selectedResource.fileSize)}

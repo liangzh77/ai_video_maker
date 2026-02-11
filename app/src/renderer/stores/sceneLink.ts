@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 
 /**
- * 分镜源视频和分镜新视频的关联关系 Store
+ * 资源关联关系 Store
  *
  * 关联逻辑：
- * - scene_source 和 scene_new 按索引一一对应
+ * - 两个不同 section 的资源按索引一一对应
  * - 点击批量关联按钮时，按当前排序顺序重新建立关联
  * - 拖动调整顺序时，关联关系保持不变（基于资源 ID）
  *
@@ -12,8 +12,6 @@ import { create } from 'zustand';
  * - 关联关系保存在 links.json 文件中
  * - 切换草稿时自动加载
  * - 修改关联时自动保存
- *
- * 注意：排序功能已迁移到文件名序号实现，不再使用 customOrder
  */
 
 // Links 文件结构（与后端保持一致）
@@ -37,8 +35,8 @@ interface SceneLinkState {
   // 批量关联：按索引顺序关联 scene_source 和 scene_new
   batchLink: (sourceIds: string[], newIds: string[]) => void;
 
-  // 获取关联的资源 ID
-  getLinkedId: (resourceId: string, resourceType: 'scene_source' | 'scene_new') => string | null;
+  // 获取关联的资源 ID（双向查找，不需要指定方向）
+  getLinkedId: (resourceId: string) => string | null;
 
   // 清除所有关联
   clearLinks: () => void;
@@ -87,14 +85,10 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     get().saveToStorage();
   },
 
-  getLinkedId: (resourceId: string, resourceType: 'scene_source' | 'scene_new') => {
+  getLinkedId: (resourceId: string) => {
     const { sourceToNewMap, newToSourceMap } = get();
-
-    if (resourceType === 'scene_source') {
-      return sourceToNewMap.get(resourceId) || null;
-    } else {
-      return newToSourceMap.get(resourceId) || null;
-    }
+    // 双向查找：先查正向映射，再查反向映射
+    return sourceToNewMap.get(resourceId) || newToSourceMap.get(resourceId) || null;
   },
 
   clearLinks: () => {

@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { Tooltip, App } from 'antd';
 import { PlayCircleOutlined, CloseOutlined, DeleteOutlined, VideoCameraOutlined } from '@ant-design/icons';
 import type { Resource, VideoMetadata } from '@shared/types';
+import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import MultiVideoPlayerDialog from './MultiVideoPlayerDialog';
 import styles from './MultiVideoDropZone.module.css';
@@ -57,8 +58,8 @@ const MultiVideoDropZone: React.FC = () => {
     if (!resourceId) return;
 
     // 只接受视频类型
-    const videoTypes = ['source_video', 'scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized'];
-    if (!videoTypes.includes(resourceType)) {
+    const desc = parseFolderName(resourceType);
+    if (!desc || desc.mediaType !== '视频') {
       message.warning('只能添加视频');
       return;
     }

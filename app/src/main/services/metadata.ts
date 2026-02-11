@@ -2,7 +2,8 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import type { ResourceType, ResourceMetadata, VideoMetadata, ImageMetadata, TextMetadata, PromptTag } from '@shared/types';
+import type { ResourceMetadata, VideoMetadata, ImageMetadata, TextMetadata, PromptTag } from '@shared/types';
+import { parseFolderName } from '@shared/section-utils';
 import { getFFmpegPath, getFFprobePath } from './python-bridge';
 import thumbnailCache from './thumbnailCache';
 
@@ -208,14 +209,18 @@ export function serializeTextContent(content: string, tag?: PromptTag): string {
  */
 export async function extractMetadata(
   filePath: string,
-  resourceType: ResourceType,
+  sectionId: string,
   draftPath?: string
 ): Promise<ResourceMetadata> {
   const mimeType = getMimeType(filePath);
   const generalType = getResourceTypeFromMime(mimeType);
 
+  // 判断是否为提示词 section
+  const sectionDescriptor = parseFolderName(sectionId);
+  const isTextSection = sectionDescriptor?.mediaType === '提示词';
+
   // 文本类型不缓存（内容需要实时读取）
-  if (generalType === 'text' || resourceType === 'prompt') {
+  if (generalType === 'text' || isTextSection) {
     return extractTextMetadata(filePath);
   }
 

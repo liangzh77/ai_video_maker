@@ -3,6 +3,7 @@ import { Modal, Progress, App, Empty, Select, Radio, Button, Input, Segmented, I
 import { CopyOutlined, CloseCircleOutlined, MinusOutlined, PlusOutlined } from '@ant-design/icons';
 import type { Resource, ImageResolution, TextMetadata } from '@shared/types';
 import { isTextMetadata } from '@shared/types';
+import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import styles from './GenerateImageDialog.module.css';
 
@@ -17,7 +18,7 @@ type GenerateMode = 'image' | 'text';
 async function runWithConcurrency<T>(
   tasks: (() => Promise<T>)[],
   concurrency: number,
-  onTaskComplete: (result: T, index: number) => void,
+  onTaskComplete: (result: T, index: number) => void | Promise<void>,
   onTaskError: (error: Error, index: number) => void,
   abortSignal?: { aborted: boolean },
 ): Promise<void> {
@@ -28,7 +29,7 @@ async function runWithConcurrency<T>(
     if (abortSignal?.aborted) return;
     try {
       const result = await tasks[index]();
-      onTaskComplete(result, index);
+      await onTaskComplete(result, index);
     } catch (err) {
       onTaskError(err instanceof Error ? err : new Error(String(err)), index);
     }
@@ -139,10 +140,11 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     });
   };
 
-  // Filter source character images and new character images
-  const sourceImages = resources.filter((r) => r.type === 'source_character');
-  const newImages = resources.filter((r) => r.type === 'new_character');
-  const allImages = [...sourceImages, ...newImages];
+  // Filter image resources by mediaType (all image sections)
+  const allImages = resources.filter((r) => {
+    const desc = parseFolderName(r.type);
+    return desc?.mediaType === '图片';
+  });
 
   // 多选图片的处理函数
   const toggleImageSelection = (imageId: string) => {
@@ -173,8 +175,10 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   }, [visible, message]);
 
   // Reset state when dialog opens
+  const prevVisibleRef = useRef(false);
   useEffect(() => {
-    if (visible) {
+    if (visible && !prevVisibleRef.current) {
+      // 对话框刚打开，重置所有状态
       setSelectedImageIds([]);
       setIsGenerating(false);
       setElapsedSeconds(0);
@@ -193,6 +197,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         setMode('image');
       }
     }
+    prevVisibleRef.current = visible;
   }, [visible, promptContent, promptResource]);
 
   // Timer for elapsed time during generation
@@ -233,6 +238,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     abortRef.current = { aborted: false };
 
     try {
+      let localCompleted = 0;
+      let localFailed = 0;
+
       const tasks = Array.from({ length: batchCount }, () => async () => {
         const result = await window.api.task.generateImageDirect({
           draftId: selectedDraftId,
@@ -250,6 +258,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         tasks,
         threadCount,
         (_result, _index) => {
+          localCompleted++;
           setCompletedCount((prev) => prev + 1);
           // debounce 刷新资源列表，避免并发完成时多次刷新竞争
           if (selectedDraftId) {
@@ -262,6 +271,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           }
         },
         (error, index) => {
+          localFailed++;
           setFailedCount((prev) => prev + 1);
           console.error(`Image task ${index} failed:`, error);
         },
@@ -280,6 +290,10 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setIsStopping(false);
       if (abortRef.current.aborted) {
         message.info('已停止生成');
+      } else if (localFailed > 0 && localCompleted === 0) {
+        message.error('图片生成失败');
+      } else if (localFailed > 0) {
+        message.warning(`图片生成部分完成（${localFailed} 个失败）`);
       } else {
         message.success('图片生成完成');
       }
@@ -316,6 +330,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     abortRef.current = { aborted: false };
 
     try {
+      let localCompleted = 0;
+      let localFailed = 0;
+
       const tasks = Array.from({ length: batchCount }, () => async () => {
         const result = await window.api.task.generateText({
           draftId: selectedDraftId,
@@ -331,22 +348,33 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         tasks,
         threadCount,
         async (text, _index) => {
+          localCompleted++;
           setCompletedCount((prev) => prev + 1);
           setTextResults((prev) => [...prev, text]);
-          // 创建新的提示词卡片
-          await addTextResource(selectedDraftId, 'prompt', text);
+          // 创建新的提示词卡片（在与源提示词同 section 下）
+          await addTextResource(selectedDraftId, promptResource.type, text);
         },
         (error, index) => {
+          localFailed++;
           setFailedCount((prev) => prev + 1);
           console.error(`Text task ${index} failed:`, error);
         },
         abortRef.current,
       );
 
+      // 全部完成后刷新资源列表
+      if (selectedDraftId) {
+        await loadResources(selectedDraftId);
+      }
+
       setIsGenerating(false);
       setIsStopping(false);
       if (abortRef.current.aborted) {
         message.info('已停止生成');
+      } else if (localFailed > 0 && localCompleted === 0) {
+        message.error('文本生成失败');
+      } else if (localFailed > 0) {
+        message.warning(`文本生成部分完成（${localFailed} 个失败）`);
       } else {
         message.success('文本生成完成');
       }
@@ -562,9 +590,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                     <div className={styles.imageName} title={img.fileName}>
                       {img.fileName}
                     </div>
-                    {/* 显示图片类型标签 */}
-                    <div className={`${styles.typeTag} ${img.type === 'source_character' ? styles.sourceTag : styles.newTag}`}>
-                      {img.type === 'source_character' ? '源' : '新'}
+                    {/* 显示图片所属分组标签 */}
+                    <div className={`${styles.typeTag} ${styles.newTag}`}>
+                      {parseFolderName(img.type)?.label || img.type}
                     </div>
                   </div>
                 ))}

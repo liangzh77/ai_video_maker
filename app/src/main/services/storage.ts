@@ -2,7 +2,8 @@ import { app } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import type { Draft, Resource, ResourceType, ProcessingTask, ResourceMetadata } from '@shared/types';
+import type { Draft, Resource, ResourceType, ProcessingTask, ResourceMetadata, SectionDescriptor, MediaType } from '@shared/types';
+import { parseFolderName, buildFolderName } from '@shared/section-utils';
 import { loadConfig, saveConfig } from './config';
 import { extractMetadata, getMimeType } from './metadata';
 import { clearIndexCache as clearThumbnailIndexCache } from './thumbnailCache';
@@ -173,112 +174,295 @@ function getFilesPath(draftId: string): string {
 // Resource File Naming Convention
 // ============================================
 
+// ============================================
+// Section 管理（动态卡片栏）
+// ============================================
+
 /**
- * 资源类型到文件夹/文件名的映射
- *
- * 规则：
- * - 源视频：文件名 "源视频.{ext}"
- * - 原角色图片：文件夹 "原角色图片/"
- * - 提示词：文件夹 "提示词/"
- * - 新角色图片：文件夹 "新角色图片/"
- * - 分镜源视频：文件夹 "分镜源视频/"
- * - 分镜新视频：文件夹 "分镜新视频/"
- * - 高清分镜新视频：文件夹 "高清分镜新视频/"
- * - 对口型新视频：文件夹 "对口型新视频/"
- * - 合成新视频：文件名 "合成新视频.{ext}"
+ * 扫描草稿的 files/ 目录，获取所有 section（文件夹名符合 {序号}_{媒体类型}_{名称}）
  */
-interface ResourcePathConfig {
-  isFolder: boolean;
-  name: string;
+export async function scanSections(draftId: string): Promise<SectionDescriptor[]> {
+  const filesDir = getFilesPath(draftId);
+
+  try {
+    await fs.access(filesDir);
+  } catch {
+    return [];
+  }
+
+  const entries = await fs.readdir(filesDir, { withFileTypes: true });
+  const sections: SectionDescriptor[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const descriptor = parseFolderName(entry.name);
+    if (descriptor) {
+      sections.push(descriptor);
+    }
+  }
+
+  // 按序号排序
+  sections.sort((a, b) => a.order - b.order);
+  return sections;
 }
 
-const RESOURCE_PATH_CONFIG: Record<ResourceType, ResourcePathConfig> = {
-  'source_video': { isFolder: false, name: '源视频' },
-  'source_character': { isFolder: true, name: '源角色图片' },
-  'prompt': { isFolder: true, name: '提示词' },
-  'new_character': { isFolder: true, name: '新角色图片' },
-  'scene_source': { isFolder: true, name: '分镜源视频' },
-  'scene_new': { isFolder: true, name: '分镜新视频' },
-  'scene_hd': { isFolder: true, name: '高清分镜新视频' },
-  'lipsync': { isFolder: true, name: '对口型新视频' },
-  'synthesized': { isFolder: true, name: '合成新视频' },
-};
+/**
+ * 创建新 section
+ * 自动分配序号 = 当前最大序号 + 1
+ */
+export async function createSection(draftId: string, mediaType: MediaType, label: string): Promise<SectionDescriptor> {
+  const filesDir = getFilesPath(draftId);
+  const existing = await scanSections(draftId);
+
+  const maxOrder = existing.length > 0 ? Math.max(...existing.map(s => s.order)) : 0;
+  const newOrder = maxOrder + 1;
+  const folderName = buildFolderName(newOrder, mediaType, label);
+
+  await fs.mkdir(path.join(filesDir, folderName), { recursive: true });
+
+  return {
+    id: folderName,
+    order: newOrder,
+    mediaType,
+    label,
+  };
+}
+
+/**
+ * 按 label 和 mediaType 查找已有 section，找不到则自动创建
+ * 用于任务处理时的 fallback（无 targetSectionId 时）
+ */
+export async function findOrCreateSection(draftId: string, mediaType: MediaType, label: string): Promise<SectionDescriptor> {
+  const existing = await scanSections(draftId);
+  // 按 label 和 mediaType 匹配
+  const found = existing.find(s => s.label === label && s.mediaType === mediaType);
+  if (found) return found;
+  // 未找到，创建新 section
+  return createSection(draftId, mediaType, label);
+}
+
+/**
+ * 删除 section（删除文件夹及其所有内容）
+ */
+export async function deleteSection(draftId: string, sectionId: string): Promise<void> {
+  const filesDir = getFilesPath(draftId);
+  const folderPath = path.join(filesDir, sectionId);
+  await fs.rm(folderPath, { recursive: true, force: true });
+}
+
+/**
+ * 重命名 section（文件夹跟着改名）
+ */
+export async function renameSection(draftId: string, sectionId: string, newLabel: string): Promise<SectionDescriptor> {
+  const filesDir = getFilesPath(draftId);
+  const descriptor = parseFolderName(sectionId);
+  if (!descriptor) {
+    throw new Error(`Invalid section id: ${sectionId}`);
+  }
+
+  const newFolderName = buildFolderName(descriptor.order, descriptor.mediaType, newLabel);
+  if (newFolderName === sectionId) {
+    return { ...descriptor, label: newLabel };
+  }
+
+  const oldPath = path.join(filesDir, sectionId);
+  const newPath = path.join(filesDir, newFolderName);
+  await fs.rename(oldPath, newPath);
+
+  // 更新关联.json 中的资源路径引用
+  await updateLinksOnSectionRename(draftId, sectionId, newFolderName);
+
+  return {
+    id: newFolderName,
+    order: descriptor.order,
+    mediaType: descriptor.mediaType,
+    label: newLabel,
+  };
+}
+
+/**
+ * 重排序 sections（两步重命名法避免冲突）
+ * @param orderedIds 按新顺序排列的 section ID 数组
+ */
+export async function reorderSections(draftId: string, orderedIds: string[]): Promise<SectionDescriptor[]> {
+  const filesDir = getFilesPath(draftId);
+
+  // 第一步：所有文件夹重命名为临时名
+  const tempMappings: Array<{ oldId: string; tempName: string; descriptor: SectionDescriptor }> = [];
+
+  for (const sectionId of orderedIds) {
+    const descriptor = parseFolderName(sectionId);
+    if (!descriptor) continue;
+
+    const tempName = `_temp_reorder_${descriptor.order}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const oldPath = path.join(filesDir, sectionId);
+    const tempPath = path.join(filesDir, tempName);
+
+    try {
+      await fs.rename(oldPath, tempPath);
+      tempMappings.push({ oldId: sectionId, tempName, descriptor });
+    } catch (err) {
+      // 回滚已重命名的
+      for (const item of tempMappings) {
+        try {
+          await fs.rename(
+            path.join(filesDir, item.tempName),
+            path.join(filesDir, item.oldId)
+          );
+        } catch {}
+      }
+      throw err;
+    }
+  }
+
+  // 第二步：按新顺序重命名为最终名
+  const newSections: SectionDescriptor[] = [];
+  const oldToNewMap = new Map<string, string>();
+
+  for (let i = 0; i < tempMappings.length; i++) {
+    const { oldId, tempName, descriptor } = tempMappings[i];
+    const newOrder = i + 1;
+    const newFolderName = buildFolderName(newOrder, descriptor.mediaType, descriptor.label);
+
+    const tempPath = path.join(filesDir, tempName);
+    const newPath = path.join(filesDir, newFolderName);
+    await fs.rename(tempPath, newPath);
+
+    oldToNewMap.set(oldId, newFolderName);
+    newSections.push({
+      id: newFolderName,
+      order: newOrder,
+      mediaType: descriptor.mediaType,
+      label: descriptor.label,
+    });
+  }
+
+  // 更新关联.json 中的路径引用
+  await updateLinksOnSectionsReorder(draftId, oldToNewMap);
+
+  return newSections;
+}
+
+/**
+ * section 重命名后更新关联.json 中的资源路径
+ */
+async function updateLinksOnSectionRename(
+  draftId: string,
+  oldSectionId: string,
+  newSectionId: string
+): Promise<void> {
+  try {
+    const links = await loadLinks(draftId);
+    let updated = false;
+    const newSourceToNew: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(links.sourceToNew)) {
+      let newKey = key;
+      let newValue = value;
+
+      if (key.startsWith(oldSectionId + '/')) {
+        newKey = newSectionId + '/' + key.substring(oldSectionId.length + 1);
+        updated = true;
+      }
+      if (value.startsWith(oldSectionId + '/')) {
+        newValue = newSectionId + '/' + value.substring(oldSectionId.length + 1);
+        updated = true;
+      }
+
+      newSourceToNew[newKey] = newValue;
+    }
+
+    if (updated) {
+      links.sourceToNew = newSourceToNew;
+      await saveLinks(draftId, links);
+    }
+  } catch {}
+}
+
+/**
+ * sections 重排序后批量更新关联.json 中的路径
+ */
+async function updateLinksOnSectionsReorder(
+  draftId: string,
+  oldToNewMap: Map<string, string>
+): Promise<void> {
+  if (oldToNewMap.size === 0) return;
+
+  try {
+    const links = await loadLinks(draftId);
+    let updated = false;
+    const newSourceToNew: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(links.sourceToNew)) {
+      let newKey = key;
+      let newValue = value;
+
+      for (const [oldId, newId] of oldToNewMap) {
+        if (key.startsWith(oldId + '/')) {
+          newKey = newId + '/' + key.substring(oldId.length + 1);
+          updated = true;
+        }
+        if (value.startsWith(oldId + '/')) {
+          newValue = newId + '/' + value.substring(oldId.length + 1);
+          updated = true;
+        }
+      }
+
+      newSourceToNew[newKey] = newValue;
+    }
+
+    if (updated) {
+      links.sourceToNew = newSourceToNew;
+      await saveLinks(draftId, links);
+    }
+  } catch {}
+}
 
 /**
  * 获取资源文件的目标路径
  * @param draftId 草稿ID
- * @param resourceType 资源类型
+ * @param sectionId section 文件夹名（如 "1_视频_源视频"）
  * @param ext 文件扩展名（包含点号，如 ".mp4"）
  * @param sequenceNumber 序号（用于文件夹内多个文件的情况）
  */
 export function getResourceFilePath(
   draftId: string,
-  resourceType: ResourceType,
+  sectionId: string,
   ext: string,
   sequenceNumber?: number
 ): string {
   const filesDir = getFilesPath(draftId);
-  const config = RESOURCE_PATH_CONFIG[resourceType];
-
-  if (config.isFolder) {
-    // 放在子文件夹中，使用序号命名
-    const folderPath = path.join(filesDir, config.name);
-    const fileName = sequenceNumber !== undefined
-      ? `${sequenceNumber.toString().padStart(3, '0')}${ext}`
-      : `001${ext}`;
-    return path.join(folderPath, fileName);
-  } else {
-    // 直接在 files 文件夹中，使用固定名称
-    return path.join(filesDir, `${config.name}${ext}`);
-  }
+  const folderPath = path.join(filesDir, sectionId);
+  const fileName = sequenceNumber !== undefined
+    ? `${sequenceNumber.toString().padStart(3, '0')}${ext}`
+    : `001${ext}`;
+  return path.join(folderPath, fileName);
 }
 
 /**
- * 获取资源文件夹路径（仅对 isFolder=true 的资源类型有效）
+ * 获取资源文件夹路径
+ * @param sectionId section 文件夹名
  */
-export function getResourceFolderPath(draftId: string, resourceType: ResourceType): string | null {
-  const config = RESOURCE_PATH_CONFIG[resourceType];
-  if (!config.isFolder) {
-    return null;
-  }
-  return path.join(getFilesPath(draftId), config.name);
-}
-
-// ============================================
-// 文件夹名 -> 资源类型 反向映射
-// ============================================
-
-const FOLDER_NAME_TO_TYPE: Record<string, ResourceType> = {};
-for (const [type, config] of Object.entries(RESOURCE_PATH_CONFIG)) {
-  FOLDER_NAME_TO_TYPE[config.name] = type as ResourceType;
+export function getResourceFolderPath(draftId: string, sectionId: string): string {
+  return path.join(getFilesPath(draftId), sectionId);
 }
 
 /**
- * 从相对路径获取资源类型
- * 例如：'分镜源视频/001.mp4' -> 'scene_source'
- *       '源视频.mp4' -> 'source_video'
+ * 从相对路径获取资源类型（即 section ID = 文件夹名）
+ * 例如：'1_视频_源视频/001.mp4' -> '1_视频_源视频'
  */
 export function getResourceTypeFromPath(relativePath: string): ResourceType | null {
   const parts = relativePath.split(/[/\\]/);
 
-  if (parts.length === 1) {
-    // 顶层文件，检查是否是源视频或合成新视频
-    const fileName = parts[0];
-    for (const [type, config] of Object.entries(RESOURCE_PATH_CONFIG)) {
-      if (!config.isFolder) {
-        // 文件名以配置名开头（如 "源视频.mp4"）
-        const baseName = path.parse(fileName).name;
-        if (baseName === config.name) {
-          return type as ResourceType;
-        }
-      }
-    }
+  if (parts.length < 2) {
+    // 顶层文件不属于任何 section
     return null;
   }
 
-  // 在子文件夹中
+  // 第一个目录名就是 section ID（如果符合命名规范）
   const folderName = parts[0];
-  return FOLDER_NAME_TO_TYPE[folderName] || null;
+  const descriptor = parseFolderName(folderName);
+  return descriptor ? folderName : null;
 }
 
 // ============================================
@@ -287,7 +471,7 @@ export function getResourceTypeFromPath(relativePath: string): ResourceType | nu
 
 /**
  * 扫描草稿的 files 目录获取所有资源
- * 资源 ID 为相对路径（如 '分镜源视频/001.mp4'）
+ * 资源 ID 为相对路径（如 '1_视频_源视频/001.mp4'）
  * 元数据使用持久化缓存（thumbnails 文件夹）
  */
 export async function scanResources(draftId: string, type?: ResourceType): Promise<Resource[]> {
@@ -297,87 +481,53 @@ export async function scanResources(draftId: string, type?: ResourceType): Promi
   try {
     await fs.access(filesDir);
   } catch {
-    // files 目录不存在
     return resources;
   }
 
-  // 遍历每种资源类型
-  for (const [resourceType, config] of Object.entries(RESOURCE_PATH_CONFIG)) {
-    // 如果指定了类型筛选，跳过不匹配的类型
-    if (type && resourceType !== type) {
+  // 获取所有 section
+  const sections = await scanSections(draftId);
+
+  for (const section of sections) {
+    // 如果指定了类型筛选，跳过不匹配的
+    if (type && section.id !== type) {
       continue;
     }
 
-    if (config.isFolder) {
-      // 文件夹型资源
-      const folderPath = path.join(filesDir, config.name);
-      try {
-        const entries = await fs.readdir(folderPath, { withFileTypes: true });
+    const folderPath = path.join(filesDir, section.id);
+    try {
+      const entries = await fs.readdir(folderPath, { withFileTypes: true });
 
-        for (const entry of entries) {
-          if (!entry.isFile()) continue;
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        if (entry.name.startsWith('.') || entry.name.startsWith('_temp_')) continue;
 
-          // 忽略隐藏文件和临时文件
-          if (entry.name.startsWith('.') || entry.name.startsWith('_temp_')) continue;
+        const filePath = path.join(folderPath, entry.name);
+        const relativePath = `${section.id}/${entry.name}`;
 
-          const filePath = path.join(folderPath, entry.name);
-          const relativePath = `${config.name}/${entry.name}`;
+        const resource = await buildResource(
+          draftId,
+          relativePath,
+          filePath,
+          section.id,
+          entry.name
+        );
 
-          const resource = await buildResource(
-            draftId,
-            relativePath,
-            filePath,
-            resourceType as ResourceType,
-            entry.name
-          );
-
-          if (resource) {
-            resources.push(resource);
-          }
+        if (resource) {
+          resources.push(resource);
         }
-      } catch {
-        // 文件夹不存在，跳过
       }
-    } else {
-      // 单文件型资源（源视频、合成新视频）
-      // 查找匹配的文件（扩展名可能不同）
-      try {
-        const entries = await fs.readdir(filesDir, { withFileTypes: true });
-
-        for (const entry of entries) {
-          if (!entry.isFile()) continue;
-
-          const baseName = path.parse(entry.name).name;
-          if (baseName === config.name) {
-            const filePath = path.join(filesDir, entry.name);
-            const relativePath = entry.name;
-
-            const resource = await buildResource(
-              draftId,
-              relativePath,
-              filePath,
-              resourceType as ResourceType,
-              entry.name
-            );
-
-            if (resource) {
-              resources.push(resource);
-            }
-          }
-        }
-      } catch {
-        // 读取失败，跳过
-      }
+    } catch {
+      // 文件夹不存在或读取失败，跳过
     }
   }
 
-  // 按文件名排序（对于同类型资源）
+  // 按 section 顺序排序，同 section 内按文件名数字排序
   resources.sort((a, b) => {
     if (a.type !== b.type) {
-      // 不同类型，按类型排序
-      return a.type.localeCompare(b.type);
+      const orderA = parseFolderName(a.type)?.order ?? 999;
+      const orderB = parseFolderName(b.type)?.order ?? 999;
+      return orderA - orderB;
     }
-    // 同类型，按文件名数字排序
     return a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true });
   });
 
@@ -392,7 +542,7 @@ async function buildResource(
   draftId: string,
   relativePath: string,
   filePath: string,
-  resourceType: ResourceType,
+  sectionId: string,
   fileName: string
 ): Promise<Resource | null> {
   try {
@@ -400,12 +550,12 @@ async function buildResource(
     const draftPath = getDraftPath(draftId);
 
     // 提取元数据（会自动使用持久化缓存）
-    const metadata = await extractMetadata(filePath, resourceType, draftPath);
+    const metadata = await extractMetadata(filePath, sectionId, draftPath);
 
     const resource: Resource = {
       id: relativePath, // 使用相对路径作为 ID
       draftId,
-      type: resourceType,
+      type: sectionId,  // section ID 就是资源类型
       fileName,
       filePath,
       fileSize: stat.size,
@@ -424,11 +574,8 @@ async function buildResource(
 /**
  * 获取文件夹中下一个可用的序号
  */
-export async function getNextSequenceNumber(draftId: string, resourceType: ResourceType): Promise<number> {
-  const folderPath = getResourceFolderPath(draftId, resourceType);
-  if (!folderPath) {
-    return 1;
-  }
+export async function getNextSequenceNumber(draftId: string, sectionId: string): Promise<number> {
+  const folderPath = getResourceFolderPath(draftId, sectionId);
 
   try {
     await fs.mkdir(folderPath, { recursive: true });
@@ -502,26 +649,21 @@ export function makeSequencedFileName(sequence: number, originalName: string, ex
  */
 export async function reorderResourceFiles(
   draftId: string,
-  resourceType: ResourceType,
+  sectionId: string,
   orderedResourceIds: string[]
 ): Promise<string[]> {
-  console.log('[Storage] reorderResourceFiles START:', { draftId, resourceType, orderedResourceIds });
+  console.log('[Storage] reorderResourceFiles START:', { draftId, sectionId, orderedResourceIds });
 
   if (orderedResourceIds.length === 0) {
     console.log('[Storage] reorderResourceFiles: Empty list, returning');
     return [];
   }
 
-  const folderPath = getResourceFolderPath(draftId, resourceType);
+  const folderPath = getResourceFolderPath(draftId, sectionId);
   console.log('[Storage] reorderResourceFiles: folderPath =', folderPath);
-  if (!folderPath) {
-    console.log('[Storage] reorderResourceFiles: No folder path, returning original IDs');
-    return orderedResourceIds;
-  }
 
   const filesDir = getFilesPath(draftId);
-  const config = RESOURCE_PATH_CONFIG[resourceType];
-  console.log('[Storage] reorderResourceFiles: filesDir =', filesDir, 'config.name =', config.name);
+  console.log('[Storage] reorderResourceFiles: filesDir =', filesDir, 'sectionId =', sectionId);
 
   // 第一步：将所有文件重命名为临时名称，避免冲突
   // 直接从资源 ID（相对路径）构建文件路径，不需要扫描
@@ -568,7 +710,7 @@ export async function reorderResourceFiles(
     const newSequence = i + 1;
     const newFileName = makeSequencedFileName(newSequence, originalName, ext);
     const newPath = path.join(folderPath, newFileName);
-    const newRelativePath = `${config.name}/${newFileName}`;
+    const newRelativePath = `${sectionId}/${newFileName}`;
 
     console.log('[Storage] Step 2:', { i, tempPath, newPath, newRelativePath });
 
@@ -584,14 +726,13 @@ export async function reorderResourceFiles(
   }
 
   // 第三步：如果是 scene_source 或 scene_new，更新 links.json 中的引用
-  if (resourceType === 'scene_source' || resourceType === 'scene_new') {
-    console.log('[Storage] reorderResourceFiles: Step 3 - Updating links');
-    await updateLinksOnReorder(draftId, resourceType, oldToNewIdMap);
-  }
+  // 更新 links.json 中可能引用了这些资源的条目
+  console.log('[Storage] reorderResourceFiles: Step 3 - Updating links');
+  await updateLinksOnReorder(draftId, sectionId, oldToNewIdMap);
 
   // 注意：持久化缓存基于文件指纹（内容哈希），文件重命名不影响缓存
 
-  console.log('[Storage] reorderResourceFiles DONE:', newResourceIds.length, 'resources of type', resourceType);
+  console.log('[Storage] reorderResourceFiles DONE:', newResourceIds.length, 'resources of sectionId', sectionId);
   return newResourceIds;
 }
 
@@ -602,15 +743,11 @@ export async function reorderResourceFiles(
  */
 export async function renumberResourceFiles(
   draftId: string,
-  resourceType: ResourceType
+  sectionId: string
 ): Promise<void> {
-  const folderPath = getResourceFolderPath(draftId, resourceType);
-  if (!folderPath) return;
-
-  const config = RESOURCE_PATH_CONFIG[resourceType];
+  const folderPath = getResourceFolderPath(draftId, sectionId);
 
   try {
-    // 直接读取文件夹，获取文件名列表
     const entries = await fs.readdir(folderPath, { withFileTypes: true });
     const fileNames = entries
       .filter(e => e.isFile() && !e.name.startsWith('.') && !e.name.startsWith('_temp_'))
@@ -619,11 +756,8 @@ export async function renumberResourceFiles(
 
     if (fileNames.length === 0) return;
 
-    // 构建资源 ID 列表
-    const resourceIds = fileNames.map(name => `${config.name}/${name}`);
-
-    // 重新排序
-    await reorderResourceFiles(draftId, resourceType, resourceIds);
+    const resourceIds = fileNames.map(name => `${sectionId}/${name}`);
+    await reorderResourceFiles(draftId, sectionId, resourceIds);
   } catch {
     // 文件夹可能不存在
   }
@@ -631,13 +765,11 @@ export async function renumberResourceFiles(
 
 /**
  * 重排序后更新 links.json 中的资源引用
- * @param draftId 草稿ID
- * @param resourceType 资源类型（scene_source 或 scene_new）
- * @param oldToNewIdMap 旧 ID -> 新 ID 的映射
+ * 通用处理：检查 keys 和 values 中是否有匹配的旧 ID，统一替换
  */
 async function updateLinksOnReorder(
   draftId: string,
-  resourceType: ResourceType,
+  _sectionId: string,
   oldToNewIdMap: Map<string, string>
 ): Promise<void> {
   if (oldToNewIdMap.size === 0) return;
@@ -645,32 +777,21 @@ async function updateLinksOnReorder(
   try {
     const links = await loadLinks(draftId);
     let updated = false;
+    const newSourceToNew: Record<string, string> = {};
 
-    if (resourceType === 'scene_source') {
-      // 更新 sourceToNew 的键（source ID）
-      const newSourceToNew: Record<string, string> = {};
-      for (const [oldSourceId, newId] of Object.entries(links.sourceToNew)) {
-        const newSourceId = oldToNewIdMap.get(oldSourceId) || oldSourceId;
-        newSourceToNew[newSourceId] = newId;
-        if (newSourceId !== oldSourceId) {
-          updated = true;
-        }
+    for (const [key, value] of Object.entries(links.sourceToNew)) {
+      const newKey = oldToNewIdMap.get(key) || key;
+      const newValue = oldToNewIdMap.get(value) || value;
+      if (newKey !== key || newValue !== value) {
+        updated = true;
       }
-      links.sourceToNew = newSourceToNew;
-    } else if (resourceType === 'scene_new') {
-      // 更新 sourceToNew 的值（new ID）
-      for (const [sourceId, oldNewId] of Object.entries(links.sourceToNew)) {
-        const newNewId = oldToNewIdMap.get(oldNewId);
-        if (newNewId) {
-          links.sourceToNew[sourceId] = newNewId;
-          updated = true;
-        }
-      }
+      newSourceToNew[newKey] = newValue;
     }
 
     if (updated) {
+      links.sourceToNew = newSourceToNew;
       await saveLinks(draftId, links);
-      console.log('[Storage] Updated links.json after reorder:', resourceType);
+      console.log('[Storage] Updated links.json after reorder');
     }
   } catch (err) {
     console.error('[Storage] Failed to update links on reorder:', err);
@@ -1192,114 +1313,6 @@ export async function saveLinks(draftId: string, links: LinksFile): Promise<void
 }
 
 // ============================================
-// File Cleanup
-// ============================================
-
-/**
- * 递归获取目录下所有文件路径
- */
-async function getAllFilesRecursive(dirPath: string): Promise<string[]> {
-  const files: string[] = [];
-
-  try {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        const subFiles = await getAllFilesRecursive(fullPath);
-        files.push(...subFiles);
-      } else if (entry.isFile()) {
-        files.push(fullPath);
-      }
-    }
-  } catch {
-    // 目录不存在或无法读取
-  }
-
-  return files;
-}
-
-// 不应被清理的特殊文件名（如分割点文件、关联文件）
-const PROTECTED_FILES = ['分割点.txt', '关联.json'];
-
-/**
- * 清理草稿中的临时文件和空文件夹
- * 注意：现在资源列表通过扫描获取，这个函数主要用于清理临时文件
- * @returns 删除的文件数量
- */
-export async function cleanupOrphanedFiles(draftId: string): Promise<number> {
-  const filesDir = getFilesPath(draftId);
-  const resources = await listResources(draftId);
-
-  // 获取所有被引用的文件路径（规范化为绝对路径）
-  const referencedPaths = new Set(
-    resources.map(r => path.normalize(r.filePath))
-  );
-
-  // 获取 files 目录下的所有文件
-  const allFiles = await getAllFilesRecursive(filesDir);
-
-  let deletedCount = 0;
-
-  for (const filePath of allFiles) {
-    const normalizedPath = path.normalize(filePath);
-    const fileName = path.basename(filePath);
-
-    // 跳过受保护的文件（如分割点文件）
-    if (PROTECTED_FILES.includes(fileName)) {
-      continue;
-    }
-
-    // 如果文件不在引用列表中，删除它
-    if (!referencedPaths.has(normalizedPath)) {
-      try {
-        await fs.unlink(filePath);
-        deletedCount++;
-        console.log('[Storage] Deleted orphaned file:', filePath);
-      } catch (err) {
-        console.error('[Storage] Failed to delete orphaned file:', filePath, err);
-      }
-    }
-  }
-
-  // 清理空文件夹
-  await cleanupEmptyFolders(filesDir);
-
-  return deletedCount;
-}
-
-/**
- * 递归清理空文件夹
- */
-async function cleanupEmptyFolders(dirPath: string): Promise<void> {
-  try {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const subDirPath = path.join(dirPath, entry.name);
-        // 先递归清理子目录
-        await cleanupEmptyFolders(subDirPath);
-
-        // 检查子目录是否为空
-        try {
-          const subEntries = await fs.readdir(subDirPath);
-          if (subEntries.length === 0) {
-            await fs.rmdir(subDirPath);
-            console.log('[Storage] Deleted empty folder:', subDirPath);
-          }
-        } catch {
-          // 目录可能已被删除
-        }
-      }
-    }
-  } catch {
-    // 目录不存在或无法读取
-  }
-}
-
-// ============================================
 // Exports
 // ============================================
 
@@ -1316,8 +1329,13 @@ export const storage = {
   getResourceFolderPath,
   getResourceTypeFromPath,
   getNextSequenceNumber,
-  cleanupOrphanedFiles,
   scanResources,
+  // Section 管理
+  scanSections,
+  createSection,
+  deleteSection,
+  renameSection,
+  reorderSections,
   // 文件序号命名相关
   getSequenceFromFileName,
   getOriginalNameFromFileName,

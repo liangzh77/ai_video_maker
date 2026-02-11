@@ -34,16 +34,26 @@ export interface Draft {
 // Resource Entity
 // ============================================
 
-export type ResourceType =
-  | 'source_video'        // 源视频
-  | 'source_character'    // 源角色图片
-  | 'prompt'              // 提示词
-  | 'new_character'       // 新角色图片 (AI 生成)
-  | 'scene_source'        // 分镜源视频
-  | 'scene_new'           // 分镜新视频
-  | 'scene_hd'            // 高清分镜新视频
-  | 'lipsync'             // 对口型新视频
-  | 'synthesized';        // 合成新视频
+/**
+ * 资源类型 = section 文件夹名（如 "1_视频_源视频"）
+ * 不再是固定联合类型，而是动态字符串
+ */
+export type ResourceType = string;
+
+/**
+ * 媒体类型：决定卡片栏的行为（接受什么文件、显示什么按钮等）
+ */
+export type MediaType = '视频' | '图片' | '提示词';
+
+/**
+ * Section 描述符：从文件夹名解析得出
+ */
+export interface SectionDescriptor {
+  id: string;           // 文件夹名，如 "1_视频_源视频"
+  order: number;        // 序号（1-99）
+  mediaType: MediaType; // 媒体类型
+  label: string;        // 显示名称
+}
 
 export interface Resource {
   id: UUID;
@@ -120,6 +130,7 @@ export interface ProcessingTask {
   error?: string;
   inputResourceIds: UUID[];
   outputResourceIds: UUID[];
+  targetSectionId?: string;  // 输出目标 section
   config: TaskConfig;
 }
 

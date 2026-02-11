@@ -224,8 +224,7 @@ export function registerDraftHandlers(): void {
     }
   );
 
-  // Cleanup orphaned files in draft
-  // 注意：此 handler 在选择草稿时首先调用，同时处理数据迁移
+  // 选择草稿时执行数据迁移（如果需要）
   ipcMain.handle(
     DRAFT_CHANNELS.CLEANUP_FILES,
     async (_, request: { draftId: string }): Promise<OperationResult<number>> => {
@@ -239,14 +238,11 @@ export function registerDraftHandlers(): void {
         const draftPath = storage.getDraftPath(request.draftId);
         await checkAndMigrate(draftPath);
 
-        const deletedCount = await storage.cleanupOrphanedFiles(request.draftId);
-        console.log(`[Draft] Cleaned up ${deletedCount} orphaned files for draft:`, request.draftId);
-
-        return { success: true, data: deletedCount };
+        return { success: true, data: 0 };
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to cleanup files',
+          error: error instanceof Error ? error.message : 'Failed to migrate draft',
         };
       }
     }

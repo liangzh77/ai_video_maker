@@ -14,7 +14,7 @@ import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import imageApi from '../services/image-api';
 import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, getFFmpegPath } from '../services/python-bridge';
-import storage from '../services/storage';
+import storage, { findOrCreateSection } from '../services/storage';
 import appConfigService from '../services/config';
 import type {
   ProcessingTask,
@@ -63,6 +63,7 @@ interface TaskGenerateImageRequest {
   prompt?: string;
   modelEndpoint?: string;
   resolution?: '4K' | '2K';
+  targetSectionId?: string;
 }
 
 interface TaskCancelRequest {
@@ -73,6 +74,7 @@ interface TaskSplitVideoRequest {
   draftId: string;
   sourceVideoId: string;
   config?: Partial<SplitConfig>;
+  targetSectionId?: string;
 }
 
 interface TaskAnalyzeVideoRequest {
@@ -85,18 +87,21 @@ interface TaskSplitVideoWithPointsRequest {
   draftId: string;
   sourceVideoId: string;
   splitPoints: SplitPoint[];
+  targetSectionId?: string;
 }
 
 interface TaskUpscaleVideosRequest {
   draftId: string;
   sourceVideoIds: string[];
   config: UpscaleConfig;
+  targetSectionId?: string;
 }
 
 interface TaskSynthesizeVideoRequest {
   draftId: string;
   videoResourceIds: string[];
   config: SynthesizeConfig;
+  targetSectionId?: string;
 }
 
 interface TaskResplitSceneRequest {
@@ -181,9 +186,13 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
   const resolution = generateConfig.resolution || '2K';
   console.log('[TaskHandler] Resolution:', resolution);
 
-  // 准备输出路径
-  const sequenceNumber = await storage.getNextSequenceNumber(draftId, 'new_character');
-  const filePath = storage.getResourceFilePath(draftId, 'new_character', '.png', sequenceNumber);
+  // 准备输出路径（使用 targetSectionId，无则自动查找/创建）
+  const targetSectionDesc = task.targetSectionId
+    ? { id: task.targetSectionId }
+    : await findOrCreateSection(draftId, '图片', '新角色图片');
+  const targetSection = targetSectionDesc.id;
+  const sequenceNumber = await storage.getNextSequenceNumber(draftId, targetSection);
+  const filePath = storage.getResourceFilePath(draftId, targetSection, '.png', sequenceNumber);
 
   // 确保目录存在
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -227,14 +236,15 @@ const upscaleVideoHandler: TaskHandler = async (task, onProgress) => {
   const outputResourceIds: string[] = [];
   const totalVideos = inputResourceIds.length;
 
-  // 获取输出目录
-  const outputDir = storage.getResourceFolderPath(draftId, 'scene_hd');
-  if (!outputDir) {
-    throw new Error('Failed to get output directory for scene_hd');
-  }
+  // 获取输出目录（使用 targetSectionId，无则自动查找/创建）
+  const upscaleTargetDesc = task.targetSectionId
+    ? { id: task.targetSectionId }
+    : await findOrCreateSection(draftId, '视频', '高清分镜新视频');
+  const upscaleTargetSection = upscaleTargetDesc.id;
+  const outputDir = storage.getResourceFolderPath(draftId, upscaleTargetSection);
 
-  // 清空现有的高清分镜视频：先删除数据库记录，再删除文件
-  const existingHdResources = await storage.resource.list(draftId, 'scene_hd');
+  // 清空现有资源
+  const existingHdResources = await storage.resource.list(draftId, upscaleTargetSection);
   for (const resource of existingHdResources) {
     await storage.resource.delete(draftId, resource.id);
   }
@@ -337,11 +347,12 @@ const synthesizeVideoHandler: TaskHandler = async (task, onProgress) => {
     throw new Error('No valid input videos');
   }
 
-  // 获取输出目录
-  const outputDir = storage.getResourceFolderPath(draftId, 'synthesized');
-  if (!outputDir) {
-    throw new Error('Failed to get output directory for synthesized');
-  }
+  // 获取输出目录（使用 targetSectionId，无则自动查找/创建）
+  const synthTargetDesc = task.targetSectionId
+    ? { id: task.targetSectionId }
+    : await findOrCreateSection(draftId, '视频', '合成新视频');
+  const synthTargetSection = synthTargetDesc.id;
+  const outputDir = storage.getResourceFolderPath(draftId, synthTargetSection);
   await fs.mkdir(outputDir, { recursive: true });
 
   // 生成输出文件名（使用时间戳）
@@ -399,14 +410,15 @@ const splitVideoHandler: TaskHandler = async (task, onProgress) => {
 
   onProgress(5);
 
-  // 使用新的命名规范获取输出目录（分镜源视频文件夹）
-  const outputDir = storage.getResourceFolderPath(draftId, 'scene_source');
-  if (!outputDir) {
-    throw new Error('Failed to get output directory for scene_source');
-  }
+  // 使用 targetSectionId 获取输出目录（无则自动查找/创建）
+  const splitTargetDesc = task.targetSectionId
+    ? { id: task.targetSectionId }
+    : await findOrCreateSection(draftId, '视频', '分镜源视频');
+  const splitTargetSection = splitTargetDesc.id;
+  const outputDir = storage.getResourceFolderPath(draftId, splitTargetSection);
 
-  // 清空现有的分镜源视频：先删除数据库记录，再删除文件
-  const existingSceneResources = await storage.resource.list(draftId, 'scene_source');
+  // 清空现有资源
+  const existingSceneResources = await storage.resource.list(draftId, splitTargetSection);
   for (const resource of existingSceneResources) {
     await storage.resource.delete(draftId, resource.id);
   }
@@ -624,7 +636,8 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           request.draftId,
           'generate',
           [...request.sourceImageIds, request.promptResourceId],
-          config
+          config,
+          request.targetSectionId
         );
 
         console.log('[TaskIPC] Task created:', task.id);
@@ -636,6 +649,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           progress: task.progress,
           inputResourceIds: task.inputResourceIds,
           outputResourceIds: task.outputResourceIds,
+          targetSectionId: task.targetSectionId,
           config: task.config,
         });
 
@@ -680,7 +694,8 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           request.draftId,
           'split',
           [request.sourceVideoId],
-          splitConfig
+          splitConfig,
+          request.targetSectionId
         );
 
         console.log('[TaskIPC] Split task created:', task.id);
@@ -692,6 +707,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           progress: task.progress,
           inputResourceIds: task.inputResourceIds,
           outputResourceIds: task.outputResourceIds,
+          targetSectionId: task.targetSectionId,
           config: task.config,
         });
 
@@ -815,7 +831,8 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           request.draftId,
           'split',
           [request.sourceVideoId],
-          splitConfig
+          splitConfig,
+          request.targetSectionId
         );
 
         console.log('[TaskIPC] Split with points task created:', task.id);
@@ -827,6 +844,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           progress: task.progress,
           inputResourceIds: task.inputResourceIds,
           outputResourceIds: task.outputResourceIds,
+          targetSectionId: task.targetSectionId,
           config: task.config,
         });
 
@@ -870,7 +888,8 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           request.draftId,
           'upscale',
           request.sourceVideoIds,
-          request.config
+          request.config,
+          request.targetSectionId
         );
 
         console.log('[TaskIPC] Upscale task created:', task.id);
@@ -882,6 +901,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           progress: task.progress,
           inputResourceIds: task.inputResourceIds,
           outputResourceIds: task.outputResourceIds,
+          targetSectionId: task.targetSectionId,
           config: task.config,
         });
 
@@ -925,7 +945,8 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           request.draftId,
           'synthesize',
           request.videoResourceIds,
-          request.config
+          request.config,
+          request.targetSectionId
         );
 
         console.log('[TaskIPC] Synthesize task created:', task.id);
@@ -937,6 +958,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           progress: task.progress,
           inputResourceIds: task.inputResourceIds,
           outputResourceIds: task.outputResourceIds,
+          targetSectionId: task.targetSectionId,
           config: task.config,
         });
 
@@ -1179,15 +1201,19 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         const resolution = request.resolution || '2K';
 
         // 使用锁 + 内存计数器分配唯一序号，不创建占位文件
-        const lockKey = `${request.draftId}:new_character`;
+        const targetSectionDesc = request.targetSectionId
+          ? { id: request.targetSectionId }
+          : await findOrCreateSection(request.draftId, '图片', '新角色图片');
+        const targetSection = targetSectionDesc.id;
+        const lockKey = `${request.draftId}:${targetSection}`;
         const filePath = await withSequenceLock(
           lockKey,
           async () => {
-            const nextFromFs = await storage.getNextSequenceNumber(request.draftId, 'new_character');
+            const nextFromFs = await storage.getNextSequenceNumber(request.draftId, targetSection);
             const nextFromMemory = (allocatedSequenceNumbers.get(lockKey) || 0) + 1;
             const sequenceNumber = Math.max(nextFromFs, nextFromMemory);
             allocatedSequenceNumbers.set(lockKey, sequenceNumber);
-            const fp = storage.getResourceFilePath(request.draftId, 'new_character', '.png', sequenceNumber);
+            const fp = storage.getResourceFilePath(request.draftId, targetSection, '.png', sequenceNumber);
             await fs.mkdir(path.dirname(fp), { recursive: true });
             return fp;
           },

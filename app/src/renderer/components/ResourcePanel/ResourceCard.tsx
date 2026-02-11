@@ -3,8 +3,9 @@ import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, Vid
 import { App } from 'antd';
 import type { Resource, OperationResult } from '@shared/types';
 import { isVideoMetadata } from '@shared/types';
+import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
-import { usePlaybackStore, CONTINUOUS_PLAY_TYPES } from '../../stores/playback';
+import { usePlaybackStore, isContinuousPlayType } from '../../stores/playback';
 import { useSceneLinkStore } from '../../stores/sceneLink';
 import { useFullscreenPreviewStore } from '../../stores/fullscreenPreview';
 import styles from './ResourceCard.module.css';
@@ -188,53 +189,35 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   const isVideo = resource.mimeType.startsWith('video/');
   const isImage = resource.mimeType.startsWith('image/');
 
-  // 检查是否支持点击播放
-  const supportsContinuousPlay = isVideo && CONTINUOUS_PLAY_TYPES.includes(resource.type as typeof CONTINUOUS_PLAY_TYPES[number]);
+  // 检查是否支持点击播放（所有视频类型 section 都支持）
+  const supportsContinuousPlay = isVideo && isContinuousPlayType(resource.type);
 
   // 检查是否是当前选中资源的关联资源
   const selectedResource = getSelectedResource();
   const isLinked = (() => {
     if (!selectedResource || isSelected) return false;
-
-    // 只有 scene_source 和 scene_new 之间才有关联
-    if (resource.type === 'scene_source' && selectedResource.type === 'scene_new') {
-      const linkedSourceId = getLinkedId(selectedResource.id, 'scene_new');
-      return linkedSourceId === resource.id;
-    }
-    if (resource.type === 'scene_new' && selectedResource.type === 'scene_source') {
-      const linkedNewId = getLinkedId(selectedResource.id, 'scene_source');
-      return linkedNewId === resource.id;
-    }
-    return false;
+    // 双向查找：检查当前资源是否与选中资源关联
+    const linkedId = getLinkedId(resource.id);
+    return linkedId === selectedResource.id;
   })();
 
-  // 检查是否可以显示关联按钮（当选中的是另一类型的资源时）
+  // 检查是否可以显示关联按钮（当选中的是不同视频 section 的资源时）
   const canShowLinkButton = (() => {
     if (!selectedResource || isSelected) return false;
-
-    // 当选中 scene_source 时，scene_new 区域的卡片显示关联按钮
-    if (selectedResource.type === 'scene_source' && resource.type === 'scene_new') {
-      return true;
-    }
-    // 当选中 scene_new 时，scene_source 区域的卡片显示关联按钮
-    if (selectedResource.type === 'scene_new' && resource.type === 'scene_source') {
-      return true;
-    }
-    return false;
+    // 不同 section 的视频资源之间可以关联
+    if (resource.type === selectedResource.type) return false; // 同一 section
+    const myDesc = parseFolderName(resource.type);
+    const selectedDesc = parseFolderName(selectedResource.type);
+    if (!myDesc || !selectedDesc) return false;
+    return myDesc.mediaType === '视频' && selectedDesc.mediaType === '视频';
   })();
 
   const handleLinkClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!selectedResource) return;
-
-    // 根据当前资源类型设置关联
-    if (resource.type === 'scene_source' && selectedResource.type === 'scene_new') {
-      setLink(resource.id, selectedResource.id);
-      message.success('已关联');
-    } else if (resource.type === 'scene_new' && selectedResource.type === 'scene_source') {
-      setLink(selectedResource.id, resource.id);
-      message.success('已关联');
-    }
+    // 设置关联（选中资源为 source，点击的资源为 target）
+    setLink(selectedResource.id, resource.id);
+    message.success('已关联');
   };
 
   const handleClick = () => {

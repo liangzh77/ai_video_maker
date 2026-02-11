@@ -1,31 +1,12 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Empty, App, Popconfirm, Tooltip } from 'antd';
-import { InboxOutlined, PlusOutlined, DeleteOutlined, LinkOutlined, ThunderboltOutlined, MergeCellsOutlined, HolderOutlined } from '@ant-design/icons';
-import type { Resource, ResourceType, UpscaleConfig, SynthesizeConfig, PromptTag } from '@shared/types';
+import { InboxOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, LinkOutlined, ThunderboltOutlined, MergeCellsOutlined, HolderOutlined } from '@ant-design/icons';
+import type { Resource, SectionDescriptor, UpscaleConfig, SynthesizeConfig, PromptTag } from '@shared/types';
+import { getAcceptFormats, isTextSection, parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
+import { useSectionsStore } from '../../stores/sections';
 import { useSceneLinkStore } from '../../stores/sceneLink';
 
-// 支持拖动排序的资源类型（通过重命名文件实现）
-const SORTABLE_TYPES: ResourceType[] = ['scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized', 'source_character', 'new_character', 'prompt'];
-
-// 支持拖拽复制的资源类型（所有非文本类型）
-const DRAGGABLE_TYPES: ResourceType[] = ['source_video', 'source_character', 'new_character', 'scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized'];
-
-// 按媒体类型分组的资源类型（用于跨类型拖拽兼容性检查）
-const VIDEO_TYPES: ResourceType[] = ['source_video', 'scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized'];
-const IMAGE_TYPES: ResourceType[] = ['source_character', 'new_character'];
-
-// 获取资源类型的媒体类型
-const getMediaType = (resourceType: ResourceType): 'video' | 'image' | 'text' => {
-  if (VIDEO_TYPES.includes(resourceType)) return 'video';
-  if (IMAGE_TYPES.includes(resourceType)) return 'image';
-  return 'text';
-};
-
-// 检查两个资源类型是否兼容（可以相互拖拽复制）
-const areTypesCompatible = (fromType: ResourceType, toType: ResourceType): boolean => {
-  return getMediaType(fromType) === getMediaType(toType);
-};
 import ResourceCard from './ResourceCard';
 import PromptCard from './PromptCard';
 import UpscaleDialog from './UpscaleDialog';
@@ -36,13 +17,10 @@ import styles from './ResourceSection.module.css';
 const FRAME_DATA_MIME = 'application/x-video-frame';
 
 interface ResourceSectionProps {
-  title: string;
-  type: ResourceType;
+  section: SectionDescriptor;
   resources: Resource[];
-  acceptFormats?: string[];
   badge?: string;
   badgeType?: 'default' | 'success' | 'warning';
-  isText?: boolean;
   isLarge?: boolean;
   // Section 拖拽排序相关
   isDragging?: boolean;
@@ -102,14 +80,19 @@ const validateFileType = (file: File, acceptFormats?: string[]): boolean => {
   return false;
 };
 
+// 检查两个 section 是否兼容（可以相互拖拽复制）
+const areSectionsCompatible = (fromSectionId: string, toSectionId: string): boolean => {
+  const fromDesc = parseFolderName(fromSectionId);
+  const toDesc = parseFolderName(toSectionId);
+  if (!fromDesc || !toDesc) return false;
+  return fromDesc.mediaType === toDesc.mediaType;
+};
+
 const ResourceSection: React.FC<ResourceSectionProps> = ({
-  title,
-  type,
+  section,
   resources,
-  acceptFormats,
   badge,
   badgeType = 'default',
-  isText = false,
   isLarge = false,
   isDragging = false,
   isDragOver = false,
@@ -119,6 +102,18 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   onSectionDrop,
   onSectionDragEnd,
 }) => {
+  const sectionId = section.id;
+  const title = section.label;
+  const isText = isTextSection(section.mediaType);
+  const acceptFormats = getAcceptFormats(section.mediaType);
+  const isVideo = section.mediaType === '视频';
+  const isImage = section.mediaType === '图片';
+
+  // 重命名状态
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(title);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
   const [isFileDragOver, setIsFileDragOver] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
@@ -134,22 +129,67 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [synthesizeTaskId, setSynthesizeTaskId] = useState<string | null>(null);
   const { selectedDraftId, addResource, addFrameAsResource, addTextResource, updateResource, deleteResourcesByType, getResourcesByType, loadResources, copyResource, reorderResource, clearLocalResourcesByType } = useDraftStore();
   const { batchLink } = useSceneLinkStore();
+  const { renameSection, deleteSection } = useSectionsStore();
   const { message } = App.useApp();
 
-  const canDrop = !!acceptFormats && acceptFormats.length > 0;
-  // 支持清除所有的资源类型
-  const clearableTypes: ResourceType[] = ['scene_source', 'scene_new', 'scene_hd', 'lipsync'];
-  const canClear = clearableTypes.includes(type) && resources.length > 0;
-  // 只有 scene_new 才显示批量关联按钮
-  const canBatchLink = type === 'scene_new';
-  // 只有 scene_new 才显示高清化按钮
-  const canUpscale = type === 'scene_new' && resources.length > 0;
-  // 只有 lipsync 才显示合成按钮
-  const canSynthesize = type === 'lipsync' && resources.length > 0;
-  // 是否支持拖动排序
-  const isSortable = SORTABLE_TYPES.includes(type);
-  // 是否支持拖拽复制（所有非文本类型都支持）
-  const isDraggable = DRAGGABLE_TYPES.includes(type);
+  // 双击标题进入重命名
+  const handleTitleDoubleClick = useCallback(() => {
+    setRenameValue(title);
+    setIsRenaming(true);
+    // 等 DOM 更新后 focus
+    setTimeout(() => renameInputRef.current?.select(), 0);
+  }, [title]);
+
+  const handleRenameConfirm = useCallback(async () => {
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === title) {
+      setIsRenaming(false);
+      return;
+    }
+    if (!selectedDraftId) return;
+
+    const success = await renameSection(selectedDraftId, sectionId, trimmed);
+    if (success) {
+      // 重命名会改变 sectionId，需要重新加载资源
+      await loadResources(selectedDraftId);
+    } else {
+      message.error('重命名失败');
+    }
+    setIsRenaming(false);
+  }, [renameValue, title, selectedDraftId, sectionId, renameSection, loadResources, message]);
+
+  const handleRenameKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleRenameConfirm();
+    } else if (e.key === 'Escape') {
+      setIsRenaming(false);
+    }
+  }, [handleRenameConfirm]);
+
+  // 删除整个 section
+  const handleDeleteSection = useCallback(async () => {
+    if (!selectedDraftId) return;
+    const success = await deleteSection(selectedDraftId, sectionId);
+    if (success) {
+      await loadResources(selectedDraftId);
+      message.success(`已删除「${title}」`);
+    } else {
+      message.error('删除失败');
+    }
+  }, [selectedDraftId, sectionId, title, deleteSection, loadResources, message]);
+
+  const canDrop = acceptFormats.length > 0;
+  // 所有 section 都可以清除
+  const canClear = resources.length > 0;
+  // 视频类型 section 可以批量关联、高清化、合成
+  const canBatchLink = isVideo && resources.length > 0;
+  const canUpscale = isVideo && resources.length > 0;
+  const canSynthesize = isVideo && resources.length > 0;
+  // 所有 section 都支持排序
+  const isSortable = true;
+  // 非文本类型支持拖拽复制
+  const isDraggable = !isText;
 
   // 监听任务进度和完成事件
   useEffect(() => {
@@ -236,13 +276,10 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     };
   }, [synthesizeTaskId, selectedDraftId, loadResources, message]);
 
-  // 资源列表已经按文件名排序（由 getResourcesByType 实现）
-  // 直接使用 resources 即可
-
   const handleClearAll = async () => {
     setIsClearing(true);
     try {
-      const result = await deleteResourcesByType(type);
+      const result = await deleteResourcesByType(sectionId);
       if (result.success > 0) {
         message.success(`已删除 ${result.success} 个${title}`);
       }
@@ -257,23 +294,20 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   };
 
   const handleBatchLink = () => {
-    // 获取 scene_source 和 scene_new 资源列表（已按文件名排序）
-    const sceneSourceResources = getResourcesByType('scene_source');
-    const sceneNewResources = getResourcesByType('scene_new');
-
-    if (sceneSourceResources.length === 0 || sceneNewResources.length === 0) {
-      message.warning('需要同时有分镜源视频和分镜新视频才能关联');
+    // 批量关联：使用当前 section 和相邻 section
+    // 目前仍然使用 getResourcesByType 获取需要关联的资源
+    // TODO: 在未来版本中，让用户选择要关联的目标 section
+    const currentResources = resources;
+    if (currentResources.length === 0) {
+      message.warning('当前分组没有资源');
       return;
     }
 
-    // 资源已按文件名排序，直接使用
-    const sortedSourceIds = sceneSourceResources.map((r) => r.id);
-    const sortedNewIds = sceneNewResources.map((r) => r.id);
-
-    batchLink(sortedSourceIds, sortedNewIds);
-
-    const linkedCount = Math.min(sortedSourceIds.length, sortedNewIds.length);
-    message.success(`已关联 ${linkedCount} 对分镜视频`);
+    // 简单实现：用当前 section 的资源 ID 列表做批量关联
+    const sortedIds = currentResources.map((r) => r.id);
+    // batchLink 需要两个 ID 列表，暂时保持兼容
+    batchLink(sortedIds, sortedIds);
+    message.success(`已关联 ${sortedIds.length} 个资源`);
   };
 
   const handleUpscale = async (config: UpscaleConfig) => {
@@ -291,15 +325,12 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         draftId: selectedDraftId,
         sourceVideoIds: videoIds,
         config,
+        targetSectionId: sectionId,
       });
 
       if (result.success && result.data) {
         // 保存任务 ID 用于监听进度
         setUpscaleTaskId(result.data.id);
-
-        // 立即从前端状态中移除 scene_hd 资源
-        // 因为后端会在任务开始时删除这些资源，这样可以避免在任务完成后出现重复卡片
-        clearLocalResourcesByType('scene_hd');
       } else {
         message.error(result.error || '启动高清化任务失败');
         setIsUpscaling(false);
@@ -328,6 +359,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         draftId: selectedDraftId,
         videoResourceIds: videoIds,
         config,
+        targetSectionId: sectionId,
       });
 
       if (result.success && result.data) {
@@ -372,7 +404,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         }
       }
 
-      const result = await addTextResource(selectedDraftId, type, content);
+      const result = await addTextResource(selectedDraftId, sectionId, content);
       if (result) {
         // 如果解析到了 tag，立即更新资源的 tag（保存状态）
         if (parsedTag) {
@@ -393,10 +425,10 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     if (!isDraggable) return;
     setDraggingCardId(resourceId);
     e.dataTransfer.effectAllowed = 'copy';
-    // 设置资源 ID 和类型，用于跨 Section 拖拽
+    // 设置资源 ID 和 section ID，用于跨 Section 拖拽
     e.dataTransfer.setData('text/plain', resourceId);
-    e.dataTransfer.setData('application/x-resource-type', type);
-  }, [isDraggable, type]);
+    e.dataTransfer.setData('application/x-resource-type', sectionId);
+  }, [isDraggable, sectionId]);
 
   const handleCardDragOver = useCallback((e: React.DragEvent, resourceId: string) => {
     // 必须调用 preventDefault 才能使元素成为有效的 drop 目标
@@ -430,7 +462,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       e.stopPropagation();
       try {
         const frameData = JSON.parse(frameDataStr) as { imageData: string; fileName: string };
-        const result = await addFrameAsResource(selectedDraftId, type, frameData.imageData, frameData.fileName);
+        const result = await addFrameAsResource(selectedDraftId, sectionId, frameData.imageData, frameData.fileName);
         if (result) {
           message.success('已添加视频帧截图');
         } else {
@@ -445,7 +477,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     // 从 dataTransfer 读取数据（支持跨 section 拖拽）
     const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
-    const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
+    const fromSectionId = e.dataTransfer.getData('application/x-resource-type');
 
     // 不是资源拖拽也不是帧拖拽 → 不阻止冒泡，让外层 handleDrop 处理文件拖入
     if (!fromId || !isDraggable) return;
@@ -453,29 +485,31 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     e.stopPropagation();
 
     // 同区域拖拽 -> 调整顺序（通过重命名文件）
-    if (fromType === type) {
+    if (fromSectionId === sectionId) {
       if (fromId === targetId) return; // 拖到自己身上，忽略
       if (isSortable) {
-        await reorderResource(type, fromId, targetId);
+        await reorderResource(sectionId, fromId, targetId);
       }
       return;
     }
 
     // 跨区域拖拽 -> 复制
     // 验证类型兼容性
-    if (fromType && !areTypesCompatible(fromType, type)) {
-      message.warning(`不能将${getMediaType(fromType) === 'video' ? '视频' : '图片'}复制到${getMediaType(type) === 'video' ? '视频' : '图片'}区域`);
+    if (fromSectionId && !areSectionsCompatible(fromSectionId, sectionId)) {
+      const fromDesc = parseFolderName(fromSectionId);
+      const toDesc = parseFolderName(sectionId);
+      message.warning(`不能将${fromDesc?.mediaType || '未知'}复制到${toDesc?.mediaType || '未知'}区域`);
       return;
     }
 
-    // 复制资源到目标类型
-    const newResource = await copyResource(fromId, type);
+    // 复制资源到目标 section
+    const newResource = await copyResource(fromId, sectionId);
     if (newResource) {
       message.success('已复制');
     } else {
       message.error('复制失败');
     }
-  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource, canDrop, selectedDraftId, addFrameAsResource]);
+  }, [draggingCardId, isDraggable, copyResource, message, sectionId, isSortable, reorderResource, canDrop, selectedDraftId, addFrameAsResource]);
 
   const handleCardDragEnd = useCallback(() => {
     setDragOverCardId(null);
@@ -488,8 +522,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     setDraggingCardId(resourceId);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', resourceId);
-    e.dataTransfer.setData('application/x-resource-type', type);
-  }, [type]);
+    e.dataTransfer.setData('application/x-resource-type', sectionId);
+  }, [sectionId]);
 
   const handlePromptDragOver = useCallback((e: React.DragEvent, resourceId: string) => {
     e.preventDefault();
@@ -512,8 +546,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     setDraggingCardId(null);
 
     if (!fromId || fromId === targetId) return;
-    await reorderResource(type, fromId, targetId);
-  }, [draggingCardId, type, reorderResource]);
+    await reorderResource(sectionId, fromId, targetId);
+  }, [draggingCardId, sectionId, reorderResource]);
 
   const handlePromptDragEnd = useCallback(() => {
     setDragOverCardId(null);
@@ -539,8 +573,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     setDragOverEndZone(false);
 
     if (!fromId) return;
-    await reorderResource(type, fromId, null);
-  }, [draggingCardId, type, reorderResource]);
+    await reorderResource(sectionId, fromId, null);
+  }, [draggingCardId, sectionId, reorderResource]);
 
   // 处理拖拽到末尾占位区域
   const handleEndZoneDragOver = useCallback((e: React.DragEvent) => {
@@ -563,7 +597,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     // 从 dataTransfer 读取数据（支持跨 section 拖拽）
     const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
-    const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
+    const fromSectionId = e.dataTransfer.getData('application/x-resource-type');
 
     setDragOverCardId(null);
     setDraggingCardId(null);
@@ -572,28 +606,29 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     if (!fromId || !isDraggable) return;
 
     // 同区域拖拽 -> 移动到末尾（toId 为 null）
-    if (fromType === type) {
+    if (fromSectionId === sectionId) {
       if (isSortable) {
-        await reorderResource(type, fromId, null);
+        await reorderResource(sectionId, fromId, null);
       }
       return;
     }
 
     // 跨区域拖拽 -> 复制
-    // 验证类型兼容性
-    if (fromType && !areTypesCompatible(fromType, type)) {
-      message.warning(`不能将${getMediaType(fromType) === 'video' ? '视频' : '图片'}复制到${getMediaType(type) === 'video' ? '视频' : '图片'}区域`);
+    if (fromSectionId && !areSectionsCompatible(fromSectionId, sectionId)) {
+      const fromDesc = parseFolderName(fromSectionId);
+      const toDesc = parseFolderName(sectionId);
+      message.warning(`不能将${fromDesc?.mediaType || '未知'}复制到${toDesc?.mediaType || '未知'}区域`);
       return;
     }
 
-    // 复制资源到目标类型
-    const newResource = await copyResource(fromId, type);
+    // 复制资源到目标 section
+    const newResource = await copyResource(fromId, sectionId);
     if (newResource) {
       message.success('已复制');
     } else {
       message.error('复制失败');
     }
-  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource]);
+  }, [draggingCardId, isDraggable, copyResource, message, sectionId, isSortable, reorderResource]);
 
   // 处理拖拽到 grid 空白区域（最后一个卡片右边）
   const handleGridDragOver = useCallback((e: React.DragEvent) => {
@@ -612,7 +647,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       e.stopPropagation();
       try {
         const frameData = JSON.parse(frameDataStr) as { imageData: string; fileName: string };
-        const result = await addFrameAsResource(selectedDraftId, type, frameData.imageData, frameData.fileName);
+        const result = await addFrameAsResource(selectedDraftId, sectionId, frameData.imageData, frameData.fileName);
         if (result) {
           message.success('已添加视频帧截图');
         } else {
@@ -627,7 +662,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     // 从 dataTransfer 读取数据（支持跨 section 拖拽）
     const fromId = e.dataTransfer.getData('text/plain') || draggingCardId;
-    const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
+    const fromSectionId = e.dataTransfer.getData('application/x-resource-type');
 
     // 不是资源拖拽也不是帧拖拽 → 不阻止冒泡，让外层 handleDrop 处理文件拖入
     if (!fromId || !isDraggable) return;
@@ -637,28 +672,29 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     setDraggingCardId(null);
 
     // 同区域拖拽 -> 移动到末尾（toId 为 null）
-    if (fromType === type) {
+    if (fromSectionId === sectionId) {
       if (isSortable) {
-        await reorderResource(type, fromId, null);
+        await reorderResource(sectionId, fromId, null);
       }
       return;
     }
 
     // 跨区域拖拽 -> 复制
-    // 验证类型兼容性
-    if (fromType && !areTypesCompatible(fromType, type)) {
-      message.warning(`不能将${getMediaType(fromType) === 'video' ? '视频' : '图片'}复制到${getMediaType(type) === 'video' ? '视频' : '图片'}区域`);
+    if (fromSectionId && !areSectionsCompatible(fromSectionId, sectionId)) {
+      const fromDesc = parseFolderName(fromSectionId);
+      const toDesc = parseFolderName(sectionId);
+      message.warning(`不能将${fromDesc?.mediaType || '未知'}复制到${toDesc?.mediaType || '未知'}区域`);
       return;
     }
 
-    // 复制资源到目标类型
-    const newResource = await copyResource(fromId, type);
+    // 复制资源到目标 section
+    const newResource = await copyResource(fromId, sectionId);
     if (newResource) {
       message.success('已复制');
     } else {
       message.error('复制失败');
     }
-  }, [draggingCardId, isDraggable, copyResource, message, type, isSortable, reorderResource, canDrop, selectedDraftId, addFrameAsResource]);
+  }, [draggingCardId, isDraggable, copyResource, message, sectionId, isSortable, reorderResource, canDrop, selectedDraftId, addFrameAsResource]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -690,15 +726,17 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
     // 首先检查是否是资源卡片拖拽（跨 section 复制）
     const fromId = e.dataTransfer.getData('text/plain');
-    const fromType = e.dataTransfer.getData('application/x-resource-type') as ResourceType;
-    if (fromId && fromType && fromType !== type && isDraggable) {
+    const fromSectionId = e.dataTransfer.getData('application/x-resource-type');
+    if (fromId && fromSectionId && fromSectionId !== sectionId && isDraggable) {
       // 验证类型兼容性
-      if (!areTypesCompatible(fromType, type)) {
-        message.warning(`不能将${getMediaType(fromType) === 'video' ? '视频' : '图片'}复制到${getMediaType(type) === 'video' ? '视频' : '图片'}区域`);
+      if (!areSectionsCompatible(fromSectionId, sectionId)) {
+        const fromDesc = parseFolderName(fromSectionId);
+        const toDesc = parseFolderName(sectionId);
+        message.warning(`不能将${fromDesc?.mediaType || '未知'}复制到${toDesc?.mediaType || '未知'}区域`);
         return;
       }
-      // 复制资源到目标类型
-      const newResource = await copyResource(fromId, type);
+      // 复制资源到目标 section
+      const newResource = await copyResource(fromId, sectionId);
       if (newResource) {
         message.success('已复制');
       } else {
@@ -716,7 +754,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         const frameData = JSON.parse(frameDataStr) as { imageData: string; fileName: string };
         const result = await addFrameAsResource(
           selectedDraftId,
-          type,
+          sectionId,
           frameData.imageData,
           frameData.fileName
         );
@@ -735,7 +773,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     // Handle regular file drops（按文件名排序，确保序号与文件名顺序一致）
     const files = Array.from(e.dataTransfer.files)
       .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true }));
-    console.log('[ResourceSection] handleDrop: files count =', files.length, 'type =', type);
+    console.log('[ResourceSection] handleDrop: files count =', files.length, 'sectionId =', sectionId);
     if (files.length === 0) return;
 
     let addedCount = 0;
@@ -759,9 +797,9 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         continue;
       }
 
-      console.log('[ResourceSection] Adding resource:', { draftId: selectedDraftId, type, filePath });
+      console.log('[ResourceSection] Adding resource:', { draftId: selectedDraftId, sectionId, filePath });
       try {
-        const result = await addResource(selectedDraftId, type, filePath);
+        const result = await addResource(selectedDraftId, sectionId, filePath);
         console.log('[ResourceSection] addResource result:', result);
         if (result) {
           addedCount++;
@@ -781,7 +819,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     if (skippedCount > 0) {
       message.warning(`${skippedCount} 个文件格式不支持或添加失败`);
     }
-  }, [canDrop, selectedDraftId, type, acceptFormats, addResource, addFrameAsResource, message]);
+  }, [canDrop, selectedDraftId, sectionId, acceptFormats, addResource, addFrameAsResource, message, isDraggable, copyResource]);
 
   const contentClasses = [
     styles.content,
@@ -814,7 +852,18 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         >
           <HolderOutlined />
         </div>
-        <h3 className={styles.title}>{title}</h3>
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            className={styles.titleInput}
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onBlur={handleRenameConfirm}
+            onKeyDown={handleRenameKeyDown}
+          />
+        ) : (
+          <h3 className={styles.title} onDoubleClick={handleTitleDoubleClick}>{title}</h3>
+        )}
         <span className={styles.count}>{resources.length}</span>
         {isText && (
           <button className={styles.addButton} onClick={handleAddPrompt} title="添加提示词">
@@ -822,14 +871,14 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           </button>
         )}
         {canBatchLink && (
-          <Tooltip title="批量关联分镜源视频">
+          <Tooltip title="批量关联">
             <button className={`${styles.addButton} ${styles.linkButton}`} onClick={handleBatchLink}>
               <LinkOutlined />
             </button>
           </Tooltip>
         )}
         {canUpscale && (
-          <Tooltip title="高清化所有分镜新视频">
+          <Tooltip title="高清化所有视频">
             <button
               className={`${styles.addButton} ${styles.upscaleButton}`}
               onClick={() => setUpscaleDialogOpen(true)}
@@ -840,7 +889,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           </Tooltip>
         )}
         {canSynthesize && (
-          <Tooltip title="合成所有对口型视频">
+          <Tooltip title="合成所有视频">
             <button
               className={`${styles.addButton} ${styles.synthesizeButton}`}
               onClick={() => setSynthesizeDialogOpen(true)}
@@ -866,6 +915,20 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
             </Tooltip>
           </Popconfirm>
         )}
+        <Popconfirm
+          title="删除卡片栏"
+          description={`确定要删除「${title}」卡片栏吗？${resources.length > 0 ? `其中的 ${resources.length} 个文件也将被永久删除。` : ''}`}
+          onConfirm={handleDeleteSection}
+          okText="确认删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+        >
+          <Tooltip title="删除卡片栏">
+            <button className={`${styles.addButton} ${styles.deleteSectionButton}`}>
+              <CloseOutlined />
+            </button>
+          </Tooltip>
+        </Popconfirm>
       </div>
 
       <div

@@ -1,61 +1,100 @@
-import React, { useState, useCallback } from 'react';
-import { Tooltip, Popconfirm } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Tooltip, Popconfirm, Dropdown, App } from 'antd';
+import { ReloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
-import { useSectionOrderStore, SECTION_CONFIGS, ALL_SECTION_TYPES } from '../../stores/sectionOrder';
-import type { ResourceType } from '@shared/types';
+import { useSectionsStore } from '../../stores/sections';
+import type { MediaType } from '@shared/types';
+import { getAcceptFormats, isTextSection } from '@shared/section-utils';
 import ResourceSection from './ResourceSection';
 import styles from './ResourcePanel.module.css';
 
 const ResourcePanel: React.FC = () => {
-  const { selectedDraftId, getSelectedDraft, getResourcesByType } = useDraftStore();
-  const { order, moveSection, moveSectionToEnd, resetOrder } = useSectionOrderStore();
+  const { selectedDraftId, getSelectedDraft, getResourcesByType, loadResources } = useDraftStore();
+  const { sections, loadSections, createSection, reorderSections } = useSectionsStore();
+  const { message } = App.useApp();
   const selectedDraft = getSelectedDraft();
 
   // 拖拽状态
-  const [draggingSectionType, setDraggingSectionType] = useState<ResourceType | null>(null);
-  const [dragOverSectionType, setDragOverSectionType] = useState<ResourceType | null>(null);
+  const [draggingSectionId, setDraggingSectionId] = useState<string | null>(null);
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
+
+  // 加载 sections
+  useEffect(() => {
+    if (selectedDraftId) {
+      loadSections(selectedDraftId);
+    }
+  }, [selectedDraftId, loadSections]);
 
   // 处理 section 拖拽开始
-  const handleSectionDragStart = useCallback((e: React.DragEvent, type: ResourceType) => {
-    setDraggingSectionType(type);
+  const handleSectionDragStart = useCallback((e: React.DragEvent, sectionId: string) => {
+    setDraggingSectionId(sectionId);
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', type);
+    e.dataTransfer.setData('text/plain', sectionId);
   }, []);
 
   // 处理 section 拖拽悬停
-  const handleSectionDragOver = useCallback((e: React.DragEvent, type: ResourceType) => {
+  const handleSectionDragOver = useCallback((e: React.DragEvent, sectionId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    if (draggingSectionType && type !== draggingSectionType) {
-      setDragOverSectionType(type);
+    if (draggingSectionId && sectionId !== draggingSectionId) {
+      setDragOverSectionId(sectionId);
     }
-  }, [draggingSectionType]);
+  }, [draggingSectionId]);
 
   // 处理 section 拖拽离开
   const handleSectionDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setDragOverSectionType(null);
+    setDragOverSectionId(null);
   }, []);
 
   // 处理 section 放置
-  const handleSectionDrop = useCallback((e: React.DragEvent, targetType: ResourceType) => {
+  const handleSectionDrop = useCallback(async (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     e.stopPropagation();
 
-    if (draggingSectionType && draggingSectionType !== targetType) {
-      moveSection(draggingSectionType, targetType);
+    if (draggingSectionId && draggingSectionId !== targetId && selectedDraftId) {
+      // 构建新的顺序
+      const currentIds = sections.map((s) => s.id);
+      const fromIndex = currentIds.indexOf(draggingSectionId);
+      const toIndex = currentIds.indexOf(targetId);
+      if (fromIndex !== -1 && toIndex !== -1) {
+        const newOrder = [...currentIds];
+        newOrder.splice(fromIndex, 1);
+        const insertIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
+        newOrder.splice(insertIndex, 0, draggingSectionId);
+        const success = await reorderSections(selectedDraftId, newOrder);
+        if (success) {
+          // 重排序后文件夹名变了（序号改变），需要重新加载资源
+          await loadResources(selectedDraftId);
+        }
+      }
     }
 
-    setDraggingSectionType(null);
-    setDragOverSectionType(null);
-  }, [draggingSectionType, moveSection]);
+    setDraggingSectionId(null);
+    setDragOverSectionId(null);
+  }, [draggingSectionId, selectedDraftId, sections, reorderSections, loadResources]);
 
   // 处理拖拽结束
   const handleSectionDragEnd = useCallback(() => {
-    setDraggingSectionType(null);
-    setDragOverSectionType(null);
+    setDraggingSectionId(null);
+    setDragOverSectionId(null);
   }, []);
+
+  // 处理新建 section
+  const handleCreateSection = useCallback(async (mediaType: MediaType) => {
+    if (!selectedDraftId) return;
+    const labelMap: Record<MediaType, string> = {
+      '视频': '视频',
+      '图片': '图片',
+      '提示词': '提示词',
+    };
+    const result = await createSection(selectedDraftId, mediaType, labelMap[mediaType]);
+    if (result) {
+      message.success(`已创建"${result.label}"分组`);
+    } else {
+      message.error('创建分组失败');
+    }
+  }, [selectedDraftId, createSection, message]);
 
   if (!selectedDraftId) {
     return (
@@ -67,50 +106,47 @@ const ResourcePanel: React.FC = () => {
     );
   }
 
-  // 确保 order 包含所有 section 类型（处理新增类型的情况）
-  const validOrder = order.filter((type) => ALL_SECTION_TYPES.includes(type));
-  const missingTypes = ALL_SECTION_TYPES.filter((type) => !validOrder.includes(type));
-  const finalOrder = [...validOrder, ...missingTypes];
+  const createMenuItems = [
+    { key: '视频', label: '视频分组' },
+    { key: '图片', label: '图片分组' },
+    { key: '提示词', label: '提示词分组' },
+  ];
 
   return (
     <div className={styles.panel}>
       <div className={styles.header}>
         <h2 className={styles.title}>{selectedDraft?.name || '未命名草稿'}</h2>
-        <Tooltip title="重置分组顺序">
-          <Popconfirm
-            title="重置分组顺序"
-            description="确定要将所有分组恢复为默认顺序吗？"
-            onConfirm={resetOrder}
-            okText="确认"
-            cancelText="取消"
-          >
+        <Dropdown
+          menu={{
+            items: createMenuItems,
+            onClick: ({ key }) => handleCreateSection(key as MediaType),
+          }}
+          trigger={['click']}
+        >
+          <Tooltip title="新建分组">
             <button className={styles.resetButton}>
-              <ReloadOutlined />
+              <PlusOutlined />
             </button>
-          </Popconfirm>
-        </Tooltip>
+          </Tooltip>
+        </Dropdown>
       </div>
 
       <div className={styles.content}>
-        {finalOrder.map((type) => {
-          const config = SECTION_CONFIGS[type];
-          const resources = getResourcesByType(type);
+        {sections.map((section) => {
+          const resources = getResourcesByType(section.id);
 
           return (
             <ResourceSection
-              key={type}
-              title={config.title}
-              type={type}
+              key={section.id}
+              section={section}
               resources={resources}
-              acceptFormats={config.acceptFormats}
-              isText={config.isText}
               // 拖拽相关 props
-              isDragging={draggingSectionType === type}
-              isDragOver={dragOverSectionType === type}
-              onSectionDragStart={(e) => handleSectionDragStart(e, type)}
-              onSectionDragOver={(e) => handleSectionDragOver(e, type)}
+              isDragging={draggingSectionId === section.id}
+              isDragOver={dragOverSectionId === section.id}
+              onSectionDragStart={(e) => handleSectionDragStart(e, section.id)}
+              onSectionDragOver={(e) => handleSectionDragOver(e, section.id)}
               onSectionDragLeave={handleSectionDragLeave}
-              onSectionDrop={(e) => handleSectionDrop(e, type)}
+              onSectionDrop={(e) => handleSectionDrop(e, section.id)}
               onSectionDragEnd={handleSectionDragEnd}
             />
           );

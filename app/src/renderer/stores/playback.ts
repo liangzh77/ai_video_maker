@@ -1,8 +1,11 @@
 import { create } from 'zustand';
+import { parseFolderName } from '@shared/section-utils';
 
-// 支持连续播放和空格键播放/暂停的资源类型
-export const CONTINUOUS_PLAY_TYPES = ['scene_source', 'scene_new', 'scene_hd', 'lipsync', 'synthesized'] as const;
-export type ContinuousPlayType = (typeof CONTINUOUS_PLAY_TYPES)[number];
+// 所有视频类型 section 都支持连续播放
+export function isContinuousPlayType(sectionId: string): boolean {
+  const desc = parseFolderName(sectionId);
+  return desc?.mediaType === '视频';
+}
 
 // 播放器类型：用于区分不同的播放位置，实现互斥播放
 export type PlayerType = 'preview' | 'boundary-editor' | 'fullscreen' | 'multi-video' | null;
@@ -32,8 +35,8 @@ interface PlaybackState {
   // 停止播放：清除活跃播放器状态
   stopPlaying: (playerType: PlayerType) => void;
 
-  // 检查资源类型是否支持连续播放
-  isContinuousPlayType: (type: string) => boolean;
+  // 检查 section 是否支持连续播放
+  isContinuousPlayType: (sectionId: string) => boolean;
 
   // 检查当前播放器是否是活跃播放器
   isActivePlayer: (playerType: PlayerType) => boolean;
@@ -81,8 +84,8 @@ export const usePlaybackStore = create<PlaybackState>((set, get) => ({
     }
   },
 
-  isContinuousPlayType: (type: string) => {
-    return CONTINUOUS_PLAY_TYPES.includes(type as ContinuousPlayType);
+  isContinuousPlayType: (sectionId: string) => {
+    return isContinuousPlayType(sectionId);
   },
 
   isActivePlayer: (playerType: PlayerType) => {

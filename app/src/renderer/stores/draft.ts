@@ -1,6 +1,8 @@
 import { create } from 'zustand';
-import type { Draft, Resource, ResourceType, OperationResult } from '@shared/types';
+import type { Draft, Resource, OperationResult } from '@shared/types';
+import { parseFolderName } from '@shared/section-utils';
 import { useSceneLinkStore } from './sceneLink';
+import { useSectionsStore } from './sections';
 import { usePlaybackStore } from './playback';
 import { clearThumbnailCache } from '../components/ResourcePanel/ResourceCard';
 
@@ -57,15 +59,15 @@ interface DraftState {
   // Resource Actions
   loadResources: (draftId: string) => Promise<void>;
   selectResource: (id: string | null) => void;
-  addResource: (draftId: string, type: ResourceType, filePath: string) => Promise<Resource | null>;
-  addFrameAsResource: (draftId: string, type: ResourceType, imageData: string, fileName: string) => Promise<Resource | null>;
-  addTextResource: (draftId: string, type: ResourceType, content: string) => Promise<Resource | null>;
+  addResource: (draftId: string, sectionId: string, filePath: string) => Promise<Resource | null>;
+  addFrameAsResource: (draftId: string, sectionId: string, imageData: string, fileName: string) => Promise<Resource | null>;
+  addTextResource: (draftId: string, sectionId: string, content: string) => Promise<Resource | null>;
   updateResource: (id: string, metadata: Partial<Resource['metadata']>) => Promise<Resource | null>;
   deleteResource: (id: string) => Promise<boolean>;
-  copyResource: (id: string, targetType?: ResourceType) => Promise<Resource | null>;
-  reorderResource: (type: ResourceType, fromId: string, toId: string | null) => Promise<boolean>;
-  deleteResourcesByType: (type: ResourceType) => Promise<{ success: number; failed: number }>;
-  clearLocalResourcesByType: (type: ResourceType) => void;
+  copyResource: (id: string, targetSectionId?: string) => Promise<Resource | null>;
+  reorderResource: (sectionId: string, fromId: string, toId: string | null) => Promise<boolean>;
+  deleteResourcesByType: (sectionId: string) => Promise<{ success: number; failed: number }>;
+  clearLocalResourcesByType: (sectionId: string) => void;
   openResourceFolder: (id: string) => Promise<void>;
   setPendingGenerate: (id: string | null) => void;
 
@@ -73,7 +75,7 @@ interface DraftState {
   getSelectedDraft: () => Draft | null;
   getSelectedResource: () => Resource | null;
   getResourceById: (id: string) => Resource | null;
-  getResourcesByType: (type: ResourceType) => Resource[];
+  getResourcesByType: (sectionId: string) => Resource[];
 }
 
 // ============================================
@@ -127,14 +129,11 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     set({ selectedDraftId: id, selectedResourceId: null, resources: [] });
 
     if (id) {
-      // 清理未被引用的文件
+      // 执行数据迁移（如果需要）
       try {
-        const cleanupResult = await window.api.draft.cleanupFiles({ draftId: id });
-        if (cleanupResult.success && cleanupResult.data > 0) {
-          console.log(`[Draft] Cleaned up ${cleanupResult.data} orphaned files`);
-        }
+        await window.api.draft.cleanupFiles({ draftId: id });
       } catch (err) {
-        console.error('[Draft] Failed to cleanup orphaned files:', err);
+        console.error('[Draft] Failed to migrate draft:', err);
       }
 
       await get().loadResources(id);
@@ -279,6 +278,8 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     try {
       const resources = await window.api.resource.list({ draftId });
       set({ resources: resources || [], isLoading: false });
+      // 同时刷新 sections 列表（任务可能创建了新 section）
+      useSectionsStore.getState().loadSections(draftId);
     } catch (err) {
       set({ error: (err as Error).message, isLoading: false });
     }
@@ -288,11 +289,11 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     set({ selectedResourceId: id });
   },
 
-  addResource: async (draftId: string, type: ResourceType, filePath: string) => {
+  addResource: async (draftId: string, sectionId: string, filePath: string) => {
     try {
       const result: OperationResult<Resource> = await window.api.resource.add({
         draftId,
-        type,
+        type: sectionId,
         filePath,
       });
       if (result.success && result.data) {
@@ -317,12 +318,12 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   },
 
-  addFrameAsResource: async (draftId: string, type: ResourceType, imageData: string, fileName: string) => {
+  addFrameAsResource: async (draftId: string, sectionId: string, imageData: string, fileName: string) => {
     try {
-      console.log('addFrameAsResource called:', { draftId, type, fileName, imageDataLength: imageData.length });
+      console.log('addFrameAsResource called:', { draftId, sectionId, fileName, imageDataLength: imageData.length });
       const result: OperationResult<Resource> = await window.api.resource.addFrame({
         draftId,
-        type,
+        type: sectionId,
         imageData,
         fileName,
       });
@@ -341,14 +342,14 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   },
 
-  addTextResource: async (draftId: string, type: ResourceType, content: string) => {
+  addTextResource: async (draftId: string, sectionId: string, content: string) => {
     console.log('=== store.addTextResource START ===');
-    console.log('store.addTextResource params:', { draftId, type, contentLength: content.length });
+    console.log('store.addTextResource params:', { draftId, sectionId, contentLength: content.length });
     try {
       console.log('store.addTextResource: Calling window.api.resource.addText...');
       const result: OperationResult<Resource> = await window.api.resource.addText({
         draftId,
-        type,
+        type: sectionId,
         content,
       });
       console.log('store.addTextResource IPC result:', result);
@@ -404,12 +405,12 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   },
 
-  copyResource: async (id: string, targetType?: ResourceType) => {
+  copyResource: async (id: string, targetSectionId?: string) => {
     const { selectedDraftId } = get();
     try {
       const result: OperationResult<Resource> = await window.api.resource.copy({
         resourceId: id,
-        targetType,
+        targetType: targetSectionId,
         sourceDraftId: selectedDraftId || undefined, // 传递源草稿 ID，避免后端遍历
       });
       if (result.success && result.data) {
@@ -427,16 +428,16 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   },
 
-  reorderResource: async (type: ResourceType, fromId: string, toId: string | null) => {
+  reorderResource: async (sectionId: string, fromId: string, toId: string | null) => {
     const { resources, selectedDraftId } = get();
     if (!selectedDraftId) return false;
 
-    // 获取该类型的所有资源，按当前文件名排序
-    const typeResources = resources
-      .filter((r) => r.type === type)
+    // 获取该 section 的所有资源，按当前文件名排序
+    const sectionResources = resources
+      .filter((r) => r.type === sectionId)
       .sort((a, b) => a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true }));
 
-    const currentIds = typeResources.map((r) => r.id);
+    const currentIds = sectionResources.map((r) => r.id);
     const fromIndex = currentIds.indexOf(fromId);
     if (fromIndex === -1) return false;
 
@@ -460,13 +461,12 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     try {
       const result: OperationResult<Resource[]> = await window.api.resource.reorder({
         draftId: selectedDraftId,
-        type,
+        type: sectionId,
         orderedIds: newOrder,
       });
 
       if (result.success && result.data) {
-        // 清除该类型资源的缩略图缓存（因为文件内容位置变了）
-        // 从第一个资源 ID 中提取文件夹前缀（如 '分镜源视频/'）
+        // 清除该 section 资源的缩略图缓存（因为文件内容位置变了）
         if (result.data.length > 0) {
           const firstId = result.data[0].id;
           const slashIndex = firstId.indexOf('/');
@@ -477,21 +477,15 @@ export const useDraftStore = create<DraftState>((set, get) => ({
         }
 
         // 重排序后资源 ID 会变化（因为文件名变了）
-        // 所以需要完全替换该类型的所有资源，而不是尝试匹配旧 ID
         set((state) => {
-          // 保留其他类型的资源
-          const otherResources = state.resources.filter((r) => r.type !== type);
-          // 合并新的该类型资源
+          const otherResources = state.resources.filter((r) => r.type !== sectionId);
           return {
             resources: [...otherResources, ...result.data!],
           };
         });
 
-        // 如果是 scene_source 或 scene_new，重新加载关联关系
-        // 因为后端已更新了 关联.json 中的资源引用
-        if (type === 'scene_source' || type === 'scene_new') {
-          await useSceneLinkStore.getState().loadFromStorage(selectedDraftId);
-        }
+        // 重新加载关联关系（后端已更新了 关联.json 中的资源引用）
+        await useSceneLinkStore.getState().loadFromStorage(selectedDraftId);
 
         return true;
       }
@@ -502,9 +496,9 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     }
   },
 
-  deleteResourcesByType: async (type: ResourceType) => {
+  deleteResourcesByType: async (sectionId: string) => {
     const { resources, selectedDraftId } = get();
-    const toDelete = resources.filter((r) => r.type === type);
+    const toDelete = resources.filter((r) => r.type === sectionId);
 
     if (toDelete.length === 0) {
       return { success: 0, failed: 0 };
@@ -513,15 +507,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     const deleteIds = toDelete.map((r) => r.id);
     const currentSelectedId = get().selectedResourceId;
     const wasSelectedDeleted = deleteIds.includes(currentSelectedId || '');
-
-    // If deleting scene_source and current selection was deleted, select source_video to keep split points visible
-    let newSelectedId: string | null = wasSelectedDeleted ? null : currentSelectedId;
-    if (type === 'scene_source' && wasSelectedDeleted) {
-      const sourceVideo = resources.find((r) => r.type === 'source_video');
-      if (sourceVideo) {
-        newSelectedId = sourceVideo.id;
-      }
-    }
+    const newSelectedId: string | null = wasSelectedDeleted ? null : currentSelectedId;
 
     // Step 1: 停止所有播放，释放视频句柄
     usePlaybackStore.getState().stopPlaying(usePlaybackStore.getState().activePlayerType);
@@ -531,7 +517,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
 
     // Step 3: Update UI first to unmount components and release file locks
     set((state) => ({
-      resources: state.resources.filter((r) => r.type !== type),
+      resources: state.resources.filter((r) => r.type !== sectionId),
       selectedResourceId: newSelectedId,
     }));
 
@@ -558,8 +544,9 @@ export const useDraftStore = create<DraftState>((set, get) => ({
       }
     }
 
-    // Step 6: If deleting scene_source, also delete split folders
-    if (type === 'scene_source' && selectedDraftId) {
+    // Step 6: 检查是否为视频类型 section，如果是则也删除 split 文件夹
+    const sectionDesc = parseFolderName(sectionId);
+    if (sectionDesc?.mediaType === '视频' && selectedDraftId) {
       try {
         await window.api.resource.deleteSplitFolders({ draftId: selectedDraftId });
       } catch (err) {
@@ -581,12 +568,12 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     return { success: successCount, failed: failedCount };
   },
 
-  // 仅从前端状态中移除指定类型的资源（不调用后端API）
+  // 仅从前端状态中移除指定 section 的资源（不调用后端API）
   // 用于在后端异步任务开始时立即更新UI
-  clearLocalResourcesByType: (type: ResourceType) => {
+  clearLocalResourcesByType: (sectionId: string) => {
     set((state) => ({
-      resources: state.resources.filter((r) => r.type !== type),
-      selectedResourceId: state.resources.find((r) => r.id === state.selectedResourceId)?.type === type
+      resources: state.resources.filter((r) => r.type !== sectionId),
+      selectedResourceId: state.resources.find((r) => r.id === state.selectedResourceId)?.type === sectionId
         ? null
         : state.selectedResourceId,
     }));
@@ -620,20 +607,12 @@ export const useDraftStore = create<DraftState>((set, get) => ({
     return resources.find((r) => r.id === id) || null;
   },
 
-  getResourcesByType: (type: ResourceType) => {
+  getResourcesByType: (sectionId: string) => {
     const { resources } = get();
-    const filtered = resources.filter((r) => r.type === type);
+    const filtered = resources.filter((r) => r.type === sectionId);
 
-    // 所有文件夹类型都按文件名排序（序号在文件名开头）
-    const sortByNameTypes: ResourceType[] = [
-      'source_character', 'new_character', 'prompt',
-      'scene_source', 'scene_new', 'scene_hd', 'lipsync'
-    ];
-    if (sortByNameTypes.includes(type)) {
-      return filtered.sort((a, b) => a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true }));
-    }
-
-    return filtered;
+    // 所有 section 都按文件名排序（序号在文件名开头）
+    return filtered.sort((a, b) => a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true }));
   },
 }));
 
