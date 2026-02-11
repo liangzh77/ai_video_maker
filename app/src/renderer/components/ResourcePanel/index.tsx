@@ -191,6 +191,7 @@ const ResourcePanel: React.FC = () => {
               key={section.id}
               section={section}
               resources={resources}
+              allSections={sections}
               cardScale={cardScale}
               // 拖拽相关 props
               isDragging={draggingSectionId === section.id}

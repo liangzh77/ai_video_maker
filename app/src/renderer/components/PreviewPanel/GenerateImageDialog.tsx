@@ -5,6 +5,7 @@ import type { Resource, ImageResolution, TextMetadata } from '@shared/types';
 import { isTextMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
+import { useSectionsStore } from '../../stores/sections';
 import styles from './GenerateImageDialog.module.css';
 
 interface ModelInfo {
@@ -59,8 +60,11 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 }) => {
   const { message } = App.useApp();
   const { selectedDraftId, resources, loadResources, addTextResource } = useDraftStore();
+  const { sections } = useSectionsStore();
 
   const [mode, setMode] = useState<GenerateMode>('image');
+  const [targetImageSection, setTargetImageSection] = useState<string | null>(null);
+  const [targetTextSection, setTargetTextSection] = useState<string | null>(null);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [selectedResolution, setSelectedResolution] = useState<ImageResolution>('2K');
@@ -231,6 +235,11 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setFailedCount(0);
       setTextResults([]);
       setIsStopping(false);
+      // 图片模式默认输出到第一个图片卡片栏
+      const imageSections = sections.filter((s) => s.mediaType === '图片');
+      setTargetImageSection(imageSections.length > 0 ? imageSections[0].id : null);
+      // 文本模式默认输出到提示词所在的卡片栏
+      setTargetTextSection(promptResource?.type || sectionId || null);
       abortRef.current = { aborted: false };
       // 根据 prompt 的 tag 设置默认生成模式
       // 只有明确标记为 image/video 的才默认图片模式，其他（包括无标签）默认文本模式
@@ -304,6 +313,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             prompt: editedPrompt,
             modelEndpoint: selectedModel!,
             resolution: selectedResolution,
+            targetSectionId: targetImageSection || undefined,
           });
           if (!result.success) throw new Error(result.error || '生成失败');
           return result.data;
@@ -318,6 +328,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             prompt: editedPrompt,
             modelEndpoint: selectedModel!,
             resolution: selectedResolution,
+            targetSectionId: targetImageSection || undefined,
           });
           if (!result.success) throw new Error(result.error || '生成失败');
           return result.data;
@@ -422,10 +433,10 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           localCompleted++;
           setCompletedCount((prev) => prev + 1);
           setTextResults((prev) => [...prev, text]);
-          // 创建新的提示词卡片（在与源提示词同 section 下，或使用传入的 sectionId）
-          const targetSection = promptResource?.type || sectionId;
-          if (targetSection) {
-            await addTextResource(selectedDraftId, targetSection, text);
+          // 创建新的提示词卡片到用户选择的目标卡片栏
+          const textTarget = targetTextSection || promptResource?.type || sectionId;
+          if (textTarget) {
+            await addTextResource(selectedDraftId, textTarget, text);
           }
         },
         (error, index) => {
@@ -576,20 +587,58 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           </div>
         </div>
 
-        {/* Resolution Selection - Image mode only */}
-        {mode === 'image' && (
-          <div className={styles.section}>
-            <div className={styles.sectionTitle}>分辨率</div>
-            <Radio.Group
-              value={selectedResolution}
-              onChange={(e) => setSelectedResolution(e.target.value)}
-              disabled={isGenerating}
-            >
-              <Radio value="2K">2K</Radio>
-              <Radio value="4K">4K</Radio>
-            </Radio.Group>
+        {/* Output Target & Resolution */}
+        <div className={styles.section}>
+          <div className={styles.batchControls}>
+            <span className={styles.batchLabel}>输出到</span>
+            {mode === 'image' ? (
+              <Select
+                value={targetImageSection}
+                onChange={setTargetImageSection}
+                placeholder="默认（新角色图片）"
+                allowClear
+                disabled={isGenerating}
+                style={{ width: 200 }}
+                size="small"
+                options={sections
+                  .filter((s) => s.mediaType === '图片')
+                  .map((s) => ({
+                    label: `${s.order}. ${s.label}`,
+                    value: s.id,
+                  }))}
+              />
+            ) : (
+              <Select
+                value={targetTextSection}
+                onChange={setTargetTextSection}
+                placeholder="当前提示词栏"
+                disabled={isGenerating}
+                style={{ width: 200 }}
+                size="small"
+                options={sections
+                  .filter((s) => s.mediaType === '提示词')
+                  .map((s) => ({
+                    label: `${s.order}. ${s.label}`,
+                    value: s.id,
+                  }))}
+              />
+            )}
+            {mode === 'image' && (
+              <>
+                <span style={{ width: 16 }} />
+                <span className={styles.batchLabel}>分辨率</span>
+                <Radio.Group
+                  value={selectedResolution}
+                  onChange={(e) => setSelectedResolution(e.target.value)}
+                  disabled={isGenerating}
+                >
+                  <Radio value="2K">2K</Radio>
+                  <Radio value="4K">4K</Radio>
+                </Radio.Group>
+              </>
+            )}
           </div>
-        )}
+        </div>
 
         {/* System Prompt - Text mode only */}
         {mode === 'text' && (

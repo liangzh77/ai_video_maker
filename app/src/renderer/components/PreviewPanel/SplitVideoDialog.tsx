@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Progress, App } from 'antd';
-import type { Resource } from '@shared/types';
+import { Modal, Progress, App, Select, Input, Switch, Form } from 'antd';
+import type { Resource, SectionDescriptor } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
+import { useSectionsStore } from '../../stores/sections';
 import { useNotificationStore } from '../../stores/notification';
 import { useSplitPointsStore } from '../../stores/splitPoints';
 import styles from './SplitVideoDialog.module.css';
+
+const NEW_SECTION_VALUE = '__new__';
 
 interface SplitVideoDialogProps {
   visible: boolean;
@@ -19,6 +22,7 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
 }) => {
   const { message } = App.useApp();
   const { selectedDraftId, loadResources } = useDraftStore();
+  const { sections } = useSectionsStore();
   const { showError } = useNotificationStore();
   const { splitPoints, videoId } = useSplitPointsStore();
 
@@ -27,9 +31,22 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
   const [statusText, setStatusText] = useState('');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [sceneCount, setSceneCount] = useState(0);
+  const [selectedTarget, setSelectedTarget] = useState<string>(NEW_SECTION_VALUE);
+  const [newSectionLabel, setNewSectionLabel] = useState('分镜视频');
+  const [clearTarget, setClearTarget] = useState(true);
 
   // Check if we have split points for current video
   const hasSplitPoints = splitPoints.length > 0 && videoId === resource.id;
+
+  const videoSections = sections.filter((s: SectionDescriptor) => s.mediaType === '视频');
+
+  const targetOptions = [
+    ...videoSections.map((s: SectionDescriptor) => ({
+      label: s.label,
+      value: s.id,
+    })),
+    { label: '+ 新建卡片栏', value: NEW_SECTION_VALUE },
+  ];
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -132,16 +149,26 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
       return;
     }
 
+    // 验证新建时名称不为空
+    if (selectedTarget === NEW_SECTION_VALUE && !newSectionLabel.trim()) {
+      message.error('请输入卡片栏名称');
+      return;
+    }
+
     setIsSplitting(true);
     setProgress(0);
     setStatusText('提交任务...');
 
     try {
+      const isNew = selectedTarget === NEW_SECTION_VALUE;
       // 使用已编辑的分割点
       const result = await window.api.task.splitVideoWithPoints({
         draftId: selectedDraftId,
         sourceVideoId: resource.id,
         splitPoints: splitPoints,
+        targetSectionId: isNew ? undefined : selectedTarget,
+        newSectionLabel: isNew ? newSectionLabel : undefined,
+        clearTarget: isNew ? false : clearTarget,
       });
 
       if (!result.success) {
@@ -190,6 +217,42 @@ const SplitVideoDialog: React.FC<SplitVideoDialogProps> = ({
             将按 <strong>{splitPoints.length}</strong> 个分割点切分为 <strong>{splitPoints.length + 1}</strong> 个分镜视频
           </div>
         </div>
+
+        {/* Target Section Selection */}
+        {!isSplitting && sceneCount === 0 && (
+          <div className={styles.section}>
+            <Form layout="vertical" style={{ marginBottom: 0 }}>
+              <Form.Item label="输出到" style={{ marginBottom: 12 }}>
+                <Select
+                  value={selectedTarget}
+                  onChange={setSelectedTarget}
+                  options={targetOptions}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+
+              {selectedTarget === NEW_SECTION_VALUE && (
+                <Form.Item label="新卡片栏名称" style={{ marginBottom: 12 }}>
+                  <Input
+                    value={newSectionLabel}
+                    onChange={(e) => setNewSectionLabel(e.target.value)}
+                    placeholder="分镜视频"
+                  />
+                </Form.Item>
+              )}
+
+              {selectedTarget !== NEW_SECTION_VALUE && (
+                <Form.Item
+                  label="清空目标卡片栏已有视频"
+                  tooltip="开启后会先删除目标卡片栏中已有的所有视频，再写入切分结果"
+                  style={{ marginBottom: 0 }}
+                >
+                  <Switch checked={clearTarget} onChange={setClearTarget} />
+                </Form.Item>
+              )}
+            </Form>
+          </div>
+        )}
 
         {/* Progress */}
         {(isSplitting || sceneCount > 0) && (

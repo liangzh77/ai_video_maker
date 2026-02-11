@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Modal, Form, InputNumber, Select, Space, Typography, Progress } from 'antd';
-import type { SynthesizeConfig } from '@shared/types';
+import { Modal, Form, InputNumber, Select, Space, Typography, Progress, Input } from 'antd';
+import type { SynthesizeConfig, SectionDescriptor } from '@shared/types';
 
 const { Text } = Typography;
+
+const NEW_SECTION_VALUE = '__new__';
 
 // 预设分辨率
 const RESOLUTION_PRESETS = [
@@ -28,18 +30,28 @@ const ENCODER_PRESETS = [
   { label: '极慢 (veryslow)', value: 'veryslow' },
 ];
 
+export interface SynthesizeDialogResult {
+  config: SynthesizeConfig;
+  targetSectionId: string | null;
+  newSectionLabel?: string;
+}
+
 interface SynthesizeDialogProps {
   open: boolean;
   videoCount: number;
+  sections: SectionDescriptor[];
+  currentSectionId: string;
   isProcessing?: boolean;
   progress?: number;
   onCancel: () => void;
-  onOk: (config: SynthesizeConfig) => void;
+  onOk: (result: SynthesizeDialogResult) => void;
 }
 
 const SynthesizeDialog: React.FC<SynthesizeDialogProps> = ({
   open,
   videoCount,
+  sections,
+  currentSectionId,
   isProcessing = false,
   progress = 0,
   onCancel,
@@ -48,6 +60,17 @@ const SynthesizeDialog: React.FC<SynthesizeDialogProps> = ({
   const [form] = Form.useForm();
   const [selectedPreset, setSelectedPreset] = useState(3); // 默认竖屏 1080p
   const [isCustom, setIsCustom] = useState(false);
+  const [selectedTarget, setSelectedTarget] = useState<string>(NEW_SECTION_VALUE);
+
+  const videoSections = sections.filter((s) => s.mediaType === '视频');
+
+  const targetOptions = [
+    ...videoSections.map((s) => ({
+      label: s.id === currentSectionId ? `${s.label} (当前)` : s.label,
+      value: s.id,
+    })),
+    { label: '+ 新建卡片栏', value: NEW_SECTION_VALUE },
+  ];
 
   const handlePresetChange = (value: number) => {
     setSelectedPreset(value);
@@ -74,7 +97,12 @@ const SynthesizeDialog: React.FC<SynthesizeDialogProps> = ({
         preset: values.preset,
         crf: values.crf,
       };
-      onOk(config);
+      const isNew = selectedTarget === NEW_SECTION_VALUE;
+      onOk({
+        config,
+        targetSectionId: isNew ? null : selectedTarget,
+        newSectionLabel: isNew ? (values.newSectionLabel || '合成视频') : undefined,
+      });
     } catch (error) {
       // 验证失败
     }
@@ -117,11 +145,30 @@ const SynthesizeDialog: React.FC<SynthesizeDialogProps> = ({
             targetFps: 30,
             preset: 'veryfast',
             crf: 23,
+            newSectionLabel: '合成视频',
           }}
         >
           <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
             将 {videoCount} 个视频按顺序合成为一个视频
           </Text>
+
+          <Form.Item label="输出到">
+            <Select
+              value={selectedTarget}
+              onChange={setSelectedTarget}
+              options={targetOptions}
+            />
+          </Form.Item>
+
+          {selectedTarget === NEW_SECTION_VALUE && (
+            <Form.Item
+              name="newSectionLabel"
+              label="新卡片栏名称"
+              rules={[{ required: true, message: '请输入名称' }]}
+            >
+              <Input placeholder="合成视频" />
+            </Form.Item>
+          )}
 
           <Form.Item label="分辨率预设">
             <Select

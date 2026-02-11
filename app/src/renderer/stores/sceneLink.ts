@@ -108,16 +108,30 @@ export const useSceneLinkStore = create<SceneLinkState>((set, get) => ({
     const newSourceToNewMap = new Map(sourceToNewMap);
     const newNewToSourceMap = new Map(newToSourceMap);
 
-    // 先清除旧的关联
-    // 如果 sourceId 之前有关联，清除旧的 newId 的反向映射
-    const oldNewId = newSourceToNewMap.get(sourceId);
-    if (oldNewId) {
-      newNewToSourceMap.delete(oldNewId);
+    // 彻底清除两个 ID 在任意方向上的旧关联
+    // 1. sourceId 作为 source（正向）
+    const oldNewForSource = newSourceToNewMap.get(sourceId);
+    if (oldNewForSource) {
+      newNewToSourceMap.delete(oldNewForSource);
+      newSourceToNewMap.delete(sourceId);
     }
-    // 如果 newId 之前有关联，清除旧的 sourceId 的正向映射
-    const oldSourceId = newNewToSourceMap.get(newId);
-    if (oldSourceId) {
-      newSourceToNewMap.delete(oldSourceId);
+    // 2. sourceId 作为 new（反向，方向不一致的旧数据）
+    const oldSourceForSource = newNewToSourceMap.get(sourceId);
+    if (oldSourceForSource) {
+      newSourceToNewMap.delete(oldSourceForSource);
+      newNewToSourceMap.delete(sourceId);
+    }
+    // 3. newId 作为 new（正向）
+    const oldSourceForNew = newNewToSourceMap.get(newId);
+    if (oldSourceForNew) {
+      newSourceToNewMap.delete(oldSourceForNew);
+      newNewToSourceMap.delete(newId);
+    }
+    // 4. newId 作为 source（反向，方向不一致的旧数据）
+    const oldNewForNew = newSourceToNewMap.get(newId);
+    if (oldNewForNew) {
+      newNewToSourceMap.delete(oldNewForNew);
+      newSourceToNewMap.delete(newId);
     }
 
     // 设置新的关联

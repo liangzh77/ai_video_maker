@@ -215,8 +215,14 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   const handleLinkClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!selectedResource) return;
-    // 设置关联（选中资源为 source，点击的资源为 target）
-    setLink(selectedResource.id, resource.id);
+    // 规范化方向：小序号 section 的资源为 source，大序号的为 new
+    const myOrder = parseFolderName(resource.type)?.order ?? 0;
+    const selectedOrder = parseFolderName(selectedResource.type)?.order ?? 0;
+    if (selectedOrder <= myOrder) {
+      setLink(selectedResource.id, resource.id);
+    } else {
+      setLink(resource.id, selectedResource.id);
+    }
     message.success('已关联');
   };
 

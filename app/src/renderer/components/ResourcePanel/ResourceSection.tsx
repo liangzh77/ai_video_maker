@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Empty, App, Popconfirm, Tooltip } from 'antd';
+import { Empty, App, Popconfirm, Tooltip, Modal, Select } from 'antd';
 import { InboxOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, LinkOutlined, ThunderboltOutlined, MergeCellsOutlined, HolderOutlined } from '@ant-design/icons';
-import type { Resource, SectionDescriptor, UpscaleConfig, SynthesizeConfig, PromptTag } from '@shared/types';
+import type { Resource, SectionDescriptor, PromptTag } from '@shared/types';
+import type { UpscaleDialogResult } from './UpscaleDialog';
+import type { SynthesizeDialogResult } from './SynthesizeDialog';
 import { getAcceptFormats, isTextSection, parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import { useSectionsStore } from '../../stores/sections';
@@ -20,6 +22,7 @@ const FRAME_DATA_MIME = 'application/x-video-frame';
 interface ResourceSectionProps {
   section: SectionDescriptor;
   resources: Resource[];
+  allSections: SectionDescriptor[];
   cardScale?: number;
   badge?: string;
   badgeType?: 'default' | 'success' | 'warning';
@@ -93,6 +96,7 @@ const areSectionsCompatible = (fromSectionId: string, toSectionId: string): bool
 const ResourceSection: React.FC<ResourceSectionProps> = ({
   section,
   resources,
+  allSections,
   cardScale = 1,
   badge,
   badgeType = 'default',
@@ -106,7 +110,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   onSectionDragEnd,
 }) => {
   const sectionId = section.id;
-  const title = section.label;
+  const title = `${section.order}. ${section.label}`;
   const isText = isTextSection(section.mediaType);
   const acceptFormats = getAcceptFormats(section.mediaType);
   const isVideo = section.mediaType === '视频';
@@ -131,6 +135,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [synthesizeProgress, setSynthesizeProgress] = useState(0);
   const [synthesizeTaskId, setSynthesizeTaskId] = useState<string | null>(null);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [batchLinkDialogOpen, setBatchLinkDialogOpen] = useState(false);
+  const [batchLinkTarget, setBatchLinkTarget] = useState<string | null>(null);
   const { selectedDraftId, addResource, addFrameAsResource, addTextResource, updateResource, deleteResourcesByType, getResourcesByType, loadResources, copyResource, reorderResource, clearLocalResourcesByType } = useDraftStore();
   const { batchLink } = useSceneLinkStore();
   const { renameSection, deleteSection } = useSectionsStore();
@@ -298,23 +304,44 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   };
 
   const handleBatchLink = () => {
-    // 批量关联：使用当前 section 和相邻 section
-    // 目前仍然使用 getResourcesByType 获取需要关联的资源
-    // TODO: 在未来版本中，让用户选择要关联的目标 section
-    const currentResources = resources;
-    if (currentResources.length === 0) {
+    if (resources.length === 0) {
       message.warning('当前分组没有资源');
       return;
     }
-
-    // 简单实现：用当前 section 的资源 ID 列表做批量关联
-    const sortedIds = currentResources.map((r) => r.id);
-    // batchLink 需要两个 ID 列表，暂时保持兼容
-    batchLink(sortedIds, sortedIds);
-    message.success(`已关联 ${sortedIds.length} 个资源`);
+    // 打开对话框让用户选择要关联的目标 section
+    setBatchLinkTarget(null);
+    setBatchLinkDialogOpen(true);
   };
 
-  const handleUpscale = async (config: UpscaleConfig) => {
+  const handleBatchLinkConfirm = () => {
+    if (!batchLinkTarget) {
+      message.warning('请选择要关联的视频卡片栏');
+      return;
+    }
+
+    const currentIds = resources.map((r) => r.id);
+    const targetResources = getResourcesByType(batchLinkTarget);
+    if (targetResources.length === 0) {
+      message.warning('目标卡片栏没有资源');
+      return;
+    }
+
+    const targetIds = targetResources.map((r) => r.id);
+
+    // 规范化方向：小序号 section 为 source，大序号为 new
+    const targetSection = allSections.find((s) => s.id === batchLinkTarget);
+    if (section.order <= (targetSection?.order ?? 0)) {
+      batchLink(currentIds, targetIds);
+    } else {
+      batchLink(targetIds, currentIds);
+    }
+
+    const count = Math.min(currentIds.length, targetIds.length);
+    message.success(`已关联 ${count} 对资源`);
+    setBatchLinkDialogOpen(false);
+  };
+
+  const handleUpscale = async (dialogResult: UpscaleDialogResult) => {
     if (!selectedDraftId || resources.length === 0) return;
 
     // 开始处理，保持对话框打开显示进度
@@ -328,8 +355,10 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       const result = await window.api.task.upscaleVideo({
         draftId: selectedDraftId,
         sourceVideoIds: videoIds,
-        config,
-        targetSectionId: sectionId,
+        config: dialogResult.config,
+        targetSectionId: dialogResult.targetSectionId ?? undefined,
+        newSectionLabel: dialogResult.newSectionLabel,
+        clearTarget: dialogResult.clearTarget,
       });
 
       if (result.success && result.data) {
@@ -348,7 +377,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
     }
   };
 
-  const handleSynthesize = async (config: SynthesizeConfig) => {
+  const handleSynthesize = async (dialogResult: SynthesizeDialogResult) => {
     if (!selectedDraftId || resources.length === 0) return;
 
     // 开始处理，保持对话框打开显示进度
@@ -362,8 +391,9 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       const result = await window.api.task.synthesizeVideo({
         draftId: selectedDraftId,
         videoResourceIds: videoIds,
-        config,
-        targetSectionId: sectionId,
+        config: dialogResult.config,
+        targetSectionId: dialogResult.targetSectionId ?? undefined,
+        newSectionLabel: dialogResult.newSectionLabel,
       });
 
       if (result.success && result.data) {
@@ -1032,6 +1062,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       <UpscaleDialog
         open={upscaleDialogOpen}
         videoCount={resources.length}
+        sections={allSections}
+        currentSectionId={sectionId}
         isProcessing={isUpscaling}
         progress={upscaleProgress}
         onCancel={() => {
@@ -1046,6 +1078,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       <SynthesizeDialog
         open={synthesizeDialogOpen}
         videoCount={resources.length}
+        sections={allSections}
+        currentSectionId={sectionId}
         isProcessing={isSynthesizing}
         progress={synthesizeProgress}
         onCancel={() => {
@@ -1055,6 +1089,34 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         }}
         onOk={handleSynthesize}
       />
+
+      {/* 批量关联对话框 */}
+      <Modal
+        title="批量关联"
+        open={batchLinkDialogOpen}
+        onCancel={() => setBatchLinkDialogOpen(false)}
+        onOk={handleBatchLinkConfirm}
+        okText="确认关联"
+        cancelText="取消"
+        okButtonProps={{ disabled: !batchLinkTarget }}
+        width={400}
+      >
+        <div style={{ marginBottom: 12 }}>
+          将「{title}」中的 {resources.length} 个资源按顺序与目标卡片栏的资源一一关联
+        </div>
+        <Select
+          value={batchLinkTarget}
+          onChange={setBatchLinkTarget}
+          placeholder="选择目标视频卡片栏"
+          style={{ width: '100%' }}
+          options={allSections
+            .filter((s) => s.mediaType === '视频' && s.id !== sectionId)
+            .map((s) => ({
+              label: `${s.order}. ${s.label}（${getResourcesByType(s.id).length} 个）`,
+              value: s.id,
+            }))}
+        />
+      </Modal>
 
       {/* 生成对话框（提示词栏直接打开） */}
       {isText && (

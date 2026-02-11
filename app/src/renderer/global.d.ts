@@ -38,6 +38,9 @@ export interface ElectronAPI {
       draftId: string;
       sourceVideoIds: string[];
       config: any;
+      targetSectionId?: string;
+      newSectionLabel?: string;
+      clearTarget?: boolean;
     }) => Promise<any>;
     generateImage: (params: {
       draftId: string;
@@ -51,6 +54,8 @@ export interface ElectronAPI {
       draftId: string;
       videoResourceIds: string[];
       config?: any;
+      targetSectionId?: string;
+      newSectionLabel?: string;
     }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
   };

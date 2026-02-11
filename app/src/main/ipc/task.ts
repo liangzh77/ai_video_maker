@@ -88,6 +88,8 @@ interface TaskSplitVideoWithPointsRequest {
   sourceVideoId: string;
   splitPoints: SplitPoint[];
   targetSectionId?: string;
+  newSectionLabel?: string;
+  clearTarget?: boolean;
 }
 
 interface TaskUpscaleVideosRequest {
@@ -95,6 +97,8 @@ interface TaskUpscaleVideosRequest {
   sourceVideoIds: string[];
   config: UpscaleConfig;
   targetSectionId?: string;
+  newSectionLabel?: string;
+  clearTarget?: boolean;
 }
 
 interface TaskSynthesizeVideoRequest {
@@ -102,6 +106,7 @@ interface TaskSynthesizeVideoRequest {
   videoResourceIds: string[];
   config: SynthesizeConfig;
   targetSectionId?: string;
+  newSectionLabel?: string;
 }
 
 interface TaskResplitSceneRequest {
@@ -228,45 +233,68 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
  */
 const upscaleVideoHandler: TaskHandler = async (task, onProgress) => {
   const { draftId, inputResourceIds, config } = task;
-  const upscaleConfig = config as UpscaleConfig;
+  const rawConfig = config as any;
+  const upscaleConfig: UpscaleConfig = {
+    targetWidth: rawConfig.targetWidth,
+    targetHeight: rawConfig.targetHeight,
+    targetFps: rawConfig.targetFps,
+    preset: rawConfig.preset,
+    crf: rawConfig.crf,
+    interpolateFrames: rawConfig.interpolateFrames,
+  };
+  const newSectionLabel: string | undefined = rawConfig._newSectionLabel;
+  const clearTarget: boolean = rawConfig._clearTarget ?? false;
 
   console.log('[TaskHandler] Start processing video upscale task:', task.id);
   console.log('[TaskHandler] Input videos:', inputResourceIds.length);
+  console.log('[TaskHandler] clearTarget:', clearTarget, 'newSectionLabel:', newSectionLabel);
 
   const outputResourceIds: string[] = [];
   const totalVideos = inputResourceIds.length;
 
-  // 获取输出目录（使用 targetSectionId，无则自动查找/创建）
-  const upscaleTargetDesc = task.targetSectionId
-    ? { id: task.targetSectionId }
-    : await findOrCreateSection(draftId, '视频', '高清分镜新视频');
+  // 获取输出目录
+  let upscaleTargetDesc: { id: string };
+  if (task.targetSectionId) {
+    upscaleTargetDesc = { id: task.targetSectionId };
+  } else if (newSectionLabel) {
+    upscaleTargetDesc = await findOrCreateSection(draftId, '视频', newSectionLabel);
+  } else {
+    upscaleTargetDesc = await findOrCreateSection(draftId, '视频', '高清视频');
+  }
   const upscaleTargetSection = upscaleTargetDesc.id;
   const outputDir = storage.getResourceFolderPath(draftId, upscaleTargetSection);
 
-  // 清空现有资源
-  const existingHdResources = await storage.resource.list(draftId, upscaleTargetSection);
-  for (const resource of existingHdResources) {
-    await storage.resource.delete(draftId, resource.id);
-  }
-  if (existingHdResources.length > 0) {
-    console.log(`[TaskHandler] Deleted ${existingHdResources.length} existing scene_hd records`);
-  }
+  // 仅在用户选择清空时才清空目标 section
+  if (clearTarget) {
+    const existingHdResources = await storage.resource.list(draftId, upscaleTargetSection);
+    for (const resource of existingHdResources) {
+      await storage.resource.delete(draftId, resource.id);
+    }
+    if (existingHdResources.length > 0) {
+      console.log(`[TaskHandler] Deleted ${existingHdResources.length} existing resources`);
+    }
 
-  // 清空高清分镜视频文件夹
-  try {
-    const existingFiles = await fs.readdir(outputDir);
-    for (const file of existingFiles) {
-      const filePath = path.join(outputDir, file);
-      await fs.unlink(filePath);
+    try {
+      const existingFiles = await fs.readdir(outputDir);
+      for (const file of existingFiles) {
+        const filePath = path.join(outputDir, file);
+        await fs.unlink(filePath);
+      }
+      if (existingFiles.length > 0) {
+        console.log(`[TaskHandler] Cleared ${existingFiles.length} existing files`);
+      }
+    } catch {
+      // 文件夹不存在，忽略
     }
-    if (existingFiles.length > 0) {
-      console.log(`[TaskHandler] Cleared ${existingFiles.length} existing files from scene_hd folder`);
-    }
-  } catch {
-    // 文件夹不存在，忽略
   }
 
   await fs.mkdir(outputDir, { recursive: true });
+
+  // 计算起始序号（不清空时从已有文件最大序号+1开始）
+  let startSequence = 1;
+  if (!clearTarget) {
+    startSequence = await storage.getNextSequenceNumber(draftId, upscaleTargetSection);
+  }
 
   // Load app config for Python path
   const appConfig = await appConfigService.load();
@@ -281,8 +309,8 @@ const upscaleVideoHandler: TaskHandler = async (task, onProgress) => {
 
     console.log(`[TaskHandler] Processing video ${i + 1}/${totalVideos}: ${sourceResource.fileName}`);
 
-    // 生成输出文件名（保持原序号）
-    const sequenceNumber = i + 1;
+    // 生成输出文件名
+    const sequenceNumber = startSequence + i;
     const outputFileName = `${sequenceNumber.toString().padStart(3, '0')}.mp4`;
     const outputPath = path.join(outputDir, outputFileName);
 
@@ -324,7 +352,16 @@ const upscaleVideoHandler: TaskHandler = async (task, onProgress) => {
  */
 const synthesizeVideoHandler: TaskHandler = async (task, onProgress) => {
   const { draftId, inputResourceIds, config } = task;
-  const synthesizeConfig = config as SynthesizeConfig;
+  const rawConfig = config as any;
+  const synthesizeConfig: SynthesizeConfig = {
+    outputFormat: rawConfig.outputFormat,
+    targetWidth: rawConfig.targetWidth,
+    targetHeight: rawConfig.targetHeight,
+    targetFps: rawConfig.targetFps,
+    preset: rawConfig.preset,
+    crf: rawConfig.crf,
+  };
+  const newSectionLabel: string | undefined = rawConfig._newSectionLabel;
 
   console.log('[TaskHandler] Start processing video synthesize task:', task.id);
   console.log('[TaskHandler] Input videos:', inputResourceIds.length);
@@ -347,10 +384,15 @@ const synthesizeVideoHandler: TaskHandler = async (task, onProgress) => {
     throw new Error('No valid input videos');
   }
 
-  // 获取输出目录（使用 targetSectionId，无则自动查找/创建）
-  const synthTargetDesc = task.targetSectionId
-    ? { id: task.targetSectionId }
-    : await findOrCreateSection(draftId, '视频', '合成新视频');
+  // 获取输出目录
+  let synthTargetDesc: { id: string };
+  if (task.targetSectionId) {
+    synthTargetDesc = { id: task.targetSectionId };
+  } else if (newSectionLabel) {
+    synthTargetDesc = await findOrCreateSection(draftId, '视频', newSectionLabel);
+  } else {
+    synthTargetDesc = await findOrCreateSection(draftId, '视频', '合成视频');
+  }
   const synthTargetSection = synthTargetDesc.id;
   const outputDir = storage.getResourceFolderPath(draftId, synthTargetSection);
   await fs.mkdir(outputDir, { recursive: true });
@@ -396,9 +438,18 @@ const synthesizeVideoHandler: TaskHandler = async (task, onProgress) => {
  */
 const splitVideoHandler: TaskHandler = async (task, onProgress) => {
   const { draftId, inputResourceIds, config } = task;
-  const splitConfig = config as SplitConfig;
+  const rawConfig = config as any;
+  const splitConfig: SplitConfig = {
+    detectorType: rawConfig.detectorType,
+    threshold: rawConfig.threshold,
+    minSceneLen: rawConfig.minSceneLen,
+    customPoints: rawConfig.customPoints,
+  };
+  const newSectionLabel: string | undefined = rawConfig._newSectionLabel;
+  const clearTarget: boolean = rawConfig._clearTarget ?? true;
 
   console.log('[TaskHandler] Start processing video split task:', task.id);
+  console.log('[TaskHandler] clearTarget:', clearTarget, 'newSectionLabel:', newSectionLabel);
 
   // Get source video resource
   const sourceVideoId = inputResourceIds[0];
@@ -410,32 +461,38 @@ const splitVideoHandler: TaskHandler = async (task, onProgress) => {
 
   onProgress(5);
 
-  // 使用 targetSectionId 获取输出目录（无则自动查找/创建）
-  const splitTargetDesc = task.targetSectionId
-    ? { id: task.targetSectionId }
-    : await findOrCreateSection(draftId, '视频', '分镜源视频');
+  // 获取输出目录
+  let splitTargetDesc: { id: string };
+  if (task.targetSectionId) {
+    splitTargetDesc = { id: task.targetSectionId };
+  } else if (newSectionLabel) {
+    splitTargetDesc = await findOrCreateSection(draftId, '视频', newSectionLabel);
+  } else {
+    splitTargetDesc = await findOrCreateSection(draftId, '视频', '分镜视频');
+  }
   const splitTargetSection = splitTargetDesc.id;
   const outputDir = storage.getResourceFolderPath(draftId, splitTargetSection);
 
-  // 清空现有资源
-  const existingSceneResources = await storage.resource.list(draftId, splitTargetSection);
-  for (const resource of existingSceneResources) {
-    await storage.resource.delete(draftId, resource.id);
-  }
-  if (existingSceneResources.length > 0) {
-    console.log(`[TaskHandler] Deleted ${existingSceneResources.length} existing scene_source records`);
-  }
-
-  // 清空分镜源视频文件夹
-  try {
-    const existingFiles = await fs.readdir(outputDir);
-    for (const file of existingFiles) {
-      const filePath = path.join(outputDir, file);
-      await fs.unlink(filePath);
+  // 仅在用户选择清空时才清空目标 section
+  if (clearTarget) {
+    const existingSceneResources = await storage.resource.list(draftId, splitTargetSection);
+    for (const resource of existingSceneResources) {
+      await storage.resource.delete(draftId, resource.id);
     }
-    console.log(`[TaskHandler] Cleared ${existingFiles.length} existing files from scene_source folder`);
-  } catch {
-    // 文件夹不存在，忽略
+    if (existingSceneResources.length > 0) {
+      console.log(`[TaskHandler] Deleted ${existingSceneResources.length} existing resources`);
+    }
+
+    try {
+      const existingFiles = await fs.readdir(outputDir);
+      for (const file of existingFiles) {
+        const filePath = path.join(outputDir, file);
+        await fs.unlink(filePath);
+      }
+      console.log(`[TaskHandler] Cleared ${existingFiles.length} existing files`);
+    } catch {
+      // 文件夹不存在，忽略
+    }
   }
 
   await fs.mkdir(outputDir, { recursive: true });
@@ -461,12 +518,18 @@ const splitVideoHandler: TaskHandler = async (task, onProgress) => {
   console.log('[TaskHandler] Split completed, scenes:', result.scenes.length);
   onProgress(90);
 
+  // 计算起始序号（不清空时从已有文件最大序号+1开始）
+  let startSequence = 1;
+  if (!clearTarget) {
+    startSequence = await storage.getNextSequenceNumber(draftId, splitTargetSection);
+  }
+
   // Create resource records for each split video
   const outputResourceIds: string[] = [];
 
   for (let i = 0; i < result.scenes.length; i++) {
     const scene = result.scenes[i];
-    const sequenceNumber = i + 1;
+    const sequenceNumber = startSequence + i;
 
     // 使用新的命名规范重命名文件
     const ext = path.extname(scene.filePath);
@@ -819,11 +882,13 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           return { success: false, error: 'No split points provided' };
         }
 
-        // Create task config with custom points
-        const splitConfig: SplitConfig = {
-          detectorType: 'content',
+        // Create task config with custom points (attach newSectionLabel/clearTarget for handler)
+        const splitConfig = {
+          detectorType: 'content' as const,
           minSceneLen: 1, // Allow short scenes when using custom points
           customPoints: request.splitPoints,
+          _newSectionLabel: request.newSectionLabel,
+          _clearTarget: request.clearTarget ?? true,
         };
 
         // Add task to queue
@@ -831,7 +896,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           request.draftId,
           'split',
           [request.sourceVideoId],
-          splitConfig,
+          splitConfig as any,
           request.targetSectionId
         );
 
@@ -883,12 +948,17 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           }
         }
 
-        // Add task to queue
+        // Add task to queue (attach newSectionLabel/clearTarget in config for handler)
+        const upscaleConfigWithMeta = {
+          ...request.config,
+          _newSectionLabel: request.newSectionLabel,
+          _clearTarget: request.clearTarget ?? false,
+        };
         const task = taskQueue.addTask(
           request.draftId,
           'upscale',
           request.sourceVideoIds,
-          request.config,
+          upscaleConfigWithMeta as any,
           request.targetSectionId
         );
 
@@ -940,12 +1010,16 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           }
         }
 
-        // Add task to queue
+        // Add task to queue (attach newSectionLabel in config for handler)
+        const synthConfigWithMeta = {
+          ...request.config,
+          _newSectionLabel: request.newSectionLabel,
+        };
         const task = taskQueue.addTask(
           request.draftId,
           'synthesize',
           request.videoResourceIds,
-          request.config,
+          synthConfigWithMeta as any,
           request.targetSectionId
         );
 

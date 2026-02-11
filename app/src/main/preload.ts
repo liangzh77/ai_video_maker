@@ -35,13 +35,13 @@ export interface ElectronAPI {
     getModels: () => Promise<Array<{ id: string; name: string }>>;
     analyzeVideo: (params: { draftId: string; sourceVideoId: string; config?: any }) => Promise<any>;
     splitVideo: (params: { draftId: string; sourceVideoId: string; config?: any }) => Promise<any>;
-    splitVideoWithPoints: (params: { draftId: string; sourceVideoId: string; splitPoints: any[]; targetSectionId?: string }) => Promise<any>;
+    splitVideoWithPoints: (params: { draftId: string; sourceVideoId: string; splitPoints: any[]; targetSectionId?: string; newSectionLabel?: string; clearTarget?: boolean }) => Promise<any>;
     resplitScene: (params: { draftId: string; sceneResourceId: string; newStartTime: number; newEndTime: number }) => Promise<any>;
-    upscaleVideo: (params: { draftId: string; sourceVideoIds: string[]; config: any; targetSectionId?: string }) => Promise<any>;
+    upscaleVideo: (params: { draftId: string; sourceVideoIds: string[]; config: any; targetSectionId?: string; newSectionLabel?: string; clearTarget?: boolean }) => Promise<any>;
     generateImage: (params: { draftId: string; sourceImageIds: string[]; promptResourceId?: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K'; targetSectionId?: string }) => Promise<any>;
     generateImageDirect: (params: { draftId: string; sourceImageIds: string[]; promptResourceId?: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K'; targetSectionId?: string }) => Promise<any>;
     generateText: (params: { draftId: string; prompt: string; systemPrompt?: string; modelEndpoint: string }) => Promise<any>;
-    synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any; targetSectionId?: string }) => Promise<any>;
+    synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any; targetSectionId?: string; newSectionLabel?: string }) => Promise<any>;
     extractAudio: (params: { draftId: string; videoResourceId: string }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
   };

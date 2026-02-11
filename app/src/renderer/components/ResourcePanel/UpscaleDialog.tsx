@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { Modal, Form, InputNumber, Select, Switch, Space, Typography, Progress } from 'antd';
-import type { UpscaleConfig } from '@shared/types';
+import { Modal, Form, InputNumber, Select, Switch, Space, Typography, Progress, Input } from 'antd';
+import type { UpscaleConfig, SectionDescriptor } from '@shared/types';
 
 const { Text } = Typography;
+
+const NEW_SECTION_VALUE = '__new__';
 
 // 预设分辨率
 const RESOLUTION_PRESETS = [
@@ -28,18 +30,29 @@ const ENCODER_PRESETS = [
   { label: '极慢 (veryslow)', value: 'veryslow' },
 ];
 
+export interface UpscaleDialogResult {
+  config: UpscaleConfig;
+  targetSectionId: string | null; // null 表示新建
+  newSectionLabel?: string;
+  clearTarget: boolean;
+}
+
 interface UpscaleDialogProps {
   open: boolean;
   videoCount: number;
+  sections: SectionDescriptor[];
+  currentSectionId: string;
   isProcessing?: boolean;
   progress?: number;
   onCancel: () => void;
-  onOk: (config: UpscaleConfig) => void;
+  onOk: (result: UpscaleDialogResult) => void;
 }
 
 const UpscaleDialog: React.FC<UpscaleDialogProps> = ({
   open,
   videoCount,
+  sections,
+  currentSectionId,
   isProcessing = false,
   progress = 0,
   onCancel,
@@ -48,6 +61,17 @@ const UpscaleDialog: React.FC<UpscaleDialogProps> = ({
   const [form] = Form.useForm();
   const [selectedPreset, setSelectedPreset] = useState(3); // 默认竖屏 1080p
   const [isCustom, setIsCustom] = useState(false);
+  const [selectedTarget, setSelectedTarget] = useState<string>(NEW_SECTION_VALUE);
+
+  const videoSections = sections.filter((s) => s.mediaType === '视频');
+
+  const targetOptions = [
+    ...videoSections.map((s) => ({
+      label: s.id === currentSectionId ? `${s.label} (当前)` : s.label,
+      value: s.id,
+    })),
+    { label: '+ 新建卡片栏', value: NEW_SECTION_VALUE },
+  ];
 
   const handlePresetChange = (value: number) => {
     setSelectedPreset(value);
@@ -74,7 +98,13 @@ const UpscaleDialog: React.FC<UpscaleDialogProps> = ({
         crf: values.crf,
         interpolateFrames: values.interpolateFrames || false,
       };
-      onOk(config);
+      const isNew = selectedTarget === NEW_SECTION_VALUE;
+      onOk({
+        config,
+        targetSectionId: isNew ? null : selectedTarget,
+        newSectionLabel: isNew ? (values.newSectionLabel || '高清视频') : undefined,
+        clearTarget: isNew ? false : (values.clearTarget || false),
+      });
     } catch (error) {
       // 验证失败
     }
@@ -118,11 +148,42 @@ const UpscaleDialog: React.FC<UpscaleDialogProps> = ({
             preset: 'veryfast',
             crf: 23,
             interpolateFrames: false,
+            newSectionLabel: '高清视频',
+            clearTarget: false,
           }}
         >
           <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
             将对 {videoCount} 个视频进行高清化处理
           </Text>
+
+          <Form.Item label="输出到">
+            <Select
+              value={selectedTarget}
+              onChange={setSelectedTarget}
+              options={targetOptions}
+            />
+          </Form.Item>
+
+          {selectedTarget === NEW_SECTION_VALUE && (
+            <Form.Item
+              name="newSectionLabel"
+              label="新卡片栏名称"
+              rules={[{ required: true, message: '请输入名称' }]}
+            >
+              <Input placeholder="高清视频" />
+            </Form.Item>
+          )}
+
+          {selectedTarget !== NEW_SECTION_VALUE && (
+            <Form.Item
+              name="clearTarget"
+              label="清空目标卡片栏已有视频"
+              valuePropName="checked"
+              tooltip="开启后会先删除目标卡片栏中已有的所有视频，再写入高清化结果"
+            >
+              <Switch />
+            </Form.Item>
+          )}
 
           <Form.Item label="分辨率预设">
             <Select
