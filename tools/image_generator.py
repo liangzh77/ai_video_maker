@@ -58,13 +58,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def resolution_to_config(resolution: str, ref_width: int, ref_height: int) -> GenerationConfig:
+def resolution_to_config(resolution: str, ref_width: int = 0, ref_height: int = 0) -> GenerationConfig:
     """
     根据分辨率和参考图片尺寸创建生成配置
 
     Args:
         resolution: "2K" 或 "4K"
-        ref_width: 参考图片宽度
+        ref_width: 参考图片宽度（文生图时为 0，使用默认正方形尺寸）
         ref_height: 参考图片高度
 
     Returns:
@@ -73,8 +73,13 @@ def resolution_to_config(resolution: str, ref_width: int, ref_height: int) -> Ge
     config = GenerationConfig()
     config.target_resolution = resolution
 
-    # 根据参考图片尺寸设置 size
-    if ref_width >= ref_height:
+    if ref_width <= 0 or ref_height <= 0:
+        # 文生图：无参考图片，使用默认正方形尺寸
+        if resolution == "4K":
+            config.size = ImageSize.custom(2160, 2160)
+        else:
+            config.size = ImageSize.custom(1080, 1080)
+    elif ref_width >= ref_height:
         # 横向
         if resolution == "4K":
             config.size = ImageSize.custom(3840, int(3840 * ref_height / ref_width))
@@ -102,7 +107,7 @@ async def generate_image(
 
     Args:
         model_id: 模型 ID (provider:endpoint)
-        source_paths: 源图片路径列表（支持单个或多个）
+        source_paths: 源图片路径列表（可为空，空时走文生图）
         prompt: 提示词
         resolution: 分辨率 (2K/4K)
         output_path: 输出路径
@@ -110,44 +115,67 @@ async def generate_image(
     Returns:
         生成结果信息
     """
-    # 读取所有源图片
     print(f"进度: 5%")
-    print(f"[ImageGenerator] Reading {len(source_paths)} source image(s)")
-
-    source_images = []
-    for i, path in enumerate(source_paths):
-        print(f"[ImageGenerator] Reading image {i+1}: {path}")
-        with open(path, "rb") as f:
-            source_images.append(f.read())
-
-    # 获取第一张源图片尺寸（用于计算输出尺寸）
-    ref_width, ref_height = get_image_size(source_images[0])
-    print(f"[ImageGenerator] First image size: {ref_width}x{ref_height}")
-
-    # 创建配置
-    config = resolution_to_config(resolution, ref_width, ref_height)
-    print(f"[ImageGenerator] Target resolution: {resolution}")
-    print(f"[ImageGenerator] Target size: {config.size.width}x{config.size.height}")
-
-    print(f"进度: 10%")
 
     # 创建 provider
     print(f"[ImageGenerator] Creating provider for model: {model_id}")
     provider = create_provider(model_id)
 
-    print(f"进度: 15%")
-    print(f"[ImageGenerator] Generating image with {len(source_images)} reference(s)...")
+    if source_paths:
+        # 图生图：读取源图片
+        print(f"[ImageGenerator] Reading {len(source_paths)} source image(s)")
 
-    # 调用图生图（传递图片列表）
-    try:
-        result = await provider.image_to_image(
-            prompt=prompt,
-            reference_images=source_images,
-            config=config
-        )
-    except ProviderError as e:
-        print(f"[ImageGenerator] Error: {e.message}")
-        raise
+        source_images = []
+        for i, path in enumerate(source_paths):
+            print(f"[ImageGenerator] Reading image {i+1}: {path}")
+            with open(path, "rb") as f:
+                source_images.append(f.read())
+
+        # 获取第一张源图片尺寸（用于计算输出尺寸）
+        ref_width, ref_height = get_image_size(source_images[0])
+        print(f"[ImageGenerator] First image size: {ref_width}x{ref_height}")
+
+        # 创建配置
+        config = resolution_to_config(resolution, ref_width, ref_height)
+        print(f"[ImageGenerator] Target resolution: {resolution}")
+        print(f"[ImageGenerator] Target size: {config.size.width}x{config.size.height}")
+
+        print(f"进度: 10%")
+        print(f"进度: 15%")
+        print(f"[ImageGenerator] Generating image with {len(source_images)} reference(s)...")
+
+        # 调用图生图
+        try:
+            result = await provider.image_to_image(
+                prompt=prompt,
+                reference_images=source_images,
+                config=config
+            )
+        except ProviderError as e:
+            print(f"[ImageGenerator] Error: {e.message}")
+            raise
+    else:
+        # 文生图：无源图片
+        print(f"[ImageGenerator] Text-to-image mode (no source images)")
+
+        # 使用默认尺寸配置
+        config = resolution_to_config(resolution)
+        print(f"[ImageGenerator] Target resolution: {resolution}")
+        print(f"[ImageGenerator] Target size: {config.size.width}x{config.size.height}")
+
+        print(f"进度: 10%")
+        print(f"进度: 15%")
+        print(f"[ImageGenerator] Generating image from text prompt...")
+
+        # 调用文生图
+        try:
+            result = await provider.text_to_image(
+                prompt=prompt,
+                config=config
+            )
+        except ProviderError as e:
+            print(f"[ImageGenerator] Error: {e.message}")
+            raise
 
     print(f"进度: 90%")
 
@@ -186,9 +214,9 @@ def main():
     )
     parser.add_argument(
         "--source", "-s",
-        required=True,
         action="append",
-        help="源图片路径（可多次使用以指定多张图片）"
+        default=[],
+        help="源图片路径（可多次使用以指定多张图片，不提供则为文生图）"
     )
     parser.add_argument(
         "--prompt", "-p",
@@ -210,16 +238,20 @@ def main():
     args = parser.parse_args()
 
     # 检查所有源文件是否存在
-    for source in args.source:
-        if not os.path.exists(source):
-            print(f"Error: Source file not found: {source}")
-            sys.exit(1)
+    if args.source:
+        for source in args.source:
+            if not os.path.exists(source):
+                print(f"Error: Source file not found: {source}")
+                sys.exit(1)
 
     print(f"[ImageGenerator] Starting...")
     print(f"[ImageGenerator] Model: {args.model}")
-    print(f"[ImageGenerator] Source images: {len(args.source)}")
-    for i, src in enumerate(args.source):
-        print(f"[ImageGenerator]   {i+1}. {src}")
+    if args.source:
+        print(f"[ImageGenerator] Source images: {len(args.source)}")
+        for i, src in enumerate(args.source):
+            print(f"[ImageGenerator]   {i+1}. {src}")
+    else:
+        print(f"[ImageGenerator] Mode: text-to-image (no source images)")
     print(f"[ImageGenerator] Prompt: {args.prompt[:50]}...")
     print(f"[ImageGenerator] Resolution: {args.resolution}")
     print(f"[ImageGenerator] Output: {args.output}")

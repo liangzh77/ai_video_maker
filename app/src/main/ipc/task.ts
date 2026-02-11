@@ -1169,18 +1169,16 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           return { success: false, error: 'DRAFT_NOT_FOUND' };
         }
 
-        // Verify source images exist
-        if (!request.sourceImageIds || request.sourceImageIds.length === 0) {
-          return { success: false, error: 'No source images provided' };
-        }
-
+        // Collect source image paths (optional, supports text-to-image)
         const sourcePaths: string[] = [];
-        for (const sourceImageId of request.sourceImageIds) {
-          const sourceImage = await storage.resource.get(request.draftId, sourceImageId);
-          if (!sourceImage) {
-            return { success: false, error: `Source image not found: ${sourceImageId}` };
+        if (request.sourceImageIds && request.sourceImageIds.length > 0) {
+          for (const sourceImageId of request.sourceImageIds) {
+            const sourceImage = await storage.resource.get(request.draftId, sourceImageId);
+            if (!sourceImage) {
+              return { success: false, error: `Source image not found: ${sourceImageId}` };
+            }
+            sourcePaths.push(sourceImage.filePath);
           }
-          sourcePaths.push(sourceImage.filePath);
         }
 
         // Get prompt content

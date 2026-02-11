@@ -216,8 +216,8 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   // 生成图片（批量）
   const handleGenerateImage = async () => {
-    if (!selectedDraftId || selectedImageIds.length === 0) {
-      message.error('请先选择至少一张参考图片');
+    if (!selectedDraftId) {
+      message.error('请先选择草稿');
       return;
     }
 
@@ -240,6 +240,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     try {
       let localCompleted = 0;
       let localFailed = 0;
+      const errorMessages: string[] = [];
 
       const tasks = Array.from({ length: batchCount }, () => async () => {
         const result = await window.api.task.generateImageDirect({
@@ -272,6 +273,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         },
         (error, index) => {
           localFailed++;
+          errorMessages.push(`任务 ${index + 1}: ${error.message}`);
           setFailedCount((prev) => prev + 1);
           console.error(`Image task ${index} failed:`, error);
         },
@@ -290,10 +292,8 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setIsStopping(false);
       if (abortRef.current.aborted) {
         message.info('已停止生成');
-      } else if (localFailed > 0 && localCompleted === 0) {
-        message.error('图片生成失败');
       } else if (localFailed > 0) {
-        message.warning(`图片生成部分完成（${localFailed} 个失败）`);
+        showError(errorMessages.join('\n\n'));
       } else {
         message.success('图片生成完成');
       }
@@ -332,6 +332,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     try {
       let localCompleted = 0;
       let localFailed = 0;
+      const errorMessages: string[] = [];
 
       const tasks = Array.from({ length: batchCount }, () => async () => {
         const result = await window.api.task.generateText({
@@ -356,6 +357,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         },
         (error, index) => {
           localFailed++;
+          errorMessages.push(`任务 ${index + 1}: ${error.message}`);
           setFailedCount((prev) => prev + 1);
           console.error(`Text task ${index} failed:`, error);
         },
@@ -371,10 +373,8 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setIsStopping(false);
       if (abortRef.current.aborted) {
         message.info('已停止生成');
-      } else if (localFailed > 0 && localCompleted === 0) {
-        message.error('文本生成失败');
       } else if (localFailed > 0) {
-        message.warning(`文本生成部分完成（${localFailed} 个失败）`);
+        showError(errorMessages.join('\n\n'));
       } else {
         message.success('文本生成完成');
       }
@@ -402,7 +402,6 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   // 根据模式判断确定按钮是否可用
   const isOkDisabled = (() => {
     if (isGenerating || !selectedModel) return true;
-    if (mode === 'image') return selectedImageIds.length === 0;
     return false;
   })();
 
@@ -537,7 +536,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         {mode === 'image' && (
           <div className={styles.section}>
             <div className={styles.sectionTitle}>
-              选择参考图片（支持多选）
+              选择参考图片（可选，支持多选）
               <span className={styles.count}>
                 已选 {selectedImageIds.length} / 共 {allImages.length} 张
               </span>
