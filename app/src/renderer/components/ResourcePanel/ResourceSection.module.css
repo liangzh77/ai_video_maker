@@ -179,12 +179,12 @@
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
   padding: var(--spacing-md);
-  min-height: 100px;
+  min-height: calc(100px * var(--card-scale, 1));
   transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .content.large {
-  min-height: 200px;
+  min-height: calc(200px * var(--card-scale, 1));
 }
 
 .content.droppable {
@@ -206,19 +206,19 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(calc(140px * var(--card-scale, 1)), 1fr));
   gap: var(--spacing-md);
 }
 
 .content.large .grid {
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(calc(200px * var(--card-scale, 1)), 1fr));
 }
 
 .empty {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 80px;
+  min-height: calc(80px * var(--card-scale, 1));
 }
 
 .dropHint {

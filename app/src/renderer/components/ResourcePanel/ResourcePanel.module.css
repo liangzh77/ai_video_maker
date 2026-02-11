@@ -6,8 +6,8 @@
 
 .header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: var(--spacing-sm);
   margin-bottom: var(--spacing-lg);
 }
 
@@ -17,6 +17,69 @@
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0;
+}
+
+.scaleControls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.scaleButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 11px;
+}
+
+.scaleButton:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background-color: rgba(0, 122, 255, 0.05);
+}
+
+.scaleButton:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.scaleLabel {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  min-width: 36px;
+  text-align: center;
+  user-select: none;
+}
+
+.createSectionButton {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.createSectionButton:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background-color: rgba(0, 122, 255, 0.05);
 }
 
 .resetButton {

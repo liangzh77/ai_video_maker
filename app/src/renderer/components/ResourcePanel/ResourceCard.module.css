@@ -182,6 +182,9 @@
 
 .info {
   padding: var(--spacing-sm);
+  /* 当 cardScale 小于 0.7 时逐渐隐藏 info 区域 */
+  max-height: clamp(0px, calc((var(--card-scale, 1) - 0.5) * 200px), 100px);
+  overflow: hidden;
 }
 
 .name {

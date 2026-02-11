@@ -6,7 +6,8 @@
   background-color: var(--color-bg-main);
   cursor: pointer;
   transition: transform 0.15s, box-shadow 0.15s;
-  min-height: 80px;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
 }
 
 .card:hover {
@@ -96,11 +97,10 @@
   color: var(--color-text-primary);
   word-break: break-word;
   white-space: pre-wrap;
-  max-height: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
-  -webkit-line-clamp: 5;
+  -webkit-line-clamp: 10;
   -webkit-box-orient: vertical;
 }
 
@@ -129,7 +129,7 @@
 }
 
 .card:hover .generateButton {
-  opacity: 1;
+  opacity: clamp(0, calc((var(--card-scale, 1) - 0.55) * 20), 1);
 }
 
 .generateButton:hover {
@@ -159,7 +159,7 @@
 }
 
 .card:hover .copyButton {
-  opacity: 1;
+  opacity: clamp(0, calc((var(--card-scale, 1) - 0.55) * 20), 1);
 }
 
 .copyButton:hover {

@@ -20,6 +20,7 @@ const FRAME_DATA_MIME = 'application/x-video-frame';
 interface ResourceSectionProps {
   section: SectionDescriptor;
   resources: Resource[];
+  cardScale?: number;
   badge?: string;
   badgeType?: 'default' | 'success' | 'warning';
   isLarge?: boolean;
@@ -92,6 +93,7 @@ const areSectionsCompatible = (fromSectionId: string, toSectionId: string): bool
 const ResourceSection: React.FC<ResourceSectionProps> = ({
   section,
   resources,
+  cardScale = 1,
   badge,
   badgeType = 'default',
   isLarge = false,
@@ -942,6 +944,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
 
       <div
         className={contentClasses}
+        style={{ '--card-scale': cardScale } as React.CSSProperties}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
@@ -974,6 +977,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
                 <PromptCard
                   key={resource.id}
                   resource={resource}
+                  cardScale={cardScale}
                   draggable={isSortable}
                   isDragOver={dragOverCardId === resource.id}
                   onDragStart={(e) => handlePromptDragStart(e, resource.id)}

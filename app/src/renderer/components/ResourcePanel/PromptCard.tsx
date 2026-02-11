@@ -14,6 +14,7 @@ const TAG_CONFIG: Record<PromptTag, { label: string; className: string }> = {
 
 interface PromptCardProps {
   resource: Resource;
+  cardScale?: number;
   draggable?: boolean;
   isDragOver?: boolean;
   onDragStart?: (e: React.DragEvent) => void;
@@ -25,6 +26,7 @@ interface PromptCardProps {
 
 const PromptCard: React.FC<PromptCardProps> = ({
   resource,
+  cardScale = 1,
   draggable = false,
   isDragOver = false,
   onDragStart,
@@ -101,14 +103,18 @@ const PromptCard: React.FC<PromptCardProps> = ({
         {content || <span className={styles.empty}>暂无内容</span>}
       </div>
 
-      <button className={styles.generateButton} onClick={handleGenerate} title="生成">
-        <ThunderboltOutlined />
-        <span>生成</span>
-      </button>
+      {cardScale >= 0.55 && (
+        <button className={styles.generateButton} onClick={handleGenerate} title="生成">
+          <ThunderboltOutlined />
+          <span>生成</span>
+        </button>
+      )}
 
-      <button className={styles.copyButton} onClick={handleCopy} title="复制">
-        <CopyOutlined />
-      </button>
+      {cardScale >= 0.55 && (
+        <button className={styles.copyButton} onClick={handleCopy} title="复制">
+          <CopyOutlined />
+        </button>
+      )}
     </div>
   );
 };
