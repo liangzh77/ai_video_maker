@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Tooltip, App } from 'antd';
-import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined, AppstoreOutlined } from '@ant-design/icons';
 import DraftList from './DraftList';
 import MultiVideoDropZone from './MultiVideoDropZone';
+import TemplateDialog, { getTemplate } from './TemplateDialog';
 import { useDraftStore, type DraftSortBy } from '../../stores/draft';
+import { useSectionsStore } from '../../stores/sections';
 import styles from './Sidebar.module.css';
 
 interface WorkspaceInfo {
@@ -14,7 +16,9 @@ interface WorkspaceInfo {
 const Sidebar: React.FC = () => {
   const { message } = App.useApp();
   const { createDraft, selectDraft, loadDrafts, loadResources, selectedDraftId, sortBy, sortOrder, setSortBy } = useDraftStore();
+  const { createSection } = useSectionsStore();
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
 
   // 加载工作目录信息
   useEffect(() => {
@@ -33,6 +37,11 @@ const Sidebar: React.FC = () => {
   const handleCreateDraft = async () => {
     const draft = await createDraft('新项目');
     if (draft) {
+      // 按模板创建 section
+      const template = getTemplate();
+      for (const item of template) {
+        await createSection(draft.id, item.mediaType, item.label);
+      }
       selectDraft(draft.id);
     }
   };
@@ -116,11 +125,22 @@ const Sidebar: React.FC = () => {
           icon={<PlusOutlined />}
           onClick={handleCreateDraft}
           className={styles.createButton}
-          block
         >
           新建草稿
         </Button>
+        <Button
+          icon={<AppstoreOutlined />}
+          onClick={() => setTemplateDialogOpen(true)}
+          className={styles.templateButton}
+        >
+          模板
+        </Button>
       </div>
+
+      <TemplateDialog
+        open={templateDialogOpen}
+        onClose={() => setTemplateDialogOpen(false)}
+      />
 
       {/* 排序选择 */}
       <div className={styles.sortSection}>

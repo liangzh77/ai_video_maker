@@ -80,13 +80,21 @@
 }
 
 .actions {
+  display: flex;
+  gap: 8px;
   margin-bottom: var(--spacing-md);
 }
 
 .createButton {
+  flex: 1;
   border-radius: var(--radius-md);
   height: 40px;
   font-weight: 500;
+}
+
+.templateButton {
+  border-radius: var(--radius-md);
+  height: 40px;
 }
 
 .sortSection {
