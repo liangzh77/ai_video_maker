@@ -41,6 +41,7 @@ export interface ElectronAPI {
     generateImage: (params: { draftId: string; sourceImageIds: string[]; promptResourceId?: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K'; targetSectionId?: string }) => Promise<any>;
     generateImageDirect: (params: { draftId: string; sourceImageIds: string[]; promptResourceId?: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K'; targetSectionId?: string }) => Promise<any>;
     generateText: (params: { draftId: string; prompt: string; systemPrompt?: string; modelEndpoint: string }) => Promise<any>;
+    generateVideo: (params: { draftId: string; imageResourceIds: string[]; videoResourceIds: string[]; prompt: string; duration?: number; ratio?: string; targetSectionId?: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any; targetSectionId?: string; newSectionLabel?: string }) => Promise<any>;
     extractAudio: (params: { draftId: string; videoResourceId: string }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
@@ -114,6 +115,7 @@ const api: ElectronAPI = {
     generateImage: (params) => ipcRenderer.invoke('task:generateImage', params),
     generateImageDirect: (params) => ipcRenderer.invoke('task:generateImageDirect', params),
     generateText: (params) => ipcRenderer.invoke('task:generateText', params),
+    generateVideo: (params) => ipcRenderer.invoke('task:generateVideo', params),
     synthesizeVideo: (params) => ipcRenderer.invoke('task:synthesizeVideo', params),
     extractAudio: (params) => ipcRenderer.invoke('task:extractAudio', params),
     cancel: (params) => ipcRenderer.invoke('task:cancel', params),

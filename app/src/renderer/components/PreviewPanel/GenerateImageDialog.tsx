@@ -1,19 +1,84 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Modal, Progress, App, Empty, Select, Radio, Button, Input, Segmented, InputNumber, Checkbox } from 'antd';
-import { CopyOutlined, CloseCircleOutlined, MinusOutlined, PlusOutlined, HistoryOutlined, DeleteOutlined } from '@ant-design/icons';
-import type { Resource, ImageResolution, TextMetadata } from '@shared/types';
-import { isTextMetadata } from '@shared/types';
+import { Modal, Progress, App, Empty, Select, Radio, Button, Input, Segmented, InputNumber, Checkbox, Spin } from 'antd';
+import { CopyOutlined, CloseCircleOutlined, MinusOutlined, PlusOutlined, HistoryOutlined, DeleteOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import type { Resource, ImageResolution, TextMetadata, OperationResult } from '@shared/types';
+import { isTextMetadata, isVideoMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import { useSectionsStore } from '../../stores/sections';
 import styles from './GenerateImageDialog.module.css';
+
+// 视频缩略图缓存
+const videoThumbCache = new Map<string, string>();
+
+/** 视频缩略图组件 */
+const VideoThumbnail: React.FC<{ resource: Resource; style?: React.CSSProperties }> = ({ resource, style }) => {
+  const cacheKey = `${resource.id}_${resource.fileSize}`;
+  const [thumbPath, setThumbPath] = useState<string | null>(() => videoThumbCache.get(cacheKey) || null);
+  const [loading, setLoading] = useState(!thumbPath);
+
+  useEffect(() => {
+    if (thumbPath) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const result: OperationResult<string> = await window.api.resource.getThumbnail({
+          draftId: resource.draftId,
+          resourceId: resource.id,
+        });
+        if (result.success && result.data) {
+          videoThumbCache.set(cacheKey, result.data);
+          if (mounted) setThumbPath(result.data);
+        }
+      } catch { /* ignore */ }
+      if (mounted) setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, [resource.id, resource.draftId]);
+
+  if (loading) {
+    return (
+      <div className={styles.videoThumbPlaceholder} style={style}>
+        <Spin size="small" />
+      </div>
+    );
+  }
+
+  if (!thumbPath) {
+    return (
+      <div className={styles.videoThumbPlaceholder} style={style}>
+        <PlayCircleOutlined style={{ fontSize: 24, color: '#999' }} />
+      </div>
+    );
+  }
+
+  const url = `local-file:///${thumbPath.replace(/\\/g, '/')}?v=${resource.fileSize}`;
+  return <img src={url} alt={resource.fileName} className={styles.thumbnail} style={style} />;
+};
 
 interface ModelInfo {
   id: string;
   name: string;
 }
 
-type GenerateMode = 'image' | 'text';
+type GenerateMode = 'image' | 'text' | 'video';
+
+// 根据视频宽高计算最接近的 API 比例
+function calcRatioFromDimensions(width: number, height: number): string {
+  const supported: [string, number][] = [
+    ['1:1', 1.0],
+    ['4:3', 4 / 3],
+    ['3:4', 3 / 4],
+    ['16:9', 16 / 9],
+    ['9:16', 9 / 16],
+    ['21:9', 21 / 9],
+  ];
+  const actual = height > 0 ? width / height : 1.0;
+  const best = supported.reduce((prev, curr) =>
+    Math.abs(curr[1] - actual) < Math.abs(prev[1] - actual) ? curr : prev
+  );
+  return best[0];
+}
 
 // 并发池：创建 N 个任务，最多同时运行 M 个
 async function runWithConcurrency<T>(
@@ -87,6 +152,12 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   // 一图一任务模式
   const [oneImagePerTask, setOneImagePerTask] = useState(false);
+
+  // 视频生成状态
+  const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
+  const [videoDuration, setVideoDuration] = useState<number>(6);
+  const [videoRatio, setVideoRatio] = useState<string>('9:16');
+  const [targetVideoSection, setTargetVideoSection] = useState<string | null>(null);
 
   // 用于取消正在进行的生成
   const abortRef = useRef<{ aborted: boolean }>({ aborted: false });
@@ -205,6 +276,40 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     });
   };
 
+  // 视频资源列表
+  const allVideos = resources.filter((r) => {
+    const desc = parseFolderName(r.type);
+    return desc?.mediaType === '视频';
+  });
+
+  // 视频选择变化时，自动根据第一个选中视频的元数据更新时长和比例
+  useEffect(() => {
+    if (selectedVideoIds.length === 0) return;
+    const firstVideo = allVideos.find((v) => v.id === selectedVideoIds[0]);
+    if (!firstVideo?.metadata || !isVideoMetadata(firstVideo.metadata)) return;
+    const meta = firstVideo.metadata;
+    // 时长取整上限，限制在 4~15 范围
+    setVideoDuration(Math.min(15, Math.max(4, Math.ceil(meta.duration))));
+    // 比例从宽高推算
+    if (meta.width > 0 && meta.height > 0) {
+      setVideoRatio(calcRatioFromDimensions(meta.width, meta.height));
+    }
+  }, [selectedVideoIds, allVideos]);
+
+  // 多选视频的处理函数
+  const toggleVideoSelection = (videoId: string) => {
+    if (isGenerating) return;
+    setSelectedVideoIds((prev) => {
+      if (prev.includes(videoId)) {
+        return prev.filter((id) => id !== videoId);
+      } else if (prev.length < 3) {
+        return [...prev, videoId];
+      } else {
+        return prev; // 最多 3 个
+      }
+    });
+  };
+
   // Load models when dialog opens
   useEffect(() => {
     if (visible) {
@@ -240,11 +345,18 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setTargetImageSection(imageSections.length > 0 ? imageSections[0].id : null);
       // 文本模式默认输出到提示词所在的卡片栏
       setTargetTextSection(promptResource?.type || sectionId || null);
+      // 视频模式默认输出到第一个视频卡片栏
+      const videoSections = sections.filter((s) => s.mediaType === '视频');
+      setTargetVideoSection(videoSections.length > 0 ? videoSections[0].id : null);
+      setSelectedVideoIds([]);
+      setVideoDuration(6);
+      setVideoRatio('9:16');
       abortRef.current = { aborted: false };
       // 根据 prompt 的 tag 设置默认生成模式
-      // 只有明确标记为 image/video 的才默认图片模式，其他（包括无标签）默认文本模式
       const meta = promptResource?.metadata;
-      if (meta && isTextMetadata(meta) && (meta.tag === 'image' || meta.tag === 'video')) {
+      if (meta && isTextMetadata(meta) && meta.tag === 'video') {
+        setMode('video');
+      } else if (meta && isTextMetadata(meta) && meta.tag === 'image') {
         setMode('image');
       } else {
         setMode('text');
@@ -470,9 +582,60 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     }
   };
 
+  // 生成视频
+  const handleGenerateVideo = async () => {
+    if (!selectedDraftId) {
+      message.error('请先选择草稿');
+      return;
+    }
+
+    if (!editedPrompt || editedPrompt.trim().length === 0) {
+      message.error('提示词内容不能为空');
+      return;
+    }
+
+    savePromptToHistory(editedPrompt);
+    setIsGenerating(true);
+    setIsStopping(false);
+    setCompletedCount(0);
+    setFailedCount(0);
+    abortRef.current = { aborted: false };
+
+    try {
+      const result = await window.api.task.generateVideo({
+        draftId: selectedDraftId,
+        imageResourceIds: selectedImageIds,
+        videoResourceIds: selectedVideoIds,
+        prompt: editedPrompt,
+        duration: videoDuration,
+        ratio: videoRatio,
+        targetSectionId: targetVideoSection || undefined,
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || '视频生成失败');
+      }
+
+      setCompletedCount(1);
+
+      // 刷新资源列表
+      await loadResources(selectedDraftId);
+
+      setIsGenerating(false);
+      message.success('视频生成完成');
+    } catch (error) {
+      console.error('Video generation error:', error);
+      showError(error instanceof Error ? error.message : '视频生成失败');
+      setFailedCount(1);
+      setIsGenerating(false);
+    }
+  };
+
   const handleGenerate = () => {
     if (mode === 'image') {
       handleGenerateImage();
+    } else if (mode === 'video') {
+      handleGenerateVideo();
     } else {
       handleGenerateText();
     }
@@ -485,16 +648,20 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   // 根据模式判断确定按钮是否可用
   const isOkDisabled = (() => {
-    if (isGenerating || !selectedModel) return true;
+    if (isGenerating) return true;
+    if (mode === 'video') return false; // 视频模式不需要选模型
+    if (!selectedModel) return true;
     return false;
   })();
 
-  const dialogTitle = mode === 'image' ? '生成新角色图片' : '生成文本';
+  const dialogTitle = mode === 'image' ? '生成新角色图片' : mode === 'video' ? '生成视频' : '生成文本';
 
   // 计算进度百分比
-  const totalTasks = (mode === 'image' && oneImagePerTask && selectedImageIds.length > 0)
-    ? selectedImageIds.length
-    : batchCount;
+  const totalTasks = mode === 'video'
+    ? 1
+    : (mode === 'image' && oneImagePerTask && selectedImageIds.length > 0)
+      ? selectedImageIds.length
+      : batchCount;
   const progressPercent = totalTasks > 0 ? Math.round(((completedCount + failedCount) / totalTasks) * 100) : 0;
 
   return (
@@ -529,6 +696,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             options={[
               { label: '生成图片', value: 'image' },
               { label: '生成文本', value: 'text' },
+              { label: '生成视频', value: 'video' },
             ]}
             value={mode}
             onChange={(val) => setMode(val as GenerateMode)}
@@ -536,56 +704,60 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           />
         </div>
 
-        {/* Model Selection */}
-        <div className={styles.section}>
-          <div className={styles.sectionTitle}>选择模型</div>
-          <Select
-            value={selectedModel}
-            onChange={setSelectedModel}
-            placeholder="请选择模型"
-            disabled={isGenerating}
-            className={styles.modelSelect}
-            options={models.map((m) => ({ value: m.id, label: m.name }))}
-          />
-        </div>
-
-        {/* Batch Controls */}
-        <div className={styles.section}>
-          <div className={styles.batchControls}>
-            {mode === 'image' && (
-              <>
-                <Checkbox
-                  checked={oneImagePerTask}
-                  onChange={(e) => setOneImagePerTask(e.target.checked)}
-                  disabled={isGenerating}
-                >
-                  一图一任务
-                </Checkbox>
-                <span style={{ width: 8 }} />
-              </>
-            )}
-            <span className={styles.batchLabel}>生成份数</span>
-            <InputNumber
-              min={1}
-              max={50}
-              value={(mode === 'image' && oneImagePerTask) ? selectedImageIds.length || 1 : batchCount}
-              onChange={(v) => setBatchCount(v || 1)}
-              disabled={isGenerating || (mode === 'image' && oneImagePerTask)}
-              size="small"
-              style={{ width: 70 }}
-            />
-            <span className={styles.batchLabel}>线程数</span>
-            <InputNumber
-              min={1}
-              max={8}
-              value={threadCount}
-              onChange={(v) => setThreadCount(v || 1)}
+        {/* Model Selection - not needed for video mode */}
+        {mode !== 'video' && (
+          <div className={styles.section}>
+            <div className={styles.sectionTitle}>选择模型</div>
+            <Select
+              value={selectedModel}
+              onChange={setSelectedModel}
+              placeholder="请选择模型"
               disabled={isGenerating}
-              size="small"
-              style={{ width: 70 }}
+              className={styles.modelSelect}
+              options={models.map((m) => ({ value: m.id, label: m.name }))}
             />
           </div>
-        </div>
+        )}
+
+        {/* Batch Controls - not for video mode */}
+        {mode !== 'video' && (
+          <div className={styles.section}>
+            <div className={styles.batchControls}>
+              {mode === 'image' && (
+                <>
+                  <Checkbox
+                    checked={oneImagePerTask}
+                    onChange={(e) => setOneImagePerTask(e.target.checked)}
+                    disabled={isGenerating}
+                  >
+                    一图一任务
+                  </Checkbox>
+                  <span style={{ width: 8 }} />
+                </>
+              )}
+              <span className={styles.batchLabel}>生成份数</span>
+              <InputNumber
+                min={1}
+                max={50}
+                value={(mode === 'image' && oneImagePerTask) ? selectedImageIds.length || 1 : batchCount}
+                onChange={(v) => setBatchCount(v || 1)}
+                disabled={isGenerating || (mode === 'image' && oneImagePerTask)}
+                size="small"
+                style={{ width: 70 }}
+              />
+              <span className={styles.batchLabel}>线程数</span>
+              <InputNumber
+                min={1}
+                max={8}
+                value={threadCount}
+                onChange={(v) => setThreadCount(v || 1)}
+                disabled={isGenerating}
+                size="small"
+                style={{ width: 70 }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Output Target & Resolution */}
         <div className={styles.section}>
@@ -602,6 +774,22 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                 size="small"
                 options={sections
                   .filter((s) => s.mediaType === '图片')
+                  .map((s) => ({
+                    label: `${s.order}. ${s.label}`,
+                    value: s.id,
+                  }))}
+              />
+            ) : mode === 'video' ? (
+              <Select
+                value={targetVideoSection}
+                onChange={setTargetVideoSection}
+                placeholder="默认（生成视频）"
+                allowClear
+                disabled={isGenerating}
+                style={{ width: 200 }}
+                size="small"
+                options={sections
+                  .filter((s) => s.mediaType === '视频')
                   .map((s) => ({
                     label: `${s.order}. ${s.label}`,
                     value: s.id,
@@ -635,6 +823,39 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                   <Radio value="2K">2K</Radio>
                   <Radio value="4K">4K</Radio>
                 </Radio.Group>
+              </>
+            )}
+            {mode === 'video' && (
+              <>
+                <span style={{ width: 16 }} />
+                <span className={styles.batchLabel}>时长</span>
+                <InputNumber
+                  min={4}
+                  max={15}
+                  value={videoDuration}
+                  onChange={(v) => setVideoDuration(v || 6)}
+                  disabled={isGenerating}
+                  size="small"
+                  style={{ width: 70 }}
+                  addonAfter="秒"
+                />
+                <span style={{ width: 8 }} />
+                <span className={styles.batchLabel}>比例</span>
+                <Select
+                  value={videoRatio}
+                  onChange={setVideoRatio}
+                  disabled={isGenerating}
+                  size="small"
+                  style={{ width: 90 }}
+                  options={[
+                    { label: '1:1', value: '1:1' },
+                    { label: '4:3', value: '4:3' },
+                    { label: '3:4', value: '3:4' },
+                    { label: '16:9', value: '16:9' },
+                    { label: '9:16', value: '9:16' },
+                    { label: '21:9', value: '21:9' },
+                  ]}
+                />
               </>
             )}
           </div>
@@ -776,6 +997,115 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
               </div>
             )}
           </div>
+        )}
+
+        {/* Video mode: Image & Video Selection */}
+        {mode === 'video' && (
+          <>
+            {/* 参考图片选择 */}
+            <div className={styles.section}>
+              <div className={styles.sectionTitle}>
+                参考图片（可选，最多 9 张）
+                <span className={styles.count}>
+                  已选 {selectedImageIds.length} / 共 {allImages.length} 张
+                </span>
+                <span className={styles.scaleControls}>
+                  <Button type="text" size="small" icon={<MinusOutlined />} onClick={handleDecreaseScale} disabled={cardScale <= SCALE_STEPS[0]} />
+                  <Button type="text" size="small" icon={<PlusOutlined />} onClick={handleIncreaseScale} disabled={cardScale >= SCALE_STEPS[SCALE_STEPS.length - 1]} />
+                </span>
+              </div>
+              {allImages.length === 0 ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="暂无图片资源"
+                  className={styles.empty}
+                  style={{ padding: '8px 0' }}
+                />
+              ) : (
+                <div className={styles.imageGrid} style={{ maxHeight: '30vh' }}>
+                  {allImages.map((img) => (
+                    <div
+                      key={img.id}
+                      className={`${styles.imageItem} ${selectedImageIds.includes(img.id) ? styles.selected : ''}`}
+                      onClick={() => {
+                        if (isGenerating) return;
+                        setSelectedImageIds((prev) => {
+                          if (prev.includes(img.id)) return prev.filter((id) => id !== img.id);
+                          if (prev.length < 9) return [...prev, img.id];
+                          return prev;
+                        });
+                      }}
+                    >
+                      <img
+                        src={getImageUrl(img)}
+                        alt={img.fileName}
+                        className={styles.thumbnail}
+                        style={{
+                          height: `calc(37.5vh * ${cardScale})`,
+                          maxWidth: `calc(52.5vw * ${cardScale})`,
+                        }}
+                      />
+                      {selectedImageIds.includes(img.id) && (
+                        <div className={styles.selectedBadge}>
+                          {selectedImageIds.indexOf(img.id) + 1}
+                        </div>
+                      )}
+                      <div className={styles.imageName} title={img.fileName}>
+                        {img.fileName}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 参考视频选择 */}
+            <div className={styles.section}>
+              <div className={styles.sectionTitle}>
+                参考视频（可选，最多 3 个）
+                <span className={styles.count}>
+                  已选 {selectedVideoIds.length} / 共 {allVideos.length} 个
+                </span>
+              </div>
+              {allVideos.length === 0 ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="暂无视频资源"
+                  className={styles.empty}
+                  style={{ padding: '8px 0' }}
+                />
+              ) : (
+                <div className={styles.imageGrid} style={{ maxHeight: '30vh' }}>
+                  {allVideos.map((vid) => (
+                    <div
+                      key={vid.id}
+                      className={`${styles.imageItem} ${selectedVideoIds.includes(vid.id) ? styles.selected : ''}`}
+                      onClick={() => toggleVideoSelection(vid.id)}
+                    >
+                      <VideoThumbnail
+                        resource={vid}
+                        style={{
+                          height: `calc(37.5vh * ${cardScale})`,
+                          maxWidth: `calc(52.5vw * ${cardScale})`,
+                        }}
+                      />
+                      {selectedVideoIds.includes(vid.id) && (
+                        <div className={styles.selectedBadge}>
+                          {selectedVideoIds.indexOf(vid.id) + 1}
+                        </div>
+                      )}
+                      <div className={styles.imageName} title={vid.fileName}>
+                        {vid.fileName}
+                      </div>
+                      <div className={`${styles.typeTag} ${styles.newTag}`}>
+                        {parseFolderName(vid.type)?.label || vid.type}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
 
         {/* Text Results - Text mode, show generated text cards */}

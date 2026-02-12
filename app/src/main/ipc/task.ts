@@ -13,6 +13,7 @@ const execAsync = promisify(exec);
 import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import imageApi from '../services/image-api';
+import videoApi from '../services/video-api';
 import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, getFFmpegPath } from '../services/python-bridge';
 import storage, { findOrCreateSection } from '../services/storage';
 import appConfigService from '../services/config';
@@ -126,6 +127,16 @@ interface TaskGenerateTextRequest {
   prompt: string;
   systemPrompt?: string;
   modelEndpoint: string;
+}
+
+interface TaskGenerateVideoRequest {
+  draftId: string;
+  imageResourceIds: string[];
+  videoResourceIds: string[];
+  prompt: string;
+  duration?: number;
+  ratio?: string;
+  targetSectionId?: string;
 }
 
 // ============================================
@@ -1315,6 +1326,91 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'IMAGE_GENERATION_ERROR',
+        };
+      }
+    }
+  );
+
+  // Generate video (Seedance 2.0 Omni Reference)
+  ipcMain.handle(
+    TASK_CHANNELS.GENERATE_VIDEO,
+    async (_, request: TaskGenerateVideoRequest): Promise<OperationResult<{ resourceId: string }>> => {
+      console.log('[TaskIPC] Received video generation request');
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Verify prompt
+        if (!request.prompt || request.prompt.trim().length === 0) {
+          return { success: false, error: '提示词内容不能为空' };
+        }
+
+        // Collect image file paths
+        const imageFiles: string[] = [];
+        for (const imageId of (request.imageResourceIds || [])) {
+          const res = await storage.resource.get(request.draftId, imageId);
+          if (!res) {
+            return { success: false, error: `图片资源未找到: ${imageId}` };
+          }
+          imageFiles.push(res.filePath);
+        }
+
+        // Collect video file paths
+        const videoFiles: string[] = [];
+        for (const videoId of (request.videoResourceIds || [])) {
+          const res = await storage.resource.get(request.draftId, videoId);
+          if (!res) {
+            return { success: false, error: `视频资源未找到: ${videoId}` };
+          }
+          videoFiles.push(res.filePath);
+        }
+
+        // Determine target section
+        const targetSectionDesc = request.targetSectionId
+          ? { id: request.targetSectionId }
+          : await findOrCreateSection(request.draftId, '视频', '生成视频');
+        const targetSection = targetSectionDesc.id;
+
+        // Allocate sequence number with lock
+        const lockKey = `${request.draftId}:${targetSection}`;
+        const filePath = await withSequenceLock(
+          lockKey,
+          async () => {
+            const nextFromFs = await storage.getNextSequenceNumber(request.draftId, targetSection);
+            const nextFromMemory = (allocatedSequenceNumbers.get(lockKey) || 0) + 1;
+            const sequenceNumber = Math.max(nextFromFs, nextFromMemory);
+            allocatedSequenceNumbers.set(lockKey, sequenceNumber);
+            const fp = storage.getResourceFilePath(request.draftId, targetSection, '.mp4', sequenceNumber);
+            await fs.mkdir(path.dirname(fp), { recursive: true });
+            return fp;
+          },
+        );
+
+        // Call video API
+        const result = await videoApi.generateVideo({
+          prompt: request.prompt,
+          imageFiles,
+          videoFiles,
+          duration: request.duration,
+          ratio: request.ratio,
+        });
+
+        // Write video file
+        await fs.writeFile(filePath, result.videoData);
+
+        // Build resource ID
+        const resourceId = buildResourceId(request.draftId, filePath);
+        console.log('[TaskIPC] Video generated:', resourceId);
+
+        return { success: true, data: { resourceId } };
+      } catch (error) {
+        console.error('[TaskIPC] Video generation failed:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'VIDEO_GENERATION_ERROR',
         };
       }
     }

@@ -51,6 +51,7 @@ export const TASK_CHANNELS = {
   GENERATE_IMAGE: 'task:generateImage',
   GENERATE_IMAGE_DIRECT: 'task:generateImageDirect',  // 直接生成图片（不走任务队列，支持并发）
   GENERATE_TEXT: 'task:generateText',
+  GENERATE_VIDEO: 'task:generateVideo',          // Seedance 2.0 视频生成
   SYNTHESIZE_VIDEO: 'task:synthesizeVideo',
   CANCEL: 'task:cancel',
   GET_MODELS: 'task:getModels',
