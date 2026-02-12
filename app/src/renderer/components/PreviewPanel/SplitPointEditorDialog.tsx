@@ -92,6 +92,8 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
       setHasError(false);
       isSeekingRef.current = false;
       wasPlayingRef.current = false;
+      // 延迟聚焦容器，确保 Modal 动画完成后 DOM 已就绪
+      setTimeout(() => containerRef.current?.focus(), 200);
     }
   }, [visible]);
 
@@ -119,20 +121,20 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
     };
   }, []);
 
-  // Setup video event listeners
+  // Setup video event listeners (duration / error / ended)
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !visible) return;
 
-    const handleLoadedMetadata = () => {
-      setDuration(video.duration);
-      setHasError(false);
+    const trySetDuration = () => {
+      if (isFinite(video.duration) && video.duration > 0) {
+        setDuration(video.duration);
+      }
     };
 
-    const handleTimeUpdate = () => {
-      if (!isSeekingRef.current) {
-        setCurrentTime(video.currentTime);
-      }
+    const handleLoadedMetadata = () => {
+      trySetDuration();
+      setHasError(false);
     };
 
     const handleEnded = () => {
@@ -152,24 +154,51 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
     };
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
-    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('durationchange', trySetDuration);
     video.addEventListener('ended', handleEnded);
     video.addEventListener('error', handleError);
     video.addEventListener('canplay', handleCanPlay);
 
     // 如果视频已经加载完成（可能是缓存），直接读取 duration
-    if (video.readyState >= 1 && video.duration) {
-      setDuration(video.duration);
+    if (video.readyState >= 1) {
+      trySetDuration();
     }
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('durationchange', trySetDuration);
       video.removeEventListener('ended', handleEnded);
       video.removeEventListener('error', handleError);
       video.removeEventListener('canplay', handleCanPlay);
     };
   }, [visible, src]);
+
+  // 使用 requestAnimationFrame 轮询更新播放进度（比 timeupdate 事件更可靠）
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !visible || !isPlaying) return;
+
+    let rafId: number;
+    let lastUpdate = 0;
+    const INTERVAL = 50; // ~20fps，足够平滑
+
+    const update = (timestamp: number) => {
+      if (timestamp - lastUpdate >= INTERVAL) {
+        if (!isSeekingRef.current) {
+          setCurrentTime(video.currentTime);
+        }
+        // 顺便检查 duration
+        if (duration === 0 && isFinite(video.duration) && video.duration > 0) {
+          setDuration(video.duration);
+        }
+        lastUpdate = timestamp;
+      }
+      rafId = requestAnimationFrame(update);
+    };
+    rafId = requestAnimationFrame(update);
+
+    return () => cancelAnimationFrame(rafId);
+  }, [visible, isPlaying, duration]);
 
   const togglePlay = useCallback(async () => {
     const video = videoRef.current;
@@ -482,7 +511,7 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
                 <Slider
                   value={currentTime}
                   min={0}
-                  max={duration || 100}
+                  max={effectiveDuration || 100}
                   step={0.1}
                   onChange={handleSliderChange}
                   onChangeComplete={handleSliderAfterChange}
@@ -498,7 +527,7 @@ const SplitPointEditorDialog: React.FC<SplitPointEditorDialogProps> = ({
                   </button>
 
                   <span className={styles.time}>
-                    {formatTime(currentTime)} / {formatTime(duration)}
+                    {formatTime(currentTime)} / {formatTime(effectiveDuration)}
                   </span>
                 </div>
 
