@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Empty, App, Popconfirm, Tooltip, Modal, Select } from 'antd';
-import { InboxOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, LinkOutlined, ThunderboltOutlined, MergeCellsOutlined, HolderOutlined } from '@ant-design/icons';
+import { InboxOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, LinkOutlined, ThunderboltOutlined, ExpandOutlined, BlockOutlined, HolderOutlined } from '@ant-design/icons';
 import type { Resource, SectionDescriptor, PromptTag } from '@shared/types';
 import type { UpscaleDialogResult } from './UpscaleDialog';
 import type { SynthesizeDialogResult } from './SynthesizeDialog';
@@ -925,7 +925,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
               onClick={() => setUpscaleDialogOpen(true)}
               disabled={isUpscaling}
             >
-              <ThunderboltOutlined />
+              <ExpandOutlined />
             </button>
           </Tooltip>
         )}
@@ -936,7 +936,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
               onClick={() => setSynthesizeDialogOpen(true)}
               disabled={isSynthesizing}
             >
-              <MergeCellsOutlined />
+              <BlockOutlined />
             </button>
           </Tooltip>
         )}
