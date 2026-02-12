@@ -142,17 +142,17 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const { renameSection, deleteSection } = useSectionsStore();
   const { message } = App.useApp();
 
-  // 双击标题进入重命名
+  // 双击标题进入重命名（用 label 而非 title，避免序号前缀被带入）
   const handleTitleDoubleClick = useCallback(() => {
-    setRenameValue(title);
+    setRenameValue(section.label);
     setIsRenaming(true);
     // 等 DOM 更新后 focus
     setTimeout(() => renameInputRef.current?.select(), 0);
-  }, [title]);
+  }, [section.label]);
 
   const handleRenameConfirm = useCallback(async () => {
     const trimmed = renameValue.trim();
-    if (!trimmed || trimmed === title) {
+    if (!trimmed || trimmed === section.label) {
       setIsRenaming(false);
       return;
     }
@@ -166,7 +166,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       message.error('重命名失败');
     }
     setIsRenaming(false);
-  }, [renameValue, title, selectedDraftId, sectionId, renameSection, loadResources, message]);
+  }, [renameValue, section.label, selectedDraftId, sectionId, renameSection, loadResources, message]);
 
   const handleRenameKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
