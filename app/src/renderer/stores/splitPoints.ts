@@ -114,6 +114,14 @@ export const useSplitPointsStore = create<SplitPointsState>((set, get) => ({
         console.log('[SplitPointsStore] Loaded split points:', result.data.splitPoints.length);
         return true;
       }
+      // 没有已保存的分割点，但仍设置 draftId/videoId 以便手动添加时能保存
+      set({
+        draftId,
+        videoId,
+        splitPoints: [],
+        selectedPointId: null,
+        error: null,
+      });
       return false;
     } catch (err) {
       console.error('[SplitPointsStore] Failed to load split points:', err);

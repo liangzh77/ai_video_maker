@@ -197,13 +197,13 @@ const PreviewPanel: React.FC = () => {
     }
 
     // Skip if already loaded for this video
-    if (videoId === selectedResourceId && splitPoints.length > 0) {
+    if (videoId === selectedResourceId) {
       return;
     }
 
     // Try to load saved split points
     loadSplitPoints(selectedDraftId, selectedResourceId);
-  }, [selectedDraftId, selectedResourceId, selectedResource, videoId, splitPoints.length, loadSplitPoints]);
+  }, [selectedDraftId, selectedResourceId, selectedResource, videoId, loadSplitPoints]);
 
   const handleOpenFolder = async () => {
     if (selectedResourceId) {
@@ -414,13 +414,12 @@ const PreviewPanel: React.FC = () => {
                   disabled={!hasSplitPoints}
                 />
               </Tooltip>
-              {/* Editor button - only enabled when has split points */}
-              <Tooltip title={hasSplitPoints ? '放大编辑分割点' : '请先分析视频'}>
+              {/* Editor button - always enabled, can manually add split points */}
+              <Tooltip title="编辑分割点">
                 <Button
                   type="text"
                   icon={<ExpandOutlined />}
                   onClick={() => setEditorDialogVisible(true)}
-                  disabled={!hasSplitPoints}
                 />
               </Tooltip>
             </Space>
@@ -489,7 +488,7 @@ const PreviewPanel: React.FC = () => {
               ref={videoPlayerRef}
               src={getLocalFileUrl(selectedResource.filePath, selectedResource.fileSize)}
               resource={selectedResource}
-              showSplitTimeline={canAnalyzeAndSplit && hasSplitPoints}
+              showSplitTimeline={canAnalyzeAndSplit}
               onEnded={handleVideoEnded}
               autoPlay={shouldAutoPlay && isContinuousPlayType(selectedResource.type)}
             />

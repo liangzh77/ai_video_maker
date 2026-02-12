@@ -523,6 +523,13 @@ export function registerResourceHandlers(): void {
 
           try {
             await fs.copyFile(foundResource.filePath, newFilePath, fsConstants.COPYFILE_EXCL);
+            // 复制伴随的分割点文件（忽略不存在）
+            try {
+              await fs.copyFile(
+                foundResource.filePath + '.分割点.json',
+                newFilePath + '.分割点.json'
+              );
+            } catch {}
             break; // 复制成功
           } catch (err: any) {
             if (err.code === 'EEXIST' && retry < MAX_RETRIES - 1) {

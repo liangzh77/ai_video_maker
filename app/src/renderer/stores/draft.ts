@@ -4,6 +4,7 @@ import { parseFolderName } from '@shared/section-utils';
 import { useSceneLinkStore } from './sceneLink';
 import { useSectionsStore } from './sections';
 import { usePlaybackStore } from './playback';
+import { useSplitPointsStore } from './splitPoints';
 import { clearThumbnailCache } from '../components/ResourcePanel/ResourceCard';
 
 // ============================================
@@ -478,12 +479,27 @@ export const useDraftStore = create<DraftState>((set, get) => ({
         }
 
         // 重排序后资源 ID 会变化（因为文件名变了）
+        // 将 selectedResourceId 映射到新 ID（通过 newOrder 和 result.data 的位置对应关系）
+        const currentSelectedId = get().selectedResourceId;
+        let newSelectedId = currentSelectedId;
+        if (currentSelectedId) {
+          const oldIndex = newOrder.indexOf(currentSelectedId);
+          if (oldIndex !== -1 && oldIndex < result.data.length) {
+            // result.data 按文件名排序，与 newOrder 顺序一致
+            newSelectedId = result.data[oldIndex].id;
+          }
+        }
+
         set((state) => {
           const otherResources = state.resources.filter((r) => r.type !== sectionId);
           return {
             resources: [...otherResources, ...result.data!],
+            selectedResourceId: newSelectedId,
           };
         });
+
+        // 清空分割点缓存，强制重新加载（避免显示旧视频的分割点）
+        useSplitPointsStore.getState().clearPoints();
 
         // 重新加载关联关系（后端已更新了 关联.json 中的资源引用）
         await useSceneLinkStore.getState().loadFromStorage(selectedDraftId);

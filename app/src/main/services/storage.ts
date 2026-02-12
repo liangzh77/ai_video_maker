@@ -504,6 +504,7 @@ export async function scanResources(draftId: string, type?: ResourceType): Promi
       for (const entry of entries) {
         if (!entry.isFile()) continue;
         if (entry.name.startsWith('.') || entry.name.startsWith('_temp_')) continue;
+        if (entry.name.endsWith('.分割点.json')) continue;
 
         const filePath = path.join(folderPath, entry.name);
         const relativePath = `${section.id}/${entry.name}`;
@@ -686,6 +687,8 @@ export async function reorderResourceFiles(
 
     try {
       await fs.rename(oldPath, tempPath);
+      // 同步重命名伴随的分割点文件（忽略不存在）
+      try { await fs.rename(oldPath + '.分割点.json', tempPath + '.分割点.json'); } catch {}
       console.log('[Storage] Step 1 SUCCESS:', oldPath, '->', tempPath);
       tempRenames.push({ oldId: resourceId, oldPath, tempPath, originalName, ext });
     } catch (err) {
@@ -695,6 +698,7 @@ export async function reorderResourceFiles(
       for (const item of tempRenames) {
         try {
           await fs.rename(item.tempPath, item.oldPath);
+          try { await fs.rename(item.tempPath + '.分割点.json', item.oldPath + '.分割点.json'); } catch {}
           console.log('[Storage] Rollback SUCCESS:', item.tempPath, '->', item.oldPath);
         } catch (rollbackErr) {
           console.error('[Storage] Rollback FAILED:', item.tempPath, rollbackErr);
@@ -720,6 +724,8 @@ export async function reorderResourceFiles(
 
     try {
       await fs.rename(tempPath, newPath);
+      // 同步重命名伴随的分割点文件（忽略不存在）
+      try { await fs.rename(tempPath + '.分割点.json', newPath + '.分割点.json'); } catch {}
       console.log('[Storage] Step 2 SUCCESS:', tempPath, '->', newPath);
       newResourceIds.push(newRelativePath);
       oldToNewIdMap.set(oldId, newRelativePath);
@@ -754,7 +760,7 @@ export async function renumberResourceFiles(
   try {
     const entries = await fs.readdir(folderPath, { withFileTypes: true });
     const fileNames = entries
-      .filter(e => e.isFile() && !e.name.startsWith('.') && !e.name.startsWith('_temp_'))
+      .filter(e => e.isFile() && !e.name.startsWith('.') && !e.name.startsWith('_temp_') && !e.name.endsWith('.分割点.json'))
       .map(e => e.name)
       .sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true }));
 
@@ -1161,6 +1167,8 @@ export async function deleteResource(draftId: string, resourceId: string): Promi
 
   try {
     await fs.unlink(filePath);
+    // 尝试删除伴随的分割点文件（忽略不存在）
+    try { await fs.unlink(filePath + '.分割点.json'); } catch {}
     await updateDraft(draftId, {});
     return true;
   } catch (err) {
@@ -1177,9 +1185,9 @@ export async function deleteResource(draftId: string, resourceId: string): Promi
 // Split Points Storage
 // ============================================
 
-function getSplitPointsPath(draftId: string, _videoId: string): string {
-  // 使用固定的文件名，存储在 files 目录下
-  return path.join(getFilesPath(draftId), '分割点.txt');
+function getSplitPointsPath(draftId: string, videoId: string): string {
+  // 在视频文件同目录创建同名伴随文件，如 001_example.mp4.分割点.json
+  return path.join(getFilesPath(draftId), videoId + '.分割点.json');
 }
 
 interface SplitPointsFile {
