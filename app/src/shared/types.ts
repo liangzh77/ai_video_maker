@@ -43,7 +43,7 @@ export type ResourceType = string;
 /**
  * 媒体类型：决定卡片栏的行为（接受什么文件、显示什么按钮等）
  */
-export type MediaType = '视频' | '图片' | '提示词';
+export type MediaType = '视频' | '图片' | '提示词' | '声音';
 
 /**
  * Section 描述符：从文件夹名解析得出
@@ -67,7 +67,7 @@ export interface Resource {
   metadata: ResourceMetadata;
 }
 
-export type ResourceMetadata = VideoMetadata | ImageMetadata | TextMetadata;
+export type ResourceMetadata = VideoMetadata | ImageMetadata | TextMetadata | AudioMetadata;
 
 export interface VideoMetadata {
   duration: number;       // seconds
@@ -89,6 +89,14 @@ export interface ImageMetadata {
   format: 'png' | 'jpg' | 'webp';
 }
 
+export interface AudioMetadata {
+  duration: number;      // seconds
+  sampleRate: number;    // Hz
+  bitrate: number;       // kbps
+  channels: number;
+  codec: string;
+}
+
 export type PromptTag = 'text' | 'image' | 'video';
 
 export interface TextMetadata {
@@ -108,6 +116,10 @@ export function isImageMetadata(meta: ResourceMetadata): meta is ImageMetadata {
 
 export function isTextMetadata(meta: ResourceMetadata): meta is TextMetadata {
   return 'content' in meta && 'encoding' in meta;
+}
+
+export function isAudioMetadata(meta: ResourceMetadata): meta is AudioMetadata {
+  return 'sampleRate' in meta && 'channels' in meta;
 }
 
 // ============================================

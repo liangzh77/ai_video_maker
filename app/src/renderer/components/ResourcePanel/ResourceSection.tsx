@@ -54,6 +54,12 @@ const EXTENSION_MEDIA_TYPES: Record<string, string> = {
   // Text
   '.txt': 'text',
   '.md': 'text',
+  // Audio
+  '.mp3': 'audio',
+  '.wav': 'audio',
+  '.flac': 'audio',
+  '.aac': 'audio',
+  '.ogg': 'audio',
 };
 
 // File type validation
@@ -907,9 +913,11 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           </Tooltip>
         )}
         {isText && (
-          <button className={`${styles.addButton} ${styles.upscaleButton}`} onClick={handleAddPrompt} title="添加提示词">
-            <PlusOutlined />
-          </button>
+          <Tooltip title="添加提示词">
+            <button className={`${styles.addButton} ${styles.upscaleButton}`} onClick={handleAddPrompt}>
+              <PlusOutlined />
+            </button>
+          </Tooltip>
         )}
         {canBatchLink && (
           <Tooltip title="批量关联">

@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import type { ResourceMetadata, VideoMetadata, ImageMetadata, TextMetadata, PromptTag } from '@shared/types';
+import type { ResourceMetadata, VideoMetadata, ImageMetadata, TextMetadata, AudioMetadata, PromptTag } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { getFFmpegPath, getFFprobePath } from './python-bridge';
 import thumbnailCache from './thumbnailCache';
@@ -29,6 +29,12 @@ const MIME_TYPES: Record<string, string> = {
   // Text
   '.txt': 'text/plain',
   '.md': 'text/markdown',
+  // Audio
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
+  '.aac': 'audio/aac',
+  '.ogg': 'audio/ogg',
 };
 
 const SUPPORTED_VIDEO_EXTENSIONS = ['.mp4', '.mov', '.avi'];
@@ -39,10 +45,11 @@ export function getMimeType(filePath: string): string {
   return MIME_TYPES[ext] || 'application/octet-stream';
 }
 
-export function getResourceTypeFromMime(mimeType: string): 'video' | 'image' | 'text' | null {
+export function getResourceTypeFromMime(mimeType: string): 'video' | 'image' | 'text' | 'audio' | null {
   if (mimeType.startsWith('video/')) return 'video';
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType.startsWith('text/')) return 'text';
+  if (mimeType.startsWith('audio/')) return 'audio';
   return null;
 }
 
@@ -157,6 +164,40 @@ async function extractImageMetadata(filePath: string): Promise<ImageMetadata> {
 }
 
 // ============================================
+// Audio Metadata Extraction (using FFprobe)
+// ============================================
+
+async function extractAudioMetadata(filePath: string): Promise<AudioMetadata> {
+  try {
+    const ffprobePath = getFFprobePath();
+    const { stdout } = await execAsync(
+      `"${ffprobePath}" -v quiet -print_format json -show_format -show_streams "${filePath}"`,
+      { encoding: 'utf-8' }
+    );
+
+    const probe: FFProbeResult = JSON.parse(stdout);
+    const audioStream = probe.streams.find((s) => s.codec_type === 'audio');
+
+    return {
+      duration: probe.format.duration ? parseFloat(probe.format.duration) : 0,
+      sampleRate: (audioStream as any)?.sample_rate ? parseInt((audioStream as any).sample_rate, 10) : 0,
+      bitrate: (probe.format as any)?.bit_rate ? Math.round(parseInt((probe.format as any).bit_rate, 10) / 1000) : 0,
+      channels: (audioStream as any)?.channels || 0,
+      codec: audioStream?.codec_name || 'unknown',
+    };
+  } catch (error) {
+    console.warn('FFprobe not available, using default audio metadata');
+    return {
+      duration: 0,
+      sampleRate: 0,
+      bitrate: 0,
+      channels: 0,
+      codec: 'unknown',
+    };
+  }
+}
+
+// ============================================
 // Text Metadata Extraction
 // ============================================
 
@@ -241,12 +282,15 @@ export async function extractMetadata(
     case 'image':
       metadata = await extractImageMetadata(filePath);
       break;
+    case 'audio':
+      metadata = await extractAudioMetadata(filePath);
+      break;
     default:
       metadata = { content: '', encoding: 'utf-8' } as TextMetadata;
   }
 
   // 保存到持久化缓存
-  if (draftPath && (generalType === 'video' || generalType === 'image')) {
+  if (draftPath && (generalType === 'video' || generalType === 'image' || generalType === 'audio')) {
     await thumbnailCache.saveMetadata(draftPath, filePath, metadata);
   }
 
@@ -283,6 +327,7 @@ export const metadata = {
   extractVideo: extractVideoMetadata,
   extractImage: extractImageMetadata,
   extractText: extractTextMetadata,
+  extractAudio: extractAudioMetadata,
   captureVideoFrame,
 };
 

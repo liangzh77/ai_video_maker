@@ -120,6 +120,7 @@ interface TaskResplitSceneRequest {
 interface TaskExtractAudioRequest {
   draftId: string;
   videoResourceId: string;
+  targetSectionId: string;
 }
 
 interface TaskGenerateTextRequest {
@@ -1145,13 +1146,13 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
     }
   );
 
-  // Extract audio from video
+  // Extract audio from video to a section
   ipcMain.handle(
     TASK_CHANNELS.EXTRACT_AUDIO,
     async (_, request: TaskExtractAudioRequest): Promise<OperationResult<{ filePath: string }>> => {
       console.log('[TaskIPC] Received extract audio request:', request);
       try {
-        const { draftId, videoResourceId } = request;
+        const { draftId, videoResourceId, targetSectionId } = request;
 
         // 验证草稿存在
         const draft = await storage.draft.get(draftId);
@@ -1171,39 +1172,16 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           return { success: false, error: 'NO_AUDIO: Video has no audio track' };
         }
 
-        // 生成默认文件名
-        const videoFileName = path.basename(videoResource.fileName, path.extname(videoResource.fileName));
-        const defaultName = `${videoFileName}_audio.mp3`;
+        // 获取目标 section 的输出路径
+        const sequenceNumber = await storage.getNextSequenceNumber(draftId, targetSectionId);
+        const outputPath = storage.getResourceFilePath(draftId, targetSectionId, '.mp3', sequenceNumber);
 
-        // 打开保存对话框
-        const result = await dialog.showSaveDialog(mainWindowRef!, {
-          title: '保存音频',
-          defaultPath: defaultName,
-          filters: [
-            { name: 'MP3 Audio', extensions: ['mp3'] },
-            { name: 'AAC Audio', extensions: ['aac'] },
-            { name: 'WAV Audio', extensions: ['wav'] },
-          ],
-        });
+        // 确保目录存在
+        await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-        if (result.canceled || !result.filePath) {
-          return { success: false, error: 'CANCELLED: User cancelled save dialog' };
-        }
-
-        const outputPath = result.filePath;
-        const ext = path.extname(outputPath).toLowerCase();
-
-        // 根据扩展名选择编码器
-        let audioCodec = 'libmp3lame';
-        if (ext === '.aac') {
-          audioCodec = 'aac';
-        } else if (ext === '.wav') {
-          audioCodec = 'pcm_s16le';
-        }
-
-        // 使用 FFmpeg 提取音频
+        // 使用 FFmpeg 提取音频（统一输出 mp3 格式）
         const ffmpegPath = getFFmpegPath();
-        const ffmpegCmd = `"${ffmpegPath}" -y -i "${videoResource.filePath}" -vn -acodec ${audioCodec} "${outputPath}"`;
+        const ffmpegCmd = `"${ffmpegPath}" -y -i "${videoResource.filePath}" -vn -acodec libmp3lame "${outputPath}"`;
 
         console.log('[TaskIPC] FFmpeg command:', ffmpegCmd);
         await execAsync(ffmpegCmd);

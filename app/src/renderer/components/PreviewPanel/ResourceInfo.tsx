@@ -2,7 +2,7 @@ import React from 'react';
 import { Button, Tooltip, Popconfirm, message } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 import type { Resource } from '@shared/types';
-import { isVideoMetadata, isImageMetadata } from '@shared/types';
+import { isVideoMetadata, isImageMetadata, isAudioMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import styles from './ResourceInfo.module.css';
@@ -45,6 +45,7 @@ const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
 
   const isVideo = isVideoMetadata(resource.metadata);
   const isImage = isImageMetadata(resource.metadata);
+  const isAudio = isAudioMetadata(resource.metadata);
 
   return (
     <div className={styles.info}>
@@ -95,6 +96,31 @@ const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
               {resource.metadata.width}×{resource.metadata.height}
             </span>
           </div>
+        )}
+
+        {isAudio && (
+          <>
+            <div className={styles.item}>
+              <span className={styles.label}>时长</span>
+              <span className={styles.value}>{formatDuration(resource.metadata.duration)}</span>
+            </div>
+            <div className={styles.item}>
+              <span className={styles.label}>采样率</span>
+              <span className={styles.value}>{resource.metadata.sampleRate} Hz</span>
+            </div>
+            <div className={styles.item}>
+              <span className={styles.label}>比特率</span>
+              <span className={styles.value}>{resource.metadata.bitrate} kbps</span>
+            </div>
+            <div className={styles.item}>
+              <span className={styles.label}>声道</span>
+              <span className={styles.value}>{resource.metadata.channels}</span>
+            </div>
+            <div className={styles.item}>
+              <span className={styles.label}>编码</span>
+              <span className={styles.value}>{resource.metadata.codec}</span>
+            </div>
+          </>
         )}
 
         <div className={styles.item}>

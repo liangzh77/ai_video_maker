@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Input, Button, App, Segmented } from 'antd';
-import { SaveOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { SaveOutlined, ThunderboltOutlined, CopyOutlined } from '@ant-design/icons';
 import type { Resource, TextMetadata, PromptTag } from '@shared/types';
 import { isTextMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
@@ -88,6 +88,20 @@ const TextEditor: React.FC<TextEditorProps> = ({ resource }) => {
       <div className={styles.header}>
         <span className={styles.label}>内容编辑</span>
         <div className={styles.actions}>
+          <Button
+            size="small"
+            icon={<CopyOutlined />}
+            onClick={() => {
+              navigator.clipboard.writeText(content).then(() => {
+                message.success('已复制到剪贴板');
+              }).catch(() => {
+                message.error('复制失败');
+              });
+            }}
+            disabled={!content}
+          >
+            复制
+          </Button>
           <Button
             size="small"
             icon={<ThunderboltOutlined />}

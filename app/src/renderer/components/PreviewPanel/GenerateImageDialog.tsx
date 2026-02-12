@@ -11,6 +11,9 @@ import styles from './GenerateImageDialog.module.css';
 // 视频缩略图缓存
 const videoThumbCache = new Map<string, string>();
 
+// 缓存每种生成模式上次选择的输出卡片栏标签（跨对话框打开保持）
+const targetSectionLabelCache: Record<string, string | null> = {};
+
 /** 视频缩略图组件 */
 const VideoThumbnail: React.FC<{ resource: Resource; style?: React.CSSProperties }> = ({ resource, style }) => {
   const cacheKey = `${resource.id}_${resource.fileSize}`;
@@ -310,6 +313,29 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     });
   };
 
+  // 输出卡片栏变更时更新缓存
+  const handleTargetImageSectionChange = (sectionId: string) => {
+    setTargetImageSection(sectionId || null);
+    if (sectionId) {
+      const sec = sections.find((s) => s.id === sectionId);
+      if (sec) targetSectionLabelCache.image = sec.label;
+    }
+  };
+  const handleTargetTextSectionChange = (sectionId: string) => {
+    setTargetTextSection(sectionId || null);
+    if (sectionId) {
+      const sec = sections.find((s) => s.id === sectionId);
+      if (sec) targetSectionLabelCache.text = sec.label;
+    }
+  };
+  const handleTargetVideoSectionChange = (sectionId: string) => {
+    setTargetVideoSection(sectionId || null);
+    if (sectionId) {
+      const sec = sections.find((s) => s.id === sectionId);
+      if (sec) targetSectionLabelCache.video = sec.label;
+    }
+  };
+
   // Load models when dialog opens
   useEffect(() => {
     if (visible) {
@@ -340,14 +366,24 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setFailedCount(0);
       setTextResults([]);
       setIsStopping(false);
-      // 图片模式默认输出到第一个图片卡片栏
+      // 图片模式：从缓存恢复，或默认第一个
       const imageSections = sections.filter((s) => s.mediaType === '图片');
-      setTargetImageSection(imageSections.length > 0 ? imageSections[0].id : null);
-      // 文本模式默认输出到提示词所在的卡片栏
-      setTargetTextSection(promptResource?.type || sectionId || null);
-      // 视频模式默认输出到第一个视频卡片栏
+      const cachedImageSection = targetSectionLabelCache.image
+        ? imageSections.find((s) => s.label === targetSectionLabelCache.image)
+        : null;
+      setTargetImageSection(cachedImageSection?.id || (imageSections.length > 0 ? imageSections[0].id : null));
+      // 文本模式：从缓存恢复，或默认提示词所在栏
+      const textSections = sections.filter((s) => s.mediaType === '提示词');
+      const cachedTextSection = targetSectionLabelCache.text
+        ? textSections.find((s) => s.label === targetSectionLabelCache.text)
+        : null;
+      setTargetTextSection(cachedTextSection?.id || promptResource?.type || sectionId || null);
+      // 视频模式：从缓存恢复，或默认第一个
       const videoSections = sections.filter((s) => s.mediaType === '视频');
-      setTargetVideoSection(videoSections.length > 0 ? videoSections[0].id : null);
+      const cachedVideoSection = targetSectionLabelCache.video
+        ? videoSections.find((s) => s.label === targetSectionLabelCache.video)
+        : null;
+      setTargetVideoSection(cachedVideoSection?.id || (videoSections.length > 0 ? videoSections[0].id : null));
       setSelectedVideoIds([]);
       setVideoDuration(6);
       setVideoRatio('9:16');
@@ -766,7 +802,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             {mode === 'image' ? (
               <Select
                 value={targetImageSection}
-                onChange={setTargetImageSection}
+                onChange={handleTargetImageSectionChange}
                 placeholder="默认（新角色图片）"
                 allowClear
                 disabled={isGenerating}
@@ -782,7 +818,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             ) : mode === 'video' ? (
               <Select
                 value={targetVideoSection}
-                onChange={setTargetVideoSection}
+                onChange={handleTargetVideoSectionChange}
                 placeholder="默认（生成视频）"
                 allowClear
                 disabled={isGenerating}
@@ -798,7 +834,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             ) : (
               <Select
                 value={targetTextSection}
-                onChange={setTargetTextSection}
+                onChange={handleTargetTextSectionChange}
                 placeholder="当前提示词栏"
                 disabled={isGenerating}
                 style={{ width: 200 }}

@@ -24,6 +24,7 @@ const MEDIA_TYPE_OPTIONS = [
   { label: '视频', value: '视频' },
   { label: '图片', value: '图片' },
   { label: '提示词', value: '提示词' },
+  { label: '声音', value: '声音' },
 ];
 
 export function getTemplate(): TemplateItem[] {

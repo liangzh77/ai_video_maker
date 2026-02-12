@@ -43,7 +43,7 @@ export interface ElectronAPI {
     generateText: (params: { draftId: string; prompt: string; systemPrompt?: string; modelEndpoint: string }) => Promise<any>;
     generateVideo: (params: { draftId: string; imageResourceIds: string[]; videoResourceIds: string[]; prompt: string; duration?: number; ratio?: string; targetSectionId?: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any; targetSectionId?: string; newSectionLabel?: string }) => Promise<any>;
-    extractAudio: (params: { draftId: string; videoResourceId: string }) => Promise<any>;
+    extractAudio: (params: { draftId: string; videoResourceId: string; targetSectionId: string }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
   };
   config: {

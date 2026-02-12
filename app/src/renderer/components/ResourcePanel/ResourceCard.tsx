@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, VideoCameraOutlined, LoadingOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, VideoCameraOutlined, LoadingOutlined, SoundOutlined } from '@ant-design/icons';
 import { App } from 'antd';
 import type { Resource, OperationResult } from '@shared/types';
-import { isVideoMetadata } from '@shared/types';
+import { isVideoMetadata, isAudioMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import { usePlaybackStore, isContinuousPlayType } from '../../stores/playback';
@@ -188,6 +188,7 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
   const isSelected = selectedResourceId === resource.id;
   const isVideo = resource.mimeType.startsWith('video/');
   const isImage = resource.mimeType.startsWith('image/');
+  const isAudio = resource.mimeType.startsWith('audio/');
 
   // 检查是否支持点击播放（所有视频类型 section 都支持）
   const supportsContinuousPlay = isVideo && isContinuousPlayType(resource.type);
@@ -274,6 +275,15 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
       );
     }
 
+    // 音频占位图标
+    if (isAudio) {
+      return (
+        <div className={styles.videoPlaceholder}>
+          <SoundOutlined className={styles.playIcon} />
+        </div>
+      );
+    }
+
     // Fallback placeholder for other types
     return (
       <div className={styles.videoPlaceholder}>
@@ -331,6 +341,18 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
         )}
 
         {isVideo && isVideoMetadata(resource.metadata) && (
+          <span className={styles.duration}>
+            {formatDuration(resource.metadata.duration)}
+          </span>
+        )}
+
+        {isAudio && (
+          <span className={styles.videoIndicator}>
+            <SoundOutlined />
+          </span>
+        )}
+
+        {isAudio && isAudioMetadata(resource.metadata) && (
           <span className={styles.duration}>
             {formatDuration(resource.metadata.duration)}
           </span>

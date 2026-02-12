@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Button, Tooltip, Space, App } from 'antd';
+import { Button, Tooltip, Space, App, Modal, Select } from 'antd';
 import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined, EditOutlined, LinkOutlined, SoundOutlined, PlaySquareOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
 import { useSplitPointsStore } from '../../stores/splitPoints';
@@ -36,6 +36,7 @@ const PreviewPanel: React.FC = () => {
   const [dualPlayerVisible, setDualPlayerVisible] = useState(false);
   const [fullscreenVideoVisible, setFullscreenVideoVisible] = useState(false);
   const videoPlayerRef = useRef<VideoPlayerRef>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement>(null);
 
   // 获取按文件名排序的资源列表（getResourcesByType 已自动排序）
   const getSortedResources = useCallback((sectionId: string) => {
@@ -154,12 +155,28 @@ const PreviewPanel: React.FC = () => {
       // 只响应空格键
       if (e.code !== 'Space') return;
 
-      // 检查当前资源是否是视频（所有视频都支持空格键控制）
       if (!selectedResource) return;
-      if (!selectedResource.mimeType.startsWith('video/')) return;
 
-      e.preventDefault();
-      videoPlayerRef.current?.togglePlay();
+      // 视频：空格键播放/暂停
+      if (selectedResource.mimeType.startsWith('video/')) {
+        e.preventDefault();
+        videoPlayerRef.current?.togglePlay();
+        return;
+      }
+
+      // 音频：空格键播放/暂停
+      if (selectedResource.mimeType.startsWith('audio/')) {
+        e.preventDefault();
+        const audio = audioPlayerRef.current;
+        if (audio) {
+          if (audio.paused) {
+            audio.play();
+          } else {
+            audio.pause();
+          }
+        }
+        return;
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -260,29 +277,52 @@ const PreviewPanel: React.FC = () => {
     }
   }, [selectedDraftId, selectedResourceId, selectedResource, sections, getResourcesByType, loadResources, message]);
 
-  // 处理提取音频
-  const handleExtractAudio = useCallback(async () => {
-    if (!selectedDraftId || !selectedResourceId) return;
+  // 提取声音对话框状态
+  const [extractAudioVisible, setExtractAudioVisible] = useState(false);
+  const [extractAudioTargetSection, setExtractAudioTargetSection] = useState<string>('');
+  const [extractAudioLoading, setExtractAudioLoading] = useState(false);
 
+  // 获取所有声音类型的 section
+  const audioSections = useMemo(() => {
+    return sections.filter((s) => {
+      const desc = parseFolderName(s.id);
+      return desc?.mediaType === '声音';
+    });
+  }, [sections]);
+
+  // 打开提取声音对话框
+  const handleOpenExtractAudio = useCallback(() => {
+    // 默认选中第一个声音 section
+    setExtractAudioTargetSection(audioSections.length > 0 ? audioSections[0].id : '');
+    setExtractAudioVisible(true);
+  }, [audioSections]);
+
+  // 确认提取声音
+  const handleConfirmExtractAudio = useCallback(async () => {
+    if (!selectedDraftId || !selectedResourceId || !extractAudioTargetSection) return;
+
+    setExtractAudioLoading(true);
     try {
       const result = await window.api.task.extractAudio({
         draftId: selectedDraftId,
         videoResourceId: selectedResourceId,
+        targetSectionId: extractAudioTargetSection,
       });
 
       if (!result.success) {
-        if (result.error === 'CANCELLED: User cancelled save dialog') {
-          // 用户取消，不显示错误
-          return;
-        }
         throw new Error(result.error || 'Extract audio failed');
       }
 
-      message.success('音频已保存');
+      message.success('声音已提取');
+      setExtractAudioVisible(false);
+      // 刷新资源列表
+      await loadResources(selectedDraftId);
     } catch (error) {
-      message.error('提取音频失败: ' + (error instanceof Error ? error.message : '未知错误'));
+      message.error('提取声音失败: ' + (error instanceof Error ? error.message : '未知错误'));
+    } finally {
+      setExtractAudioLoading(false);
     }
-  }, [selectedDraftId, selectedResourceId, message]);
+  }, [selectedDraftId, selectedResourceId, extractAudioTargetSection, message, loadResources]);
 
   // Check if split points are for current video
   const hasSplitPoints = splitPoints.length > 0 && videoId === selectedResourceId;
@@ -330,6 +370,7 @@ const PreviewPanel: React.FC = () => {
 
   const isVideo = selectedResource.mimeType.startsWith('video/');
   const isImage = selectedResource.mimeType.startsWith('image/');
+  const isAudio = selectedResource.mimeType.startsWith('audio/');
   const isText = isTextMetadata(selectedResource.metadata);
 
   // 视频 metadata
@@ -403,11 +444,11 @@ const PreviewPanel: React.FC = () => {
             </Tooltip>
           )}
           {isVideo && hasAudio && (
-            <Tooltip title="保存音频">
+            <Tooltip title="提取声音">
               <Button
                 type="text"
                 icon={<SoundOutlined />}
-                onClick={handleExtractAudio}
+                onClick={handleOpenExtractAudio}
               />
             </Tooltip>
           )}
@@ -460,6 +501,18 @@ const PreviewPanel: React.FC = () => {
             src={getLocalFileUrl(selectedResource.filePath, selectedResource.fileSize)}
             resource={selectedResource}
           />
+        )}
+
+        {isAudio && (
+          <div style={{ padding: '16px 0' }}>
+            <audio
+              ref={audioPlayerRef}
+              key={selectedResource.id}
+              controls
+              src={getLocalFileUrl(selectedResource.filePath, selectedResource.fileSize)}
+              style={{ width: '100%' }}
+            />
+          </div>
         )}
 
         {isText && (
@@ -529,6 +582,36 @@ const PreviewPanel: React.FC = () => {
           onClose={() => setFullscreenVideoVisible(false)}
         />
       )}
+
+      {/* Extract Audio Dialog */}
+      <Modal
+        title="提取声音"
+        open={extractAudioVisible}
+        onCancel={() => setExtractAudioVisible(false)}
+        onOk={handleConfirmExtractAudio}
+        okText="提取"
+        cancelText="取消"
+        confirmLoading={extractAudioLoading}
+        okButtonProps={{ disabled: !extractAudioTargetSection }}
+        width={360}
+      >
+        {audioSections.length === 0 ? (
+          <p>没有声音分组，请先创建一个声音分组</p>
+        ) : (
+          <div>
+            <p style={{ marginBottom: 8 }}>选择目标分组：</p>
+            <Select
+              value={extractAudioTargetSection}
+              onChange={setExtractAudioTargetSection}
+              style={{ width: '100%' }}
+              options={audioSections.map((s) => {
+                const desc = parseFolderName(s.id);
+                return { label: `${desc?.order}. ${desc?.label}`, value: s.id };
+              })}
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
