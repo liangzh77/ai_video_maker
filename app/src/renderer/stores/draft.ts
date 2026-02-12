@@ -126,7 +126,8 @@ export const useDraftStore = create<DraftState>((set, get) => ({
   },
 
   selectDraft: async (id: string | null) => {
-    set({ selectedDraftId: id, selectedResourceId: null, resources: [] });
+    // 不立即清空 resources，由 loadResources 原子替换，避免闪烁
+    set({ selectedDraftId: id, selectedResourceId: null, ...(id ? {} : { resources: [] }) });
 
     if (id) {
       // 执行数据迁移（如果需要）
@@ -274,14 +275,14 @@ export const useDraftStore = create<DraftState>((set, get) => ({
 
   // Resource Actions
   loadResources: async (draftId: string) => {
-    set({ isLoading: true, error: null });
+    // 不设置 isLoading，避免 DraftList 闪烁（isLoading 仅用于草稿列表加载）
     try {
       const resources = await window.api.resource.list({ draftId });
-      set({ resources: resources || [], isLoading: false });
+      set({ resources: resources || [], error: null });
       // 同时刷新 sections 列表（任务可能创建了新 section）
       useSectionsStore.getState().loadSections(draftId);
     } catch (err) {
-      set({ error: (err as Error).message, isLoading: false });
+      set({ error: (err as Error).message });
     }
   },
 

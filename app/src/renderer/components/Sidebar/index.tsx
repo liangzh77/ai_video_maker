@@ -5,7 +5,6 @@ import DraftList from './DraftList';
 import MultiVideoDropZone from './MultiVideoDropZone';
 import TemplateDialog, { getTemplate } from './TemplateDialog';
 import { useDraftStore, type DraftSortBy } from '../../stores/draft';
-import { useSectionsStore } from '../../stores/sections';
 import styles from './Sidebar.module.css';
 
 interface WorkspaceInfo {
@@ -16,7 +15,6 @@ interface WorkspaceInfo {
 const Sidebar: React.FC = () => {
   const { message } = App.useApp();
   const { createDraft, selectDraft, loadDrafts, loadResources, selectedDraftId, sortBy, sortOrder, setSortBy } = useDraftStore();
-  const { createSection } = useSectionsStore();
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
 
@@ -37,11 +35,12 @@ const Sidebar: React.FC = () => {
   const handleCreateDraft = async () => {
     const draft = await createDraft('新项目');
     if (draft) {
-      // 按模板创建 section
+      // 按模板创建 section（直接调用 API，不经过 store，避免与旧草稿 sections 混合产生重复 key）
       const template = getTemplate();
       for (const item of template) {
-        await createSection(draft.id, item.mediaType, item.label);
+        await window.api.section.create({ draftId: draft.id, mediaType: item.mediaType, label: item.label });
       }
+      // selectDraft 会触发 loadSections，加载新草稿的正确 sections
       selectDraft(draft.id);
     }
   };
@@ -55,6 +54,8 @@ const Sidebar: React.FC = () => {
           isDefault: false,
         });
         message.success('工作目录已更新');
+        // 先取消选中当前草稿（旧工作目录的草稿在新目录中不存在）
+        await selectDraft(null);
         // 重新加载草稿列表
         await loadDrafts();
       } else if (result.error !== 'CANCELED') {
