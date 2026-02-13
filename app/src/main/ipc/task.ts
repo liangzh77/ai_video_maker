@@ -64,6 +64,7 @@ interface TaskGenerateImageRequest {
   prompt?: string;
   modelEndpoint?: string;
   resolution?: '4K' | '2K';
+  aspectRatio?: string;
   targetSectionId?: string;
 }
 
@@ -1292,6 +1293,9 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           prompt,
           resolution,
           filePath,
+          undefined,  // onProgress
+          undefined,  // appConfig
+          request.aspectRatio,
         );
 
         // Build resource ID

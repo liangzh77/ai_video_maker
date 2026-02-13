@@ -58,7 +58,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def resolution_to_config(resolution: str, ref_width: int = 0, ref_height: int = 0) -> GenerationConfig:
+def resolution_to_config(resolution: str, ref_width: int = 0, ref_height: int = 0, aspect_ratio: str = None) -> GenerationConfig:
     """
     根据分辨率和参考图片尺寸创建生成配置
 
@@ -66,6 +66,7 @@ def resolution_to_config(resolution: str, ref_width: int = 0, ref_height: int = 
         resolution: "2K" 或 "4K"
         ref_width: 参考图片宽度（文生图时为 0，使用默认正方形尺寸）
         ref_height: 参考图片高度
+        aspect_ratio: 用户指定的宽高比 (如 "16:9")，None 表示自动推算
 
     Returns:
         GenerationConfig 配置对象
@@ -73,7 +74,20 @@ def resolution_to_config(resolution: str, ref_width: int = 0, ref_height: int = 
     config = GenerationConfig()
     config.target_resolution = resolution
 
-    if ref_width <= 0 or ref_height <= 0:
+    if aspect_ratio:
+        # 用户指定了宽高比
+        config.extra_params['aspect_ratio'] = aspect_ratio
+        w, h = [int(x) for x in aspect_ratio.split(':')]
+        ratio = w / h
+        if ratio >= 1:
+            # 横向或正方形
+            long = 3840 if resolution == "4K" else 1920
+            config.size = ImageSize.custom(long, int(long / ratio))
+        else:
+            # 纵向
+            long = 2160 if resolution == "4K" else 1080
+            config.size = ImageSize.custom(int(long * ratio), long)
+    elif ref_width <= 0 or ref_height <= 0:
         # 文生图：无参考图片，使用默认正方形尺寸
         if resolution == "4K":
             config.size = ImageSize.custom(2160, 2160)
@@ -100,7 +114,8 @@ async def generate_image(
     source_paths: list,
     prompt: str,
     resolution: str,
-    output_path: str
+    output_path: str,
+    aspect_ratio: str = None
 ) -> dict:
     """
     执行图片生成
@@ -136,7 +151,7 @@ async def generate_image(
         print(f"[ImageGenerator] First image size: {ref_width}x{ref_height}")
 
         # 创建配置
-        config = resolution_to_config(resolution, ref_width, ref_height)
+        config = resolution_to_config(resolution, ref_width, ref_height, aspect_ratio)
         print(f"[ImageGenerator] Target resolution: {resolution}")
         print(f"[ImageGenerator] Target size: {config.size.width}x{config.size.height}")
 
@@ -159,7 +174,7 @@ async def generate_image(
         print(f"[ImageGenerator] Text-to-image mode (no source images)")
 
         # 使用默认尺寸配置
-        config = resolution_to_config(resolution)
+        config = resolution_to_config(resolution, aspect_ratio=aspect_ratio)
         print(f"[ImageGenerator] Target resolution: {resolution}")
         print(f"[ImageGenerator] Target size: {config.size.width}x{config.size.height}")
 
@@ -234,6 +249,11 @@ def main():
         required=True,
         help="输出图片路径"
     )
+    parser.add_argument(
+        "--aspect-ratio",
+        default=None,
+        help="宽高比 (如 16:9, 9:16, 1:1)，不设则自动推算"
+    )
 
     args = parser.parse_args()
 
@@ -263,16 +283,20 @@ def main():
             source_paths=args.source,
             prompt=args.prompt,
             resolution=args.resolution,
-            output_path=args.output
+            output_path=args.output,
+            aspect_ratio=args.aspect_ratio
         ))
 
         print(f"Success: Image generated at {result['output_path']}")
 
     except ProviderError as e:
-        print(f"Error: [{e.provider}] {e.message}")
+        # 将多行错误信息合并为单行，用 " | " 分隔，避免 runProcess 只捕获第一行
+        error_msg = e.message.replace('\n', ' | ')
+        print(f"Error: [{e.provider}] {error_msg}")
         sys.exit(1)
     except Exception as e:
-        print(f"Error: {str(e)}")
+        error_msg = str(e).replace('\n', ' | ')
+        print(f"Error: {error_msg}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

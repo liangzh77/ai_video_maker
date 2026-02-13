@@ -132,6 +132,9 @@ class GeminiProvider(ImageGeneratorBase):
 
         request_data = {
             "contents": contents,
+            "systemInstruction": {
+                "parts": [{"text": "You are an image generation assistant. You must always respond with a generated image. Do not respond with text only."}]
+            },
             "generationConfig": {
                 "responseModalities": ["TEXT", "IMAGE"],
             }
@@ -208,8 +211,8 @@ class GeminiProvider(ImageGeneratorBase):
             config = self.get_default_config()
         config = self.validate_config(config)
 
-        # 根据配置尺寸计算宽高比
-        aspect_ratio = get_closest_aspect_ratio(config.size.width, config.size.height)
+        # 优先使用用户指定的宽高比，否则根据配置尺寸自动计算
+        aspect_ratio = config.extra_params.get('aspect_ratio') or get_closest_aspect_ratio(config.size.width, config.size.height)
 
         logger.info(f"[{self.name}] 文生图请求: prompt={prompt[:50]}...")
 
@@ -222,11 +225,15 @@ class GeminiProvider(ImageGeneratorBase):
             }
         ]
 
+        # 使用 config 中的 target_resolution，如果未设置则使用默认值
+        image_size = config.target_resolution if config.target_resolution else self.DEFAULT_IMAGE_SIZE
+        logger.info(f"[{self.name}] 使用分辨率: {image_size}")
+
         try:
             response = await self._make_request(
                 contents,
                 aspect_ratio=aspect_ratio,
-                image_size=self.DEFAULT_IMAGE_SIZE
+                image_size=image_size
             )
             return self._parse_response(response, config)
         except Exception as e:
@@ -279,7 +286,8 @@ class GeminiProvider(ImageGeneratorBase):
 
         # 获取第一张参考图片尺寸，计算最接近的宽高比
         ref_width, ref_height = get_image_dimensions(images_list[0])
-        aspect_ratio = get_closest_aspect_ratio(ref_width, ref_height)
+        # 优先使用用户指定的宽高比，否则根据参考图片自动计算
+        aspect_ratio = config.extra_params.get('aspect_ratio') or get_closest_aspect_ratio(ref_width, ref_height)
 
         logger.info(f"[{self.name}] 图生图请求: prompt={prompt[:50]}...")
         logger.info(f"[{self.name}] 参考图片数量: {len(images_list)}")
@@ -345,8 +353,24 @@ class GeminiProvider(ImageGeneratorBase):
         # 获取候选响应
         candidates = response.get("candidates", [])
         if not candidates:
+            # 提取可能的阻止原因
+            details = []
+            prompt_feedback = response.get("promptFeedback", {})
+            block_reason = prompt_feedback.get("blockReason", "")
+            if block_reason:
+                details.append(f"blockReason: {block_reason}")
+            safety_ratings = prompt_feedback.get("safetyRatings", [])
+            blocked_categories = [r for r in safety_ratings if r.get("blocked")]
+            if blocked_categories:
+                cats = ", ".join(r.get("category", "") for r in blocked_categories)
+                details.append(f"blocked categories: {cats}")
+
+            error_msg = "API 返回空数据"
+            if details:
+                error_msg += "\n" + "\n".join(details)
+
             raise ProviderError(
-                "API 返回空数据",
+                error_msg,
                 provider=self.name,
                 raw_error=response
             )
@@ -368,8 +392,25 @@ class GeminiProvider(ImageGeneratorBase):
                 revised_prompt = part["text"]
 
         if not image_data:
+            # 构建详细错误信息：包含模型返回的文本和 finishReason
+            details = []
+            finish_reason = candidates[0].get("finishReason", "")
+            if finish_reason and finish_reason != "STOP":
+                details.append(f"finishReason: {finish_reason}")
+            if revised_prompt:
+                details.append(f"模型回复: {revised_prompt[:500]}")
+            # 检查 promptFeedback（安全过滤等）
+            prompt_feedback = response.get("promptFeedback", {})
+            block_reason = prompt_feedback.get("blockReason", "")
+            if block_reason:
+                details.append(f"blockReason: {block_reason}")
+
+            error_msg = "响应中未找到图片数据"
+            if details:
+                error_msg += "\n" + "\n".join(details)
+
             raise ProviderError(
-                "响应中未找到图片数据",
+                error_msg,
                 provider=self.name,
                 raw_error=response
             )

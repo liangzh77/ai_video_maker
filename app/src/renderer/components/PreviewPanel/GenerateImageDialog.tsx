@@ -136,6 +136,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [selectedResolution, setSelectedResolution] = useState<ImageResolution>('2K');
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<string>('auto');
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -248,7 +249,8 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   // 显示持久错误弹窗
   const showError = (error: string) => {
-    setErrorMessage(error);
+    // 将 Python 端用 " | " 合并的多行错误还原为换行显示
+    setErrorMessage(error.replace(/ \| /g, '\n'));
     setErrorModalVisible(true);
   };
 
@@ -461,6 +463,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             prompt: editedPrompt,
             modelEndpoint: selectedModel!,
             resolution: selectedResolution,
+            aspectRatio: selectedAspectRatio !== 'auto' ? selectedAspectRatio : undefined,
             targetSectionId: targetImageSection || undefined,
           });
           if (!result.success) throw new Error(result.error || '生成失败');
@@ -476,6 +479,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             prompt: editedPrompt,
             modelEndpoint: selectedModel!,
             resolution: selectedResolution,
+            aspectRatio: selectedAspectRatio !== 'auto' ? selectedAspectRatio : undefined,
             targetSectionId: targetImageSection || undefined,
           });
           if (!result.success) throw new Error(result.error || '生成失败');
@@ -859,6 +863,28 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                   <Radio value="2K">2K</Radio>
                   <Radio value="4K">4K</Radio>
                 </Radio.Group>
+                <span style={{ width: 16 }} />
+                <span className={styles.batchLabel}>宽高比</span>
+                <Select
+                  value={selectedAspectRatio}
+                  onChange={setSelectedAspectRatio}
+                  disabled={isGenerating}
+                  size="small"
+                  style={{ width: 90 }}
+                  options={[
+                    { label: '自动', value: 'auto' },
+                    { label: '1:1', value: '1:1' },
+                    { label: '16:9', value: '16:9' },
+                    { label: '9:16', value: '9:16' },
+                    { label: '4:3', value: '4:3' },
+                    { label: '3:4', value: '3:4' },
+                    { label: '3:2', value: '3:2' },
+                    { label: '2:3', value: '2:3' },
+                    { label: '4:5', value: '4:5' },
+                    { label: '5:4', value: '5:4' },
+                    { label: '21:9', value: '21:9' },
+                  ]}
+                />
               </>
             )}
             {mode === 'video' && (

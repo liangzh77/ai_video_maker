@@ -706,7 +706,8 @@ export async function runImageGenerator(
   resolution: '2K' | '4K',
   outputPath: string,
   onProgress?: (progress: number) => void,
-  appConfig?: AppConfig
+  appConfig?: AppConfig,
+  aspectRatio?: string,
 ): Promise<ImageGenerateResult> {
   let resultWidth = 0;
   let resultHeight = 0;
@@ -735,6 +736,10 @@ export async function runImageGenerator(
     // 开发模式使用 Python 脚本
     command = getPythonPath(appConfig);
     args = [path.join(getToolsPath(), 'image_generator.py'), '--model', modelId, ...sourceArgs, '--prompt', prompt, '--resolution', resolution, '--output', outputPath];
+  }
+
+  if (aspectRatio) {
+    args.push('--aspect-ratio', aspectRatio);
   }
 
   // 获取 .env.local 路径（打包后在安装目录根目录）
