@@ -150,7 +150,7 @@ export async function generateVideo(params: VideoGenerationParams): Promise<Vide
         'Authorization': `Bearer ${apiToken}`,
         ...form.getHeaders(),
       },
-      timeout: 600000, // 10 分钟
+      timeout: 86400000, // 24 小时
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
     },

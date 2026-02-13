@@ -80,27 +80,47 @@
 }
 
 .actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
   margin-bottom: var(--spacing-md);
 }
 
 .createButton {
-  flex: 1;
+  width: 100%;
   border-radius: var(--radius-md);
   height: 40px;
   font-weight: 500;
 }
 
 .templateButton {
+  width: 100%;
   border-radius: var(--radius-md);
   height: 40px;
 }
 
+.generateRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: var(--spacing-md);
+}
+
 .generateButton {
+  width: 100%;
   border-radius: var(--radius-md);
   height: 36px;
-  margin-bottom: var(--spacing-md);
+}
+
+/* 强制 Badge 的 span 撑满 grid cell */
+.tasksButtonWrapper :global(.ant-badge) {
+  display: block;
+  width: 100%;
+}
+
+.tasksButton {
+  border-radius: var(--radius-md);
+  height: 36px;
 }
 
 .sortSection {

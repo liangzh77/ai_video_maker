@@ -876,6 +876,7 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   return (
     <div
       className={sectionClasses}
+      data-section-id={section.id}
       onDragOver={onSectionDragOver}
       onDragLeave={onSectionDragLeave}
       onDrop={onSectionDrop}

@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Tooltip, App } from 'antd';
-import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined, AppstoreOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { Badge, Button, Tooltip, App } from 'antd';
+import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined, AppstoreOutlined, ThunderboltOutlined, DashboardOutlined } from '@ant-design/icons';
 import DraftList from './DraftList';
 import MultiVideoDropZone from './MultiVideoDropZone';
 import TemplateDialog, { getTemplate } from './TemplateDialog';
 import GenerateImageDialog from '../PreviewPanel/GenerateImageDialog';
 import { useDraftStore, type DraftSortBy } from '../../stores/draft';
+import { useGenerationStore } from '../../stores/generation';
 import styles from './Sidebar.module.css';
 
 interface WorkspaceInfo {
@@ -19,6 +20,8 @@ const Sidebar: React.FC = () => {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
+  const [generateDialogInitialMode, setGenerateDialogInitialMode] = useState<'image' | 'text' | 'video' | 'tasks' | undefined>(undefined);
+  const activeTaskCount = useGenerationStore((s) => s.tasks.filter((t) => t.status === 'running' || t.status === 'pending').length);
 
   // 加载工作目录信息
   useEffect(() => {
@@ -139,15 +142,35 @@ const Sidebar: React.FC = () => {
           草稿模板
         </Button>
       </div>
-      <Button
-        icon={<ThunderboltOutlined />}
-        onClick={() => setGenerateDialogOpen(true)}
-        disabled={!selectedDraftId}
-        className={styles.generateButton}
-        block
-      >
-        生成
-      </Button>
+      <div className={styles.generateRow}>
+        <Button
+          icon={<ThunderboltOutlined />}
+          onClick={() => {
+            setGenerateDialogInitialMode(undefined);
+            setGenerateDialogOpen(true);
+          }}
+          disabled={!selectedDraftId}
+          className={styles.generateButton}
+        >
+          生成
+        </Button>
+        <div className={styles.tasksButtonWrapper}>
+          <Badge count={activeTaskCount} size="small" offset={[-4, 4]}>
+            <Button
+              icon={<DashboardOutlined />}
+              onClick={() => {
+                setGenerateDialogInitialMode('tasks');
+                setGenerateDialogOpen(true);
+              }}
+              disabled={!selectedDraftId}
+              className={styles.tasksButton}
+              block
+            >
+              进行中
+            </Button>
+          </Badge>
+        </div>
+      </div>
 
       <TemplateDialog
         open={templateDialogOpen}
@@ -156,6 +179,7 @@ const Sidebar: React.FC = () => {
 
       <GenerateImageDialog
         visible={generateDialogOpen}
+        initialMode={generateDialogInitialMode}
         onClose={() => setGenerateDialogOpen(false)}
       />
 
