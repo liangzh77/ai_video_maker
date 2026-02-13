@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Tooltip, App } from 'antd';
-import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined, AppstoreOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import DraftList from './DraftList';
 import MultiVideoDropZone from './MultiVideoDropZone';
 import TemplateDialog, { getTemplate } from './TemplateDialog';
+import GenerateImageDialog from '../PreviewPanel/GenerateImageDialog';
 import { useDraftStore, type DraftSortBy } from '../../stores/draft';
 import styles from './Sidebar.module.css';
 
@@ -17,6 +18,7 @@ const Sidebar: React.FC = () => {
   const { createDraft, selectDraft, loadDrafts, loadResources, selectedDraftId, sortBy, sortOrder, setSortBy } = useDraftStore();
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
 
   // 加载工作目录信息
   useEffect(() => {
@@ -134,13 +136,27 @@ const Sidebar: React.FC = () => {
           onClick={() => setTemplateDialogOpen(true)}
           className={styles.templateButton}
         >
-          模板
+          草稿模板
         </Button>
       </div>
+      <Button
+        icon={<ThunderboltOutlined />}
+        onClick={() => setGenerateDialogOpen(true)}
+        disabled={!selectedDraftId}
+        className={styles.generateButton}
+        block
+      >
+        生成
+      </Button>
 
       <TemplateDialog
         open={templateDialogOpen}
         onClose={() => setTemplateDialogOpen(false)}
+      />
+
+      <GenerateImageDialog
+        visible={generateDialogOpen}
+        onClose={() => setGenerateDialogOpen(false)}
       />
 
       {/* 排序选择 */}

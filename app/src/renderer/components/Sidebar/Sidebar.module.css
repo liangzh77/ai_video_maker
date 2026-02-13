@@ -97,6 +97,12 @@
   height: 40px;
 }
 
+.generateButton {
+  border-radius: var(--radius-md);
+  height: 36px;
+  margin-bottom: var(--spacing-md);
+}
+
 .sortSection {
   display: flex;
   gap: 8px;

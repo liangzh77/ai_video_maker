@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Empty, App, Popconfirm, Tooltip, Modal, Select } from 'antd';
-import { InboxOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, LinkOutlined, ThunderboltOutlined, ExpandOutlined, BlockOutlined, HolderOutlined } from '@ant-design/icons';
+import { InboxOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, LinkOutlined, ExpandOutlined, BlockOutlined, HolderOutlined } from '@ant-design/icons';
 import type { Resource, SectionDescriptor, PromptTag } from '@shared/types';
 import type { UpscaleDialogResult } from './UpscaleDialog';
 import type { SynthesizeDialogResult } from './SynthesizeDialog';
@@ -13,7 +13,6 @@ import ResourceCard from './ResourceCard';
 import PromptCard from './PromptCard';
 import UpscaleDialog from './UpscaleDialog';
 import SynthesizeDialog from './SynthesizeDialog';
-import GenerateImageDialog from '../PreviewPanel/GenerateImageDialog';
 import styles from './ResourceSection.module.css';
 
 // Custom MIME type for frame data transfer (must match VideoPlayer)
@@ -140,7 +139,6 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [synthesizeProgress, setSynthesizeProgress] = useState(0);
   const [synthesizeTaskId, setSynthesizeTaskId] = useState<string | null>(null);
-  const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [batchLinkDialogOpen, setBatchLinkDialogOpen] = useState(false);
   const [batchLinkTarget, setBatchLinkTarget] = useState<string | null>(null);
   const { selectedDraftId, addResource, addFrameAsResource, addTextResource, updateResource, deleteResourcesByType, getResourcesByType, loadResources, copyResource, reorderResource, clearLocalResourcesByType } = useDraftStore();
@@ -906,13 +904,6 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
         )}
         <span className={styles.count}>{resources.length}</span>
         {isText && (
-          <Tooltip title="生成">
-            <button className={`${styles.addButton} ${styles.upscaleButton}`} onClick={() => setGenerateDialogOpen(true)}>
-              <ThunderboltOutlined />
-            </button>
-          </Tooltip>
-        )}
-        {isText && (
           <Tooltip title="添加提示词">
             <button className={`${styles.addButton} ${styles.upscaleButton}`} onClick={handleAddPrompt}>
               <PlusOutlined />
@@ -1125,15 +1116,6 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
             }))}
         />
       </Modal>
-
-      {/* 生成对话框（提示词栏直接打开） */}
-      {isText && (
-        <GenerateImageDialog
-          visible={generateDialogOpen}
-          sectionId={sectionId}
-          onClose={() => setGenerateDialogOpen(false)}
-        />
-      )}
     </div>
   );
 };
