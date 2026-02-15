@@ -139,6 +139,7 @@ interface TaskGenerateVideoRequest {
   duration?: number;
   ratio?: string;
   targetSectionId?: string;
+  taskId?: string;  // 前端任务 ID，用于回传进度状态
 }
 
 // ============================================
@@ -1371,14 +1372,23 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           },
         );
 
-        // Call video API
+        // Call video API with progress reporting
+        const onVideoProgress = request.taskId
+          ? (message: string) => {
+              mainWindowRef?.webContents.send(TASK_EVENTS.VIDEO_PROGRESS, {
+                taskId: request.taskId,
+                message,
+              });
+            }
+          : undefined;
+
         const result = await videoApi.generateVideo({
           prompt: request.prompt,
           imageFiles,
           videoFiles,
           duration: request.duration,
           ratio: request.ratio,
-        });
+        }, onVideoProgress);
 
         // Write video file
         await fs.writeFile(filePath, result.videoData);

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { ImageResolution } from '@shared/types';
 import { useDraftStore } from './draft';
 import { useSectionsStore } from './sections';
+import { useNotificationStore } from './notification';
 
 // ============================================
 // Types
@@ -44,6 +45,7 @@ export interface GenerationTask {
   error?: string;
   resultText?: string;
   resultResourceId?: string;
+  progressMessage?: string;
   createdAt: number;
   startedAt?: number;
   completedAt?: number;
@@ -152,11 +154,44 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
     duration: params.duration,
     ratio: params.ratio,
     targetSectionId: params.targetSectionId,
+    taskId: task.id,
   });
   if (!result.success) {
     throw new Error(result.error || '视频生成失败');
   }
   return result.data?.resourceId;
+}
+
+// ============================================
+// Video Progress Listener
+// ============================================
+
+function setupVideoProgressListener() {
+  window.api.on('task:videoProgress', (_event: any, data: { taskId: string; message: string }) => {
+    const { tasks } = useGenerationStore.getState();
+    const task = tasks.find((t) => t.id === data.taskId);
+    if (task && task.status === 'running') {
+      useGenerationStore.setState((state) => ({
+        tasks: state.tasks.map((t) =>
+          t.id === data.taskId ? { ...t, progressMessage: data.message } : t,
+        ),
+      }));
+    }
+  });
+}
+
+// 延迟初始化，确保 window.api 可用
+if (typeof window !== 'undefined' && window.api) {
+  setupVideoProgressListener();
+} else if (typeof window !== 'undefined') {
+  // window.api 可能在 preload 加载后才可用
+  const checkApi = setInterval(() => {
+    if (window.api) {
+      clearInterval(checkApi);
+      setupVideoProgressListener();
+    }
+  }, 100);
+  setTimeout(() => clearInterval(checkApi), 5000);
 }
 
 // ============================================
@@ -311,6 +346,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
           }
 
           // Mark failed
+          const errorMessage = err instanceof Error ? err.message : String(err);
           set((s) => ({
             tasks: s.tasks.map((t) =>
               t.id === task.id && t.status === 'running'
@@ -318,11 +354,17 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
                     ...t,
                     status: 'failed' as TaskStatus,
                     completedAt: Date.now(),
-                    error: err instanceof Error ? err.message : String(err),
+                    error: errorMessage,
                   }
                 : t,
             ),
           }));
+
+          // 显示持久化错误通知（可复制、需手动关闭）
+          const typeLabel = task.type === 'video' ? '视频' : task.type === 'image' ? '图片' : '文本';
+          useNotificationStore.getState().showError(
+            `${typeLabel}生成失败 [${task.label}]: ${errorMessage}`,
+          );
         }
 
         // Refresh resources

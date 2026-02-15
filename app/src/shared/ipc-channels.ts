@@ -63,6 +63,7 @@ export const TASK_CHANNELS = {
 export const TASK_EVENTS = {
   PROGRESS: 'task:progress',
   COMPLETED: 'task:completed',
+  VIDEO_PROGRESS: 'task:videoProgress',  // 视频生成阶段性状态更新
 } as const;
 
 // ============================================

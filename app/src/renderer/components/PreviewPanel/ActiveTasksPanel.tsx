@@ -129,7 +129,7 @@ const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ onNavigateToResult 
           </div>
           <div className={styles.taskStatus}>
             {task.status === 'running' && task.startedAt && (
-              <>运行中 <ElapsedTimer startedAt={task.startedAt} /></>
+              <>{task.progressMessage || '运行中'} <ElapsedTimer startedAt={task.startedAt} /></>
             )}
             {task.status === 'pending' && '等待中'}
             {task.status === 'completed' && task.startedAt && task.completedAt && (

@@ -1,9 +1,10 @@
 /**
  * 视频生成 API 服务
- * 调用 jimeng-api Seedance 2.0 Omni Reference 模式
+ * 通过中转服务 (localhost:3080) + 即梦平台 API 完成视频生成
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import axios from 'axios';
 import FormData from 'form-data';
 import { exec } from 'child_process';
@@ -35,16 +36,14 @@ export interface VideoInfo {
   height: number;
 }
 
+type PromptPart = { type: 'text'; value: string } | { type: 'at'; label: string };
+
 // ============================================
 // Config
 // ============================================
 
-function getApiUrl(): string {
-  return process.env.JIMENG_API_URL || 'http://61.219.23.150:5015';
-}
-
-function getApiToken(): string {
-  return process.env.JIMENG_API_TOKEN || '';
+function getRelayUrl(): string {
+  return process.env.JIMENG_RELAY_URL || 'http://localhost:3080';
 }
 
 // ============================================
@@ -92,93 +91,291 @@ export function calcRatio(width: number, height: number): string {
 }
 
 // ============================================
+// Helpers
+// ============================================
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 计算文件 MD5
+ */
+async function computeFileMd5(filePath: string): Promise<string> {
+  const data = await fs.promises.readFile(filePath);
+  return crypto.createHash('md5').update(data).digest('hex');
+}
+
+/**
+ * 上传文件到中转服务（带 MD5 去重检查）
+ */
+async function uploadFileToRelay(relayUrl: string, filePath: string): Promise<string> {
+  const md5 = await computeFileMd5(filePath);
+
+  // 检查是否已上传
+  const checkResp = await axios.get(`${relayUrl}/api/file/check/${md5}`);
+  if (checkResp.data.exists) {
+    console.log(`[VideoAPI] File already uploaded, skipping: ${md5}`);
+    return md5;
+  }
+
+  // 上传
+  const form = new FormData();
+  form.append('file', fs.createReadStream(filePath), {
+    filename: path.basename(filePath),
+  });
+  const uploadResp = await axios.post(`${relayUrl}/api/file/upload`, form, {
+    headers: form.getHeaders(),
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+    timeout: 120000,
+  });
+  return uploadResp.data.md5;
+}
+
+/**
+ * 构建 promptParts
+ * 支持用户在提示词中用 @图片N 引用图片，或自动添加所有图片引用
+ */
+function buildPromptParts(prompt: string, imageCount: number): PromptPart[] {
+  const atPattern = /@图片(\d+)/g;
+  const parts: PromptPart[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let hasAtRef = false;
+
+  while ((match = atPattern.exec(prompt)) !== null) {
+    hasAtRef = true;
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', value: prompt.slice(lastIndex, match.index) });
+    }
+    parts.push({ type: 'at', label: `图片${match[1]}` });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (hasAtRef) {
+    if (lastIndex < prompt.length) {
+      parts.push({ type: 'text', value: prompt.slice(lastIndex) });
+    }
+    return parts;
+  }
+
+  // 没有 @ 引用 → 自动添加所有图片引用 + 原始提示词
+  for (let i = 1; i <= imageCount; i++) {
+    parts.push({ type: 'at', label: `图片${i}` });
+    parts.push({ type: 'text', value: ' ' });
+  }
+  parts.push({ type: 'text', value: prompt });
+  return parts;
+}
+
+/**
+ * 计算即梦 API 请求签名
+ * sign = md5("9e2c|<URI尾部>|7|8.4.0|<timestamp>||11ac")
+ */
+function computeJimengSign(uri: string): { sign: string; timestamp: number } {
+  const timestamp = Math.floor(Date.now() / 1000);
+  // 按文档示例: URI "/mweb/v1/get_history_by_ids" → "ory_by_ids" (slice(-10))
+  const uriSuffix = uri.slice(-10);
+  const raw = `9e2c|${uriSuffix}|7|8.4.0|${timestamp}||11ac`;
+  const sign = crypto.createHash('md5').update(raw).digest('hex');
+  return { sign, timestamp };
+}
+
+/**
+ * 轮询中转服务任务状态，直到 submitted 或 failed
+ */
+const RELAY_STATUS_LABELS: Record<string, string> = {
+  waiting: '等待中',
+  submitting: '提交中',
+};
+
+async function pollRelayTask(
+  relayUrl: string,
+  taskId: string,
+  onProgress?: (message: string) => void,
+): Promise<{
+  sessionId: string;
+  historyId: string;
+}> {
+  const MAX_POLLS = 120;
+  const POLL_INTERVAL = 3000;
+
+  for (let i = 0; i < MAX_POLLS; i++) {
+    await sleep(POLL_INTERVAL);
+    const resp = await axios.get(`${relayUrl}/api/task/${taskId}`, { timeout: 10000 });
+    const data = resp.data;
+
+    if (data.status === 'submitted') {
+      return { sessionId: data.sessionId, historyId: data.historyId };
+    }
+    if (data.status === 'failed') {
+      throw new Error(`中转服务提交失败: ${data.error || '未知错误'}`);
+    }
+    // waiting / submitting → 报告状态并继续轮询
+    const label = RELAY_STATUS_LABELS[data.status];
+    if (label) {
+      onProgress?.(label);
+    }
+    if (i % 10 === 0) {
+      console.log(`[VideoAPI] Relay poll ${i + 1}: ${data.status}`);
+    }
+  }
+  throw new Error('中转服务提交超时（6分钟）');
+}
+
+/**
+ * 轮询即梦视频生成进度，直到成功或失败
+ *
+ * 实际响应结构: { data: { [historyId]: { status, item_list } } }
+ * 状态码: 10=成功, 20=生成中, 30=失败, 42=后处理中, 45=收尾中, 50=完成
+ * 视频 URL 优先级: transcoded_video.origin.video_url > play_url > download_url > url
+ */
+const JIMENG_STATUS_LABELS: Record<number, string> = {
+  20: '生成中',
+  42: '后处理中',
+  45: '收尾中',
+};
+
+async function pollJimengVideo(
+  sessionId: string,
+  historyId: string,
+  onProgress?: (message: string) => void,
+): Promise<string> {
+  const JIMENG_BASE = 'https://jimeng.jianying.com';
+  const POLL_URI = '/mweb/v1/get_history_by_ids';
+  const POLL_INTERVAL = 3000;
+
+  for (let i = 0; ; i++) {
+    await sleep(i === 0 ? 10000 : POLL_INTERVAL);
+
+    try {
+      const { sign, timestamp } = computeJimengSign(POLL_URI);
+      const resp = await axios.post(
+        `${JIMENG_BASE}${POLL_URI}`,
+        { history_ids: [historyId] },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Cookie': `sessionid=${sessionId}`,
+            'sign': sign,
+            'sign-ver': '1',
+            'device-time': String(timestamp),
+          },
+          timeout: 30000,
+        },
+      );
+
+      // 响应结构: data: { [historyId]: { status, item_list } }
+      const taskData = resp.data?.data?.[historyId];
+      const status = taskData?.status;
+
+      console.log(`[VideoAPI] Jimeng poll ${i + 1}: status=${status}`);
+
+      // 10=成功, 50=完成
+      if (status === 10 || status === 50) {
+        const items = taskData?.item_list || [];
+        if (items.length > 0) {
+          const video = items[0]?.video;
+          const videoUrl = video?.transcoded_video?.origin?.video_url
+            || video?.play_url
+            || video?.download_url
+            || video?.url;
+          if (videoUrl) return videoUrl;
+        }
+        throw new Error('视频生成成功但未找到视频 URL');
+      }
+
+      // 30=失败
+      if (status === 30) {
+        throw new Error('即梦视频生成失败');
+      }
+
+      // 20=生成中, 42=后处理中, 45=收尾中 → 报告状态并继续轮询
+      const label = JIMENG_STATUS_LABELS[status];
+      if (label) {
+        onProgress?.(label);
+      }
+    } catch (err) {
+      if (err instanceof Error && (err.message.includes('视频生成') || err.message.includes('URL'))) {
+        throw err;
+      }
+      console.log(`[VideoAPI] Jimeng poll ${i + 1}: error - ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  // unreachable (infinite loop)
+  throw new Error('即梦视频生成异常退出');
+}
+
+// ============================================
 // Video Generation
 // ============================================
 
 /**
- * 调用 Seedance 2.0 Omni Reference 生成视频
+ * 通过中转服务 + 即梦平台生成视频
  */
-export async function generateVideo(params: VideoGenerationParams): Promise<VideoGenerationResult> {
-  const apiUrl = getApiUrl();
-  const apiToken = getApiToken();
+export async function generateVideo(
+  params: VideoGenerationParams,
+  onProgress?: (message: string) => void,
+): Promise<VideoGenerationResult> {
+  const relayUrl = getRelayUrl();
 
-  if (!apiToken) {
-    throw new Error('JIMENG_API_TOKEN 未配置，请在 .env.local 中设置');
+  // 1. 上传文件到中转服务
+  onProgress?.('上传文件中');
+  const imageMd5s: string[] = [];
+  for (const filePath of params.imageFiles) {
+    console.log(`[VideoAPI] Uploading image: ${path.basename(filePath)}`);
+    const md5 = await uploadFileToRelay(relayUrl, filePath);
+    imageMd5s.push(md5);
+    console.log(`[VideoAPI] Image MD5: ${md5}`);
   }
 
-  const form = new FormData();
-  form.append('model', 'jimeng-video-seedance-2.0');
-  form.append('functionMode', 'omni_reference');
-  form.append('prompt', params.prompt);
-
-  if (params.duration !== undefined) {
-    form.append('duration', String(params.duration));
-  }
-  if (params.ratio) {
-    form.append('ratio', params.ratio);
+  const videoMd5s: string[] = [];
+  for (const filePath of params.videoFiles) {
+    console.log(`[VideoAPI] Uploading video: ${path.basename(filePath)}`);
+    const md5 = await uploadFileToRelay(relayUrl, filePath);
+    videoMd5s.push(md5);
+    console.log(`[VideoAPI] Video MD5: ${md5}`);
   }
 
-  // 添加图片文件
-  for (let i = 0; i < params.imageFiles.length && i < 9; i++) {
-    const filePath = params.imageFiles[i];
-    const ext = path.extname(filePath).toLowerCase();
-    const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
-    form.append(`image_file_${i + 1}`, fs.createReadStream(filePath), {
-      filename: path.basename(filePath),
-      contentType: mimeType,
-    });
-  }
+  // 2. 构建 promptParts
+  const promptParts = buildPromptParts(params.prompt, imageMd5s.length);
+  console.log(`[VideoAPI] PromptParts: ${promptParts.length} parts`);
 
-  // 添加视频文件
-  for (let i = 0; i < params.videoFiles.length && i < 3; i++) {
-    const filePath = params.videoFiles[i];
-    form.append(`video_file_${i + 1}`, fs.createReadStream(filePath), {
-      filename: path.basename(filePath),
-      contentType: 'video/mp4',
-    });
-  }
+  // 3. 提交任务到中转服务
+  onProgress?.('提交中');
+  console.log(`[VideoAPI] Submitting task: ${imageMd5s.length} images, ${videoMd5s.length} videos, refMode=全能参考`);
+  const submitResp = await axios.post(`${relayUrl}/api/task/submit`, {
+    images: imageMd5s,
+    videos: videoMd5s,
+    promptParts,
+    model: 'seedance_2.0',
+    refMode: '全能参考',
+    ratio: params.ratio || '9:16',
+    duration: params.duration ? `${params.duration}s` : '8s',
+  }, { timeout: 30000 });
+  const taskId = submitResp.data.taskId;
+  console.log(`[VideoAPI] Task submitted: ${taskId}`);
 
-  console.log(`[VideoAPI] Generating video: ${params.imageFiles.length} images, ${params.videoFiles.length} videos`);
-  console.log(`[VideoAPI] Duration: ${params.duration}, Ratio: ${params.ratio}`);
+  // 4. 轮询中转服务直到提交成功
+  const { sessionId, historyId } = await pollRelayTask(relayUrl, taskId, onProgress);
+  console.log(`[VideoAPI] Submitted to Jimeng: historyId=${historyId}`);
 
-  // 发送请求
-  const response = await axios.post(
-    `${apiUrl}/v1/videos/generations`,
-    form,
-    {
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        ...form.getHeaders(),
-      },
-      timeout: 86400000, // 24 小时
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-    },
-  );
-
-  const result = response.data;
-  console.log(`[VideoAPI] Response status: ${response.status}`);
-
-  if (!result.data || !result.data[0]?.url) {
-    const errorMsg = result.error?.message || JSON.stringify(result);
-    throw new Error(`视频生成失败: ${errorMsg}`);
-  }
-
-  const videoUrl = result.data[0].url;
-  const revisedPrompt = result.data[0].revised_prompt;
-
+  // 5. 轮询即梦 API 直到生成完成
+  onProgress?.('生成中');
+  const videoUrl = await pollJimengVideo(sessionId, historyId, onProgress);
   console.log(`[VideoAPI] Video URL received, downloading...`);
 
-  // 下载视频
+  // 6. 下载视频
+  onProgress?.('下载中');
   const downloadResponse = await axios.get(videoUrl, {
     responseType: 'arraybuffer',
     timeout: 120000,
   });
-
   const videoData = Buffer.from(downloadResponse.data);
   console.log(`[VideoAPI] Downloaded: ${(videoData.length / 1024).toFixed(0)} KB`);
 
-  return { videoData, revisedPrompt };
+  return { videoData };
 }
 
 export default {
