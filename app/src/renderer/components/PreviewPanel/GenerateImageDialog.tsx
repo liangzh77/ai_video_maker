@@ -13,6 +13,9 @@ import styles from './GenerateImageDialog.module.css';
 // 视频缩略图缓存
 const videoThumbCache = new Map<string, string>();
 
+// 提示词标签显示名
+const TAG_LABELS: Record<string, string> = { text: '文本', image: '图片', video: '视频' };
+
 // 缓存每种生成模式上次选择的输出卡片栏标签（跨对话框打开保持）
 const targetSectionLabelCache: Record<string, string | null> = {};
 
@@ -124,6 +127,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   // 一图一任务模式
   const [oneImagePerTask, setOneImagePerTask] = useState(false);
+
+  // 参考提示词（文本模式）
+  const [selectedTextIds, setSelectedTextIds] = useState<string[]>([]);
 
   // 视频生成状态
   const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
@@ -262,6 +268,51 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     });
   };
 
+  // 所有提示词资源（用于文本模式参考选择）
+  const allTexts = resources.filter((r) => {
+    const desc = parseFolderName(r.type);
+    return desc?.mediaType === '提示词' && isTextMetadata(r.metadata) && (r.metadata as any).content;
+  });
+
+  // 多选提示词的处理函数
+  const toggleTextSelection = (textId: string) => {
+    setSelectedTextIds((prev) =>
+      prev.includes(textId) ? prev.filter((id) => id !== textId) : [...prev, textId]
+    );
+  };
+
+  // 校验并替换 @文本N 占位符
+  const resolveTextReferences = (prompt: string): { resolved?: string; error?: string } => {
+    const refs = [...prompt.matchAll(/@文本(\d+)/g)];
+    if (refs.length === 0) {
+      // 没有占位符但选择了文本 → 提示
+      if (selectedTextIds.length > 0) {
+        return { error: `选择了 ${selectedTextIds.length} 条参考提示词，但提示词中没有 @文本N 引用` };
+      }
+      return { resolved: prompt };
+    }
+    if (selectedTextIds.length === 0) {
+      return { error: `提示词中包含 ${refs.length} 个文本引用，但未选择参考提示词` };
+    }
+    const refNumbers = [...new Set(refs.map((m) => parseInt(m[1], 10)))];
+    const maxRef = Math.max(...refNumbers);
+    if (maxRef > selectedTextIds.length) {
+      return { error: `提示词中引用了 @文本${maxRef}，但只选择了 ${selectedTextIds.length} 条参考提示词` };
+    }
+    if (refNumbers.length < selectedTextIds.length) {
+      return { error: `选择了 ${selectedTextIds.length} 条参考提示词，但提示词中只引用了 ${refNumbers.length} 条` };
+    }
+    const resolved = prompt.replace(/@文本(\d+)/g, (_match, numStr) => {
+      const index = parseInt(numStr, 10) - 1;
+      const res = resources.find((r) => r.id === selectedTextIds[index]);
+      if (res && isTextMetadata(res.metadata)) {
+        return (res.metadata as any).content;
+      }
+      return _match;
+    });
+    return { resolved };
+  };
+
   // 输出卡片栏变更时更新缓存
   const handleTargetImageSectionChange = (sectionId: string) => {
     setTargetImageSection(sectionId || null);
@@ -308,6 +359,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       // 对话框刚打开，重置表单状态
       setSelectedImageIds([]);
       setVideoModeImageIds([]);
+      setSelectedTextIds([]);
       setEditedPrompt(promptContent);
       setSystemPrompt('');
       // 图片模式：从缓存恢复，或默认第一个
@@ -431,14 +483,21 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       return;
     }
 
-    savePromptToHistory(editedPrompt);
+    // 校验并替换 @文本N 引用
+    const { resolved: resolvedPrompt, error: refError } = resolveTextReferences(editedPrompt);
+    if (refError) {
+      message.error(refError);
+      return;
+    }
+
+    savePromptToHistory(editedPrompt); // 保存原始提示词（含 @文本N）到历史
 
     const newTasks = [];
     for (let i = 0; i < batchCount; i++) {
       newTasks.push({
         type: 'text' as const,
         draftId: selectedDraftId,
-        prompt: editedPrompt,
+        prompt: resolvedPrompt!,
         label: `文本 #${i + 1}`,
         params: {
           modelEndpoint: selectedModel!,
@@ -819,6 +878,41 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                 autoSize={{ minRows: 2, maxRows: 6 }}
               />
             </div>
+
+            {/* 参考提示词选择 - Text mode only */}
+            {mode === 'text' && allTexts.length > 0 && (
+              <div className={styles.section}>
+                <div className={styles.sectionTitle}>
+                  选择参考提示词（可选，用 @文本1 @文本2 引用）
+                  <span className={styles.count}>
+                    已选 {selectedTextIds.length} / 共 {allTexts.length} 条
+                  </span>
+                </div>
+                <div className={styles.textRefGrid}>
+                  {allTexts.map((txt) => {
+                    const meta = isTextMetadata(txt.metadata) ? txt.metadata : null;
+                    const textContent = (meta as any)?.content ?? '';
+                    const tag = (meta as any)?.tag;
+                    return (
+                      <div
+                        key={txt.id}
+                        className={`${styles.textRefItem} ${selectedTextIds.includes(txt.id) ? styles.selected : ''}`}
+                        onClick={() => toggleTextSelection(txt.id)}
+                      >
+                        {tag && <span className={styles.textRefTag}>{TAG_LABELS[tag] || tag}</span>}
+                        <div className={styles.textRefContent}>{textContent}</div>
+                        <div className={styles.textRefName} title={txt.fileName}>{txt.fileName}</div>
+                        {selectedTextIds.includes(txt.id) && (
+                          <div className={styles.selectedBadge}>
+                            {selectedTextIds.indexOf(txt.id) + 1}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Image Selection - Image mode only */}
             {mode === 'image' && (

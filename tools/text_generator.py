@@ -106,6 +106,7 @@ async def generate_text_gemini(
         "contents": contents,
         "generationConfig": {
             "responseMimeType": "text/plain",
+            "responseModalities": ["TEXT"],
         }
     }
 
@@ -123,6 +124,7 @@ async def generate_text_gemini(
             },
             "generationConfig": {
                 "responseMimeType": "text/plain",
+                "responseModalities": ["TEXT"],
             }
         }
 
