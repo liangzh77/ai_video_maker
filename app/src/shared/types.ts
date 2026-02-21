@@ -43,7 +43,7 @@ export type ResourceType = string;
 /**
  * 媒体类型：决定卡片栏的行为（接受什么文件、显示什么按钮等）
  */
-export type MediaType = '视频' | '图片' | '提示词' | '声音';
+export type MediaType = '视频' | '图片' | '提示词' | '声音' | '混合';
 
 /**
  * Section 描述符：从文件夹名解析得出

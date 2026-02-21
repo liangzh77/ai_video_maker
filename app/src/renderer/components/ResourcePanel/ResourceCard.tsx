@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, VideoCameraOutlined, LoadingOutlined, SoundOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, VideoCameraOutlined, LoadingOutlined, SoundOutlined, FileTextOutlined } from '@ant-design/icons';
 import { App } from 'antd';
 import type { Resource, OperationResult } from '@shared/types';
 import { isVideoMetadata, isAudioMetadata } from '@shared/types';
@@ -85,8 +85,12 @@ const CachedThumbnail: React.FC<CachedThumbnailProps> = ({ resource, isVideo }) 
       const existingRequest = pendingRequests.get(cacheKey);
       if (existingRequest) {
         const path = await existingRequest;
-        if (isMounted && path) {
-          setThumbnailPath(path);
+        if (isMounted) {
+          if (path) {
+            setThumbnailPath(path);
+          } else {
+            setHasError(true);
+          }
           setIsLoading(false);
         }
         return;
@@ -284,10 +288,10 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
       );
     }
 
-    // Fallback placeholder for other types
+    // 文本/其他类型占位图标
     return (
       <div className={styles.videoPlaceholder}>
-        <PlayCircleOutlined className={styles.playIcon} />
+        <FileTextOutlined className={styles.playIcon} />
       </div>
     );
   };

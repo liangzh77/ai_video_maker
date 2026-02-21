@@ -119,6 +119,7 @@ const ResourcePanel: React.FC = () => {
       '图片': '图片',
       '提示词': '提示词',
       '声音': '声音',
+      '混合': '混合',
     };
     const result = await createSection(selectedDraftId, mediaType, labelMap[mediaType]);
     if (result) {
@@ -143,6 +144,7 @@ const ResourcePanel: React.FC = () => {
     { key: '图片', label: '图片分组' },
     { key: '提示词', label: '提示词分组' },
     { key: '声音', label: '声音分组' },
+    { key: '混合', label: '混合分组' },
   ];
 
   return (

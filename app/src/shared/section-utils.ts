@@ -9,7 +9,7 @@
 import type { MediaType, SectionDescriptor } from './types';
 
 /** 合法的媒体类型集合 */
-const VALID_MEDIA_TYPES: Set<string> = new Set(['视频', '图片', '提示词', '声音']);
+const VALID_MEDIA_TYPES: Set<string> = new Set(['视频', '图片', '提示词', '声音', '混合']);
 
 /** 文件夹名解析正则: {序号}_{媒体类型}_{名称} */
 const FOLDER_NAME_REGEX = /^(\d+)_([^_]+)_(.+)$/;
@@ -57,6 +57,8 @@ export function getAcceptFormats(mediaType: MediaType): string[] {
       return ['text/*', '.txt', '.md'];
     case '声音':
       return ['audio/*', '.mp3', '.wav', '.flac', '.aac', '.ogg'];
+    case '混合':
+      return ['video/*', 'image/*', 'audio/*', 'text/*', '.txt', '.md', '.mp3', '.wav', '.flac', '.aac', '.ogg'];
   }
 }
 

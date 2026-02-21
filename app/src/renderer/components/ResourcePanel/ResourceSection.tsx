@@ -95,6 +95,7 @@ const areSectionsCompatible = (fromSectionId: string, toSectionId: string): bool
   const fromDesc = parseFolderName(fromSectionId);
   const toDesc = parseFolderName(toSectionId);
   if (!fromDesc || !toDesc) return false;
+  if (toDesc.mediaType === '混合' || fromDesc.mediaType === '混合') return true;
   return fromDesc.mediaType === toDesc.mediaType;
 };
 
@@ -1002,19 +1003,28 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
             onDragOver={handleGridDragOver}
             onDrop={handleGridDrop}
           >
-            {resources.map((resource) =>
-              isText ? (
+            {resources.map((resource) => {
+              // 纯文本 section 或混合栏中的文本资源 → 渲染为 PromptCard
+              const renderAsPrompt = isText || resource.mimeType.startsWith('text/');
+
+              return renderAsPrompt ? (
                 <PromptCard
                   key={resource.id}
                   resource={resource}
                   cardScale={cardScale}
-                  draggable={isSortable}
+                  draggable={isText ? isSortable : isDraggable}
                   isDragOver={dragOverCardId === resource.id}
-                  onDragStart={(e) => handlePromptDragStart(e, resource.id)}
-                  onDragOver={(e) => handlePromptDragOver(e, resource.id)}
-                  onDragLeave={handlePromptDragLeave}
-                  onDrop={(e) => handlePromptDrop(e, resource.id)}
-                  onDragEnd={handlePromptDragEnd}
+                  onDragStart={isText
+                    ? (e) => handlePromptDragStart(e, resource.id)
+                    : (e) => handleCardDragStart(e, resource.id)}
+                  onDragOver={isText
+                    ? (e) => handlePromptDragOver(e, resource.id)
+                    : (e) => handleCardDragOver(e, resource.id)}
+                  onDragLeave={isText ? handlePromptDragLeave : handleCardDragLeave}
+                  onDrop={isText
+                    ? (e) => handlePromptDrop(e, resource.id)
+                    : (e) => handleCardDrop(e, resource.id)}
+                  onDragEnd={isText ? handlePromptDragEnd : handleCardDragEnd}
                 />
               ) : (
                 <ResourceCard
@@ -1031,8 +1041,8 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
                   onDrop={(e) => handleCardDrop(e, resource.id)}
                   onDragEnd={handleCardDragEnd}
                 />
-              )
-            )}
+              );
+            })}
             {/* 拖拽时显示末尾拖放区域 */}
             {draggingCardId && isDraggable && (
               <div
