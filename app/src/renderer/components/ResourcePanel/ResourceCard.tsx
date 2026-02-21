@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, VideoCameraOutlined, LoadingOutlined, SoundOutlined, FileTextOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, CheckCircleFilled, CloseOutlined, LinkOutlined, VideoCameraOutlined, LoadingOutlined, SoundOutlined, FileTextOutlined, ReloadOutlined } from '@ant-design/icons';
 import { App } from 'antd';
 import type { Resource, OperationResult } from '@shared/types';
 import { isVideoMetadata, isAudioMetadata } from '@shared/types';
@@ -8,6 +8,7 @@ import { useDraftStore } from '../../stores/draft';
 import { usePlaybackStore, isContinuousPlayType } from '../../stores/playback';
 import { useSceneLinkStore } from '../../stores/sceneLink';
 import { useFullscreenPreviewStore } from '../../stores/fullscreenPreview';
+import { useGenerationStore } from '../../stores/generation';
 import styles from './ResourceCard.module.css';
 
 // 缩略图缓存（resourceId -> thumbnailPath）
@@ -261,6 +262,78 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
     }
   };
 
+  const handleRedo = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const result = await window.api.resource.loadMetadata({
+        draftId: resource.draftId,
+        resourceId: resource.id,
+      });
+      if (!result.success || !result.data?.generation) {
+        message.warning('此资源没有生成记录');
+        return;
+      }
+      const gen = result.data.generation;
+      const params = { ...gen.params };
+
+      // 解析源文件引用（通过哈希匹配当前有效路径）
+      if (gen.sourceFileHashes && Object.keys(gen.sourceFileHashes).length > 0) {
+        const files = Object.entries(gen.sourceFileHashes).map(([resourceId, hash]) => ({
+          resourceId,
+          hash: hash as string,
+        }));
+        const resolveResult = await window.api.resource.resolveSourceFiles({
+          draftId: resource.draftId,
+          files,
+        });
+        if (resolveResult.success && resolveResult.data) {
+          const idMap = new Map<string, string>();
+          let hasLost = false;
+          for (const item of resolveResult.data) {
+            if (item.resolvedId) {
+              idMap.set(item.originalId, item.resolvedId);
+            } else {
+              hasLost = true;
+            }
+          }
+          if (hasLost) {
+            message.warning('部分源文件已丢失，将跳过');
+          }
+          // 更新 params 中的源文件引用
+          for (const key of ['sourceImageIds', 'imageResourceIds', 'videoResourceIds']) {
+            if (params[key] && Array.isArray(params[key])) {
+              params[key] = (params[key] as string[])
+                .map((id: string) => idMap.get(id) || id)
+                .filter((id: string) => {
+                  // 过滤掉无法解析的 ID（如果在 idMap 中没有找到且原始 ID 也被标记为丢失）
+                  const original = Object.keys(gen.sourceFileHashes!).find(
+                    (origId) => idMap.get(origId) === id || origId === id
+                  );
+                  return original ? idMap.has(original) : true;
+                });
+            }
+          }
+        }
+      }
+
+      // 使用当前资源所在的 section 作为目标
+      const sectionId = resource.type;
+      params.targetSectionId = sectionId;
+
+      useGenerationStore.getState().addTasks([{
+        type: gen.type,
+        draftId: resource.draftId,
+        prompt: gen.prompt,
+        label: `重做: ${resource.fileName}`,
+        params,
+      }]);
+      message.success('已添加到生成队列');
+    } catch (err) {
+      console.error('[ResourceCard] Redo failed:', err);
+      message.error('重做失败');
+    }
+  };
+
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -324,6 +397,12 @@ const ResourceCard: React.FC<ResourceCardProps> = ({
         <button className={styles.deleteButton} onClick={handleDelete}>
           <CloseOutlined />
         </button>
+
+        {resource.hasGenerationMeta && (
+          <button className={styles.redoButton} onClick={handleRedo} title="重做">
+            <ReloadOutlined />
+          </button>
+        )}
 
         {canShowLinkButton && (
           <button className={styles.linkButton} onClick={handleLinkClick} title="关联到选中的视频">

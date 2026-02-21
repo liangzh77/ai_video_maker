@@ -337,6 +337,24 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
                 : t,
             ),
           }));
+
+          // 持久化生成元数据（后端会自动计算源文件哈希）
+          if (resultResourceId) {
+            try {
+              await window.api.resource.saveMetadata({
+                draftId: task.draftId,
+                resourceId: resultResourceId,
+                generation: {
+                  type: task.type,
+                  prompt: task.prompt,
+                  params: task.params,
+                  generatedAt: new Date().toISOString(),
+                },
+              });
+            } catch (metaErr) {
+              console.error('[Generation] Failed to save metadata:', metaErr);
+            }
+          }
         } catch (err) {
           // Check if task was cancelled while running — remove it
           const current = get().tasks.find((t) => t.id === task.id);

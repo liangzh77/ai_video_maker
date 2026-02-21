@@ -34,6 +34,9 @@ export const RESOURCE_CHANNELS = {
   DELETE_SPLIT_FOLDERS: 'resource:deleteSplitFolders',
   SAVE_SPLIT_POINTS: 'resource:saveSplitPoints',
   LOAD_SPLIT_POINTS: 'resource:loadSplitPoints',
+  SAVE_METADATA: 'resource:saveMetadata',
+  LOAD_METADATA: 'resource:loadMetadata',
+  RESOLVE_SOURCE_FILES: 'resource:resolveSourceFiles',
 } as const;
 
 // ============================================

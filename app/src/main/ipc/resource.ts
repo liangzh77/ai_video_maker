@@ -523,7 +523,14 @@ export function registerResourceHandlers(): void {
 
           try {
             await fs.copyFile(foundResource.filePath, newFilePath, fsConstants.COPYFILE_EXCL);
-            // 复制伴随的分割点文件（忽略不存在）
+            // 复制伴随 JSON 文件（忽略不存在）
+            try {
+              await fs.copyFile(
+                storage.getCompanionPath(foundResource.filePath),
+                storage.getCompanionPath(newFilePath)
+              );
+            } catch {}
+            // 向后兼容：复制旧格式
             try {
               await fs.copyFile(
                 foundResource.filePath + '.分割点.json',
@@ -722,7 +729,6 @@ export function registerResourceHandlers(): void {
     ): Promise<OperationResult> => {
       try {
         await storage.splitPoints.save(request.draftId, request.videoId, {
-          videoId: request.videoId,
           duration: request.duration,
           fps: request.fps,
           splitPoints: request.splitPoints,
@@ -746,7 +752,6 @@ export function registerResourceHandlers(): void {
       request: { draftId: string; videoId: string }
     ): Promise<
       OperationResult<{
-        videoId: string;
         duration: number;
         fps: number;
         splitPoints: Array<{
@@ -764,7 +769,6 @@ export function registerResourceHandlers(): void {
           return {
             success: true,
             data: {
-              videoId: data.videoId,
               duration: data.duration,
               fps: data.fps,
               splitPoints: data.splitPoints,
@@ -776,6 +780,148 @@ export function registerResourceHandlers(): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to load split points',
+        };
+      }
+    }
+  );
+
+  // Save resource metadata (generation info, etc.)
+  ipcMain.handle(
+    RESOURCE_CHANNELS.SAVE_METADATA,
+    async (
+      _,
+      request: {
+        draftId: string;
+        resourceId: string;
+        generation: {
+          type: 'image' | 'text' | 'video';
+          prompt: string;
+          params: Record<string, any>;
+          generatedAt: string;
+        };
+      }
+    ): Promise<OperationResult> => {
+      try {
+        // 从 params 中提取源文件引用，计算 SHA-256 哈希
+        const sourceFileHashes: Record<string, string> = {};
+        const sourceFileKeys = ['sourceImageIds', 'imageResourceIds', 'videoResourceIds'];
+        const filesDir = storage.getFilesPath(request.draftId);
+
+        for (const key of sourceFileKeys) {
+          const ids = request.generation.params[key] as string[] | undefined;
+          if (!ids) continue;
+          for (const id of ids) {
+            if (sourceFileHashes[id]) continue; // 已计算过
+            const filePath = path.join(filesDir, id);
+            try {
+              const { createHash } = await import('crypto');
+              const content = await fs.readFile(filePath);
+              const hash = createHash('sha256').update(content).digest('hex');
+              sourceFileHashes[id] = `sha256:${hash}`;
+            } catch {
+              // 源文件不存在，跳过
+              console.warn('[Resource] Source file not found for hash:', id);
+            }
+          }
+        }
+
+        await storage.metadata.save(request.draftId, request.resourceId, {
+          generation: {
+            ...request.generation,
+            sourceFileHashes: Object.keys(sourceFileHashes).length > 0 ? sourceFileHashes : undefined,
+          },
+        });
+        console.log('[Resource] Saved metadata for:', request.resourceId);
+        return { success: true };
+      } catch (error) {
+        console.error('[Resource] Failed to save metadata:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to save metadata',
+        };
+      }
+    }
+  );
+
+  // Load resource metadata
+  ipcMain.handle(
+    RESOURCE_CHANNELS.LOAD_METADATA,
+    async (
+      _,
+      request: { draftId: string; resourceId: string }
+    ): Promise<OperationResult<any>> => {
+      try {
+        const data = await storage.metadata.load(request.draftId, request.resourceId);
+        return { success: true, data: data || undefined };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to load metadata',
+        };
+      }
+    }
+  );
+
+  // Resolve source files by hash
+  ipcMain.handle(
+    RESOURCE_CHANNELS.RESOLVE_SOURCE_FILES,
+    async (
+      _,
+      request: {
+        draftId: string;
+        files: Array<{ resourceId: string; hash: string }>;
+      }
+    ): Promise<OperationResult<Array<{ originalId: string; resolvedId: string | null }>>> => {
+      try {
+        const filesDir = storage.getFilesPath(request.draftId);
+        const { createHash } = await import('crypto');
+        const results: Array<{ originalId: string; resolvedId: string | null }> = [];
+
+        // 先尝试直接路径匹配
+        for (const file of request.files) {
+          const filePath = path.join(filesDir, file.resourceId);
+          try {
+            const content = await fs.readFile(filePath);
+            const hash = `sha256:${createHash('sha256').update(content).digest('hex')}`;
+            if (hash === file.hash) {
+              results.push({ originalId: file.resourceId, resolvedId: file.resourceId });
+              continue;
+            }
+          } catch {}
+
+          // 路径失效或哈希不匹配，在草稿内搜索
+          let found = false;
+          const sections = await storage.scanSections(request.draftId);
+          for (const section of sections) {
+            const sectionPath = path.join(filesDir, section.id);
+            try {
+              const entries = await fs.readdir(sectionPath, { withFileTypes: true });
+              for (const entry of entries) {
+                if (!entry.isFile() || entry.name.startsWith('.') || entry.name.startsWith('_temp_') || entry.name.endsWith('.json')) continue;
+                const candidatePath = path.join(sectionPath, entry.name);
+                try {
+                  const content = await fs.readFile(candidatePath);
+                  const hash = `sha256:${createHash('sha256').update(content).digest('hex')}`;
+                  if (hash === file.hash) {
+                    results.push({ originalId: file.resourceId, resolvedId: `${section.id}/${entry.name}` });
+                    found = true;
+                    break;
+                  }
+                } catch {}
+              }
+            } catch {}
+            if (found) break;
+          }
+          if (!found) {
+            results.push({ originalId: file.resourceId, resolvedId: null });
+          }
+        }
+
+        return { success: true, data: results };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to resolve source files',
         };
       }
     }

@@ -28,6 +28,9 @@ export interface ElectronAPI {
     deleteSplitFolders: (params: { draftId: string }) => Promise<any>;
     saveSplitPoints: (params: { draftId: string; videoId: string; duration: number; fps: number; splitPoints: any[] }) => Promise<any>;
     loadSplitPoints: (params: { draftId: string; videoId: string }) => Promise<any>;
+    saveMetadata: (params: { draftId: string; resourceId: string; generation: any }) => Promise<any>;
+    loadMetadata: (params: { draftId: string; resourceId: string }) => Promise<any>;
+    resolveSourceFiles: (params: { draftId: string; files: Array<{ resourceId: string; hash: string }> }) => Promise<any>;
   };
   task: {
     list: (params?: { draftId?: string; status?: string }) => Promise<any>;
@@ -102,6 +105,9 @@ const api: ElectronAPI = {
     deleteSplitFolders: (params) => ipcRenderer.invoke('resource:deleteSplitFolders', params),
     saveSplitPoints: (params) => ipcRenderer.invoke('resource:saveSplitPoints', params),
     loadSplitPoints: (params) => ipcRenderer.invoke('resource:loadSplitPoints', params),
+    saveMetadata: (params) => ipcRenderer.invoke('resource:saveMetadata', params),
+    loadMetadata: (params) => ipcRenderer.invoke('resource:loadMetadata', params),
+    resolveSourceFiles: (params) => ipcRenderer.invoke('resource:resolveSourceFiles', params),
   },
   task: {
     list: (params) => ipcRenderer.invoke('task:list', params),

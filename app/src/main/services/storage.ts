@@ -2,7 +2,7 @@ import { app } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import type { Draft, Resource, ResourceType, ProcessingTask, ResourceMetadata, SectionDescriptor, MediaType } from '@shared/types';
+import type { Draft, Resource, ResourceType, ProcessingTask, ResourceMetadata, SectionDescriptor, MediaType, ResourceMetadataFile } from '@shared/types';
 import { parseFolderName, buildFolderName } from '@shared/section-utils';
 import { loadConfig, saveConfig } from './config';
 import { extractMetadata, getMimeType } from './metadata';
@@ -501,10 +501,43 @@ export async function scanResources(draftId: string, type?: ResourceType): Promi
     try {
       const entries = await fs.readdir(folderPath, { withFileTypes: true });
 
+      // 迁移旧格式伴随文件：xxx.mp4.分割点.json → xxx.json
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith('.分割点.json')) {
+          const oldPath = path.join(folderPath, entry.name);
+          // 从 "001.mp4.分割点.json" 提取 "001"
+          const baseName = entry.name.replace(/\.[^.]+\.分割点\.json$/, '');
+          const newPath = path.join(folderPath, baseName + '.json');
+          try {
+            // 读取旧文件并转换格式
+            const oldData = await readJson<any>(oldPath, null);
+            if (oldData) {
+              const newData: any = {};
+              if (oldData.splitPoints || oldData.duration || oldData.fps) {
+                newData.splitPoints = {
+                  duration: oldData.duration,
+                  fps: oldData.fps,
+                  points: oldData.splitPoints || [],
+                };
+              }
+              if (oldData.generation) {
+                newData.generation = oldData.generation;
+              }
+              newData.savedAt = oldData.savedAt || new Date().toISOString();
+              await writeJson(newPath, newData);
+              await fs.unlink(oldPath);
+              console.log('[Storage] Migrated companion file:', entry.name, '->', baseName + '.json');
+            }
+          } catch (err) {
+            console.warn('[Storage] Failed to migrate companion file:', entry.name, err);
+          }
+        }
+      }
+
       for (const entry of entries) {
         if (!entry.isFile()) continue;
         if (entry.name.startsWith('.') || entry.name.startsWith('_temp_')) continue;
-        if (entry.name.endsWith('.分割点.json')) continue;
+        if (entry.name.endsWith('.json')) continue;
 
         const filePath = path.join(folderPath, entry.name);
         const relativePath = `${section.id}/${entry.name}`;
@@ -557,6 +590,15 @@ async function buildResource(
     // 提取元数据（会自动使用持久化缓存）
     const metadata = await extractMetadata(filePath, sectionId, draftPath);
 
+    // 检查伴随 JSON 是否有 generation 字段
+    let hasGenerationMeta = false;
+    try {
+      const companionData = await readJson<any>(getCompanionPath(filePath), null);
+      if (companionData?.generation) {
+        hasGenerationMeta = true;
+      }
+    } catch {}
+
     const resource: Resource = {
       id: relativePath, // 使用相对路径作为 ID
       draftId,
@@ -567,6 +609,7 @@ async function buildResource(
       mimeType: getMimeType(filePath),
       metadata,
       createdAt: stat.birthtime.toISOString(),
+      hasGenerationMeta,
     };
 
     return resource;
@@ -687,8 +730,9 @@ export async function reorderResourceFiles(
 
     try {
       await fs.rename(oldPath, tempPath);
-      // 同步重命名伴随的分割点文件（忽略不存在）
-      try { await fs.rename(oldPath + '.分割点.json', tempPath + '.分割点.json'); } catch {}
+      // 同步重命名伴随 JSON 文件（忽略不存在）
+      try { await fs.rename(getCompanionPath(oldPath), getCompanionPath(tempPath)); } catch {}
+      try { await fs.rename(oldPath + '.分割点.json', tempPath + '.分割点.json'); } catch {} // 向后兼容
       console.log('[Storage] Step 1 SUCCESS:', oldPath, '->', tempPath);
       tempRenames.push({ oldId: resourceId, oldPath, tempPath, originalName, ext });
     } catch (err) {
@@ -698,7 +742,8 @@ export async function reorderResourceFiles(
       for (const item of tempRenames) {
         try {
           await fs.rename(item.tempPath, item.oldPath);
-          try { await fs.rename(item.tempPath + '.分割点.json', item.oldPath + '.分割点.json'); } catch {}
+          try { await fs.rename(getCompanionPath(item.tempPath), getCompanionPath(item.oldPath)); } catch {}
+          try { await fs.rename(item.tempPath + '.分割点.json', item.oldPath + '.分割点.json'); } catch {} // 向后兼容
           console.log('[Storage] Rollback SUCCESS:', item.tempPath, '->', item.oldPath);
         } catch (rollbackErr) {
           console.error('[Storage] Rollback FAILED:', item.tempPath, rollbackErr);
@@ -724,8 +769,9 @@ export async function reorderResourceFiles(
 
     try {
       await fs.rename(tempPath, newPath);
-      // 同步重命名伴随的分割点文件（忽略不存在）
-      try { await fs.rename(tempPath + '.分割点.json', newPath + '.分割点.json'); } catch {}
+      // 同步重命名伴随 JSON 文件（忽略不存在）
+      try { await fs.rename(getCompanionPath(tempPath), getCompanionPath(newPath)); } catch {}
+      try { await fs.rename(tempPath + '.分割点.json', newPath + '.分割点.json'); } catch {} // 向后兼容
       console.log('[Storage] Step 2 SUCCESS:', tempPath, '->', newPath);
       newResourceIds.push(newRelativePath);
       oldToNewIdMap.set(oldId, newRelativePath);
@@ -760,7 +806,7 @@ export async function renumberResourceFiles(
   try {
     const entries = await fs.readdir(folderPath, { withFileTypes: true });
     const fileNames = entries
-      .filter(e => e.isFile() && !e.name.startsWith('.') && !e.name.startsWith('_temp_') && !e.name.endsWith('.分割点.json'))
+      .filter(e => e.isFile() && !e.name.startsWith('.') && !e.name.startsWith('_temp_') && !e.name.endsWith('.json'))
       .map(e => e.name)
       .sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true }));
 
@@ -1167,8 +1213,9 @@ export async function deleteResource(draftId: string, resourceId: string): Promi
 
   try {
     await fs.unlink(filePath);
-    // 尝试删除伴随的分割点文件（忽略不存在）
-    try { await fs.unlink(filePath + '.分割点.json'); } catch {}
+    // 尝试删除伴随 JSON 文件（忽略不存在）
+    try { await fs.unlink(getCompanionPath(filePath)); } catch {}
+    try { await fs.unlink(filePath + '.分割点.json'); } catch {} // 向后兼容旧格式
     await updateDraft(draftId, {});
     return true;
   } catch (err) {
@@ -1182,55 +1229,111 @@ export async function deleteResource(draftId: string, resourceId: string): Promi
 }
 
 // ============================================
-// Split Points Storage
+// Resource Companion JSON (伴随元数据文件)
 // ============================================
 
-function getSplitPointsPath(draftId: string, videoId: string): string {
-  // 在视频文件同目录创建同名伴随文件，如 001_example.mp4.分割点.json
-  return path.join(getFilesPath(draftId), videoId + '.分割点.json');
+/**
+ * 获取资源文件的伴随 JSON 路径
+ * 如 001.mp4 → 001.json, 002_example.png → 002_example.json
+ */
+function getCompanionPath(filePath: string): string {
+  const parsed = path.parse(filePath);
+  return path.join(parsed.dir, parsed.name + '.json');
 }
 
-interface SplitPointsFile {
-  videoId: string;
-  duration: number;
-  fps: number;
-  splitPoints: Array<{
-    id: string;
-    time: number;
-    frame: number;
-    isAutoDetected: boolean;
-  }>;
-  savedAt: string;
+function getCompanionJsonPath(draftId: string, resourceId: string): string {
+  return getCompanionPath(path.join(getFilesPath(draftId), resourceId));
 }
+
+/**
+ * 加载资源元数据（伴随 JSON）
+ * 内含向后兼容：若新格式不存在，尝试读取旧格式 .分割点.json 并自动迁移
+ */
+export async function loadResourceMeta(
+  draftId: string,
+  resourceId: string
+): Promise<ResourceMetadataFile | null> {
+  const jsonPath = getCompanionJsonPath(draftId, resourceId);
+  let data = await readJson<ResourceMetadataFile | null>(jsonPath, null);
+
+  // 向后兼容：尝试读取旧格式 .分割点.json
+  if (!data) {
+    const oldPath = path.join(getFilesPath(draftId), resourceId + '.分割点.json');
+    const oldData = await readJson<any>(oldPath, null);
+    if (oldData) {
+      // 迁移为新格式
+      data = {
+        splitPoints: {
+          duration: oldData.duration,
+          fps: oldData.fps,
+          points: oldData.splitPoints,
+        },
+        savedAt: oldData.savedAt || new Date().toISOString(),
+      };
+      // 保存新格式，删除旧文件
+      await writeJson(jsonPath, data);
+      try { await fs.unlink(oldPath); } catch {}
+      console.log('[Storage] Migrated split points to new format:', resourceId);
+    }
+  }
+
+  return data;
+}
+
+/**
+ * 保存/合并资源元数据（不覆盖其他字段）
+ */
+export async function saveResourceMeta(
+  draftId: string,
+  resourceId: string,
+  update: Partial<ResourceMetadataFile>
+): Promise<void> {
+  const jsonPath = getCompanionJsonPath(draftId, resourceId);
+  const existing = await readJson<Partial<ResourceMetadataFile>>(jsonPath, {});
+  await writeJson(jsonPath, {
+    ...existing,
+    ...update,
+    savedAt: new Date().toISOString(),
+  });
+}
+
+// --- Split Points 兼容 API ---
 
 export async function saveSplitPoints(
   draftId: string,
-  videoId: string,
-  data: Omit<SplitPointsFile, 'savedAt'>
+  resourceId: string,
+  data: { duration: number; fps: number; splitPoints: Array<{ id: string; time: number; frame: number; isAutoDetected: boolean }> }
 ): Promise<void> {
-  const filePath = getSplitPointsPath(draftId, videoId);
-  await writeJson(filePath, {
-    ...data,
-    savedAt: new Date().toISOString(),
+  await saveResourceMeta(draftId, resourceId, {
+    splitPoints: {
+      duration: data.duration,
+      fps: data.fps,
+      points: data.splitPoints,
+    },
   });
 }
 
 export async function loadSplitPoints(
   draftId: string,
-  videoId: string
-): Promise<SplitPointsFile | null> {
-  const filePath = getSplitPointsPath(draftId, videoId);
-  return readJson<SplitPointsFile | null>(filePath, null);
+  resourceId: string
+): Promise<{ duration: number; fps: number; splitPoints: Array<{ id: string; time: number; frame: number; isAutoDetected: boolean }> } | null> {
+  const meta = await loadResourceMeta(draftId, resourceId);
+  if (!meta?.splitPoints) return null;
+  return {
+    duration: meta.splitPoints.duration,
+    fps: meta.splitPoints.fps,
+    splitPoints: meta.splitPoints.points,
+  };
 }
 
-export async function deleteSplitPoints(draftId: string, videoId: string): Promise<boolean> {
-  const filePath = getSplitPointsPath(draftId, videoId);
-  try {
-    await fs.unlink(filePath);
-    return true;
-  } catch {
-    return false;
-  }
+export async function deleteSplitPoints(draftId: string, resourceId: string): Promise<boolean> {
+  // 删除新格式伴随 JSON
+  const jsonPath = getCompanionJsonPath(draftId, resourceId);
+  try { await fs.unlink(jsonPath); } catch {}
+  // 向后兼容：删除旧格式
+  const oldPath = path.join(getFilesPath(draftId), resourceId + '.分割点.json');
+  try { await fs.unlink(oldPath); } catch {}
+  return true;
 }
 
 // ============================================
@@ -1428,6 +1531,11 @@ export const storage = {
     load: loadSplitPoints,
     delete: deleteSplitPoints,
   },
+  metadata: {
+    load: loadResourceMeta,
+    save: saveResourceMeta,
+  },
+  getCompanionPath,
 };
 
 export default storage;

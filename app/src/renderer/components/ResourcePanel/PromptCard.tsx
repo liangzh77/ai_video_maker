@@ -1,9 +1,10 @@
 import React from 'react';
 import { App } from 'antd';
-import { CloseOutlined, ThunderboltOutlined, CopyOutlined } from '@ant-design/icons';
+import { CloseOutlined, ThunderboltOutlined, CopyOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { Resource, PromptTag } from '@shared/types';
 import { isTextMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
+import { useGenerationStore } from '../../stores/generation';
 import styles from './PromptCard.module.css';
 
 const TAG_CONFIG: Record<PromptTag, { label: string; className: string }> = {
@@ -78,6 +79,34 @@ const PromptCard: React.FC<PromptCardProps> = ({
     }
   };
 
+  const handleRedo = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const result = await window.api.resource.loadMetadata({
+        draftId: resource.draftId,
+        resourceId: resource.id,
+      });
+      if (!result.success || !result.data?.generation) {
+        message.warning('此资源没有生成记录');
+        return;
+      }
+      const gen = result.data.generation;
+      const params = { ...gen.params, targetSectionId: resource.type };
+
+      useGenerationStore.getState().addTasks([{
+        type: gen.type,
+        draftId: resource.draftId,
+        prompt: gen.prompt,
+        label: `重做: ${resource.fileName}`,
+        params,
+      }]);
+      message.success('已添加到生成队列');
+    } catch (err) {
+      console.error('[PromptCard] Redo failed:', err);
+      message.error('重做失败');
+    }
+  };
+
   return (
     <div
       className={`${styles.card} ${isSelected ? styles.selected : ''} ${isDragOver ? styles.dragOver : ''} ${draggable ? styles.draggable : ''}`}
@@ -106,6 +135,12 @@ const PromptCard: React.FC<PromptCardProps> = ({
       <button className={styles.generateButton} onClick={handleGenerate} title="生成">
         <ThunderboltOutlined />
       </button>
+
+      {resource.hasGenerationMeta && (
+        <button className={styles.redoButton} onClick={handleRedo} title="重做">
+          <ReloadOutlined />
+        </button>
+      )}
 
       <button className={styles.copyButton} onClick={handleCopy} title="复制">
         <CopyOutlined />

@@ -65,6 +65,7 @@ export interface Resource {
   mimeType: string;
   createdAt: ISODateString;
   metadata: ResourceMetadata;
+  hasGenerationMeta?: boolean;
 }
 
 export type ResourceMetadata = VideoMetadata | ImageMetadata | TextMetadata | AudioMetadata;
@@ -171,6 +172,26 @@ export interface AnalyzeResult {
   duration: number;
   fps: number;
   splitPoints: SplitPoint[];
+}
+
+// ============================================
+// Resource Metadata File (伴随 JSON)
+// ============================================
+
+export interface ResourceMetadataFile {
+  splitPoints?: {
+    duration: number;
+    fps: number;
+    points: SplitPoint[];
+  };
+  generation?: {
+    type: 'image' | 'text' | 'video';
+    prompt: string;
+    params: Record<string, any>;
+    sourceFileHashes?: Record<string, string>;  // resourceId → "sha256:xxx"
+    generatedAt: string;
+  };
+  savedAt: string;
 }
 
 export interface UpscaleConfig {
