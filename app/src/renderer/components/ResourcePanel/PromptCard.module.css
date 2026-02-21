@@ -114,22 +114,24 @@
   position: absolute;
   bottom: var(--spacing-xs);
   left: var(--spacing-xs);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 50%;
   background-color: rgba(0, 0, 0, 0.5);
   color: rgba(255, 255, 255, 0.8);
   font-size: 11px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0;
   transition: opacity 0.15s, background-color 0.15s;
 }
 
 .card:hover .generateButton {
-  opacity: clamp(0, calc((var(--card-scale, 1) - 0.55) * 20), 1);
+  opacity: 1;
 }
 
 .generateButton:hover {
@@ -159,7 +161,7 @@
 }
 
 .card:hover .copyButton {
-  opacity: clamp(0, calc((var(--card-scale, 1) - 0.55) * 20), 1);
+  opacity: 1;
 }
 
 .copyButton:hover {

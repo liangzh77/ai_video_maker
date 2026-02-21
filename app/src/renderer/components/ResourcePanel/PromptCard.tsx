@@ -103,18 +103,13 @@ const PromptCard: React.FC<PromptCardProps> = ({
         {content || <span className={styles.empty}>暂无内容</span>}
       </div>
 
-      {cardScale >= 0.55 && (
-        <button className={styles.generateButton} onClick={handleGenerate} title="生成">
-          <ThunderboltOutlined />
-          <span>生成</span>
-        </button>
-      )}
+      <button className={styles.generateButton} onClick={handleGenerate} title="生成">
+        <ThunderboltOutlined />
+      </button>
 
-      {cardScale >= 0.55 && (
-        <button className={styles.copyButton} onClick={handleCopy} title="复制">
-          <CopyOutlined />
-        </button>
-      )}
+      <button className={styles.copyButton} onClick={handleCopy} title="复制">
+        <CopyOutlined />
+      </button>
     </div>
   );
 };
