@@ -377,21 +377,25 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setSystemPrompt('');
 
       // 尝试解析 JSON 格式提示词（提取 prompt / seconds）
+      // 支持 ```json ... ``` markdown 代码块包裹
       let resolvedPrompt = promptContent;
       let parsedVideoSeconds: number | null = null;
-      const trimmed = promptContent.trim();
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        try {
-          const json = JSON.parse(trimmed);
-          // 支持单个对象或数组中第一个对象
-          const obj = Array.isArray(json) ? json[0] : json;
-          if (obj && obj.prompt && typeof obj.prompt === 'string') {
-            resolvedPrompt = obj.prompt;
-            if (typeof obj.seconds === 'number') {
-              parsedVideoSeconds = Math.min(15, Math.max(4, obj.seconds));
+      {
+        let s = promptContent.trim();
+        const fenceMatch = s.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+        if (fenceMatch) s = fenceMatch[1].trim();
+        if (s.startsWith('{') || s.startsWith('[')) {
+          try {
+            const json = JSON.parse(s);
+            const obj = Array.isArray(json) ? json[0] : json;
+            if (obj && obj.prompt && typeof obj.prompt === 'string') {
+              resolvedPrompt = obj.prompt;
+              if (typeof obj.seconds === 'number') {
+                parsedVideoSeconds = Math.min(15, Math.max(4, obj.seconds));
+              }
             }
-          }
-        } catch { /* not JSON, ignore */ }
+          } catch { /* not JSON, ignore */ }
+        }
       }
       setEditedPrompt(resolvedPrompt);
 

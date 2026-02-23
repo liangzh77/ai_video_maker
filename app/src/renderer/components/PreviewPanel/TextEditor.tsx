@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Input, Button, App, Segmented } from 'antd';
-import { SaveOutlined, ThunderboltOutlined, CopyOutlined } from '@ant-design/icons';
+import { SaveOutlined, ThunderboltOutlined, CopyOutlined, SplitCellsOutlined } from '@ant-design/icons';
 import type { Resource, TextMetadata, PromptTag } from '@shared/types';
 import { isTextMetadata } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
@@ -22,7 +22,7 @@ interface TextEditorProps {
 
 const TextEditor: React.FC<TextEditorProps> = ({ resource }) => {
   const { message } = App.useApp();
-  const { updateResource, pendingGenerateResourceId, setPendingGenerate } = useDraftStore();
+  const { updateResource, addTextResource, pendingGenerateResourceId, setPendingGenerate } = useDraftStore();
   const [content, setContent] = useState('');
   const [tag, setTag] = useState<PromptTag | ''>('');
   const [hasChanges, setHasChanges] = useState(false);
@@ -83,6 +83,60 @@ const TextEditor: React.FC<TextEditorProps> = ({ resource }) => {
     setShowGenerateDialog(true);
   };
 
+  // 尝试从内容中提取 JSON（支持 ```json ... ``` 包裹）
+  const extractJson = (text: string): unknown | null => {
+    let s = text.trim();
+    // 剥离 markdown 代码块
+    const fenceMatch = s.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+    if (fenceMatch) s = fenceMatch[1].trim();
+    if (!s.startsWith('[') && !s.startsWith('{')) return null;
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  };
+
+  // 检查内容是否可分解（JSON 数组且至少有一项包含 prompt 字段）
+  const canDecompose = (() => {
+    const parsed = extractJson(content);
+    if (!Array.isArray(parsed)) return false;
+    const withPrompt = parsed.filter(
+      (item: unknown) => typeof item === 'object' && item !== null && 'prompt' in item,
+    );
+    return withPrompt.length > 1;
+  })();
+
+  const handleDecompose = async () => {
+    const parsed = extractJson(content);
+    if (!Array.isArray(parsed)) {
+      message.error('JSON 解析失败');
+      return;
+    }
+    // 只提取包含 prompt 字段的项
+    const arr = (parsed as Array<Record<string, unknown>>).filter(
+      (item) => typeof item === 'object' && item !== null && 'prompt' in item,
+    );
+    const draftId = resource.draftId;
+    const sectionId = resource.type;
+    let created = 0;
+    for (const item of arr) {
+      const itemContent = JSON.stringify(item, null, 2);
+      const newResource = await addTextResource(draftId, sectionId, itemContent);
+      if (newResource) {
+        if (tag) {
+          await updateResource(newResource.id, { tag } as Partial<Resource['metadata']>);
+        }
+        created++;
+      }
+    }
+    if (created > 0) {
+      message.success(`已分解为 ${created} 个提示词卡片`);
+    } else {
+      message.error('分解失败');
+    }
+  };
+
   return (
     <div className={styles.editor}>
       <div className={styles.header}>
@@ -101,6 +155,15 @@ const TextEditor: React.FC<TextEditorProps> = ({ resource }) => {
             disabled={!content}
           >
             复制
+          </Button>
+          <Button
+            size="small"
+            icon={<SplitCellsOutlined />}
+            onClick={handleDecompose}
+            disabled={!canDecompose}
+            title={canDecompose ? '将 JSON 数组拆分为多个提示词卡片' : '内容需要是 JSON 数组且每项包含 prompt 字段'}
+          >
+            分解
           </Button>
           <Button
             size="small"
