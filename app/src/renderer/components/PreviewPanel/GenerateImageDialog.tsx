@@ -538,6 +538,29 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       return;
     }
 
+    // 校验 @音频N 占位符与选中音频数量一致
+    const audioRefs = [...editedPrompt.matchAll(/@音频(\d+)/g)];
+    if (audioRefs.length > 0 || videoModeAudioIds.length > 0) {
+      const refNumbers = [...new Set(audioRefs.map((m) => parseInt(m[1], 10)))];
+      const maxRef = refNumbers.length > 0 ? Math.max(...refNumbers) : 0;
+      if (audioRefs.length > 0 && videoModeAudioIds.length === 0) {
+        message.error(`提示词中包含 @音频 引用，但未选择音频`);
+        return;
+      }
+      if (videoModeAudioIds.length > 0 && audioRefs.length === 0) {
+        message.error(`选择了 ${videoModeAudioIds.length} 个音频，但提示词中没有 @音频N 引用`);
+        return;
+      }
+      if (maxRef > videoModeAudioIds.length) {
+        message.error(`提示词中引用了 @音频${maxRef}，但只选择了 ${videoModeAudioIds.length} 个音频`);
+        return;
+      }
+      if (refNumbers.length < videoModeAudioIds.length) {
+        message.error(`选择了 ${videoModeAudioIds.length} 个音频，但提示词中只引用了 ${refNumbers.length} 个`);
+        return;
+      }
+    }
+
     savePromptToHistory(editedPrompt);
 
     addTasks([{
