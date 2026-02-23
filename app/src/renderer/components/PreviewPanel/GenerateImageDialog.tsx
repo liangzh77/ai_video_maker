@@ -374,8 +374,27 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setSelectedImageIds([]);
       setVideoModeImageIds([]);
       setSelectedTextIds([]);
-      setEditedPrompt(promptContent);
       setSystemPrompt('');
+
+      // 尝试解析 JSON 格式提示词（提取 prompt / seconds）
+      let resolvedPrompt = promptContent;
+      let parsedVideoSeconds: number | null = null;
+      const trimmed = promptContent.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          const json = JSON.parse(trimmed);
+          // 支持单个对象或数组中第一个对象
+          const obj = Array.isArray(json) ? json[0] : json;
+          if (obj && obj.prompt && typeof obj.prompt === 'string') {
+            resolvedPrompt = obj.prompt;
+            if (typeof obj.seconds === 'number') {
+              parsedVideoSeconds = Math.min(15, Math.max(4, obj.seconds));
+            }
+          }
+        } catch { /* not JSON, ignore */ }
+      }
+      setEditedPrompt(resolvedPrompt);
+
       // 图片模式：从缓存恢复，或默认第一个
       const imageSections = sections.filter((s) => s.mediaType === '图片');
       const cachedImageSection = targetSectionLabelCache.image
@@ -399,21 +418,23 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setTargetVideoSection(cachedVideoSection?.id || (videoSections.length > 0 ? videoSections[0].id : null));
       setSelectedVideoIds([]);
       setVideoModeAudioIds([]);
-      setVideoDuration(6);
+      setVideoDuration(parsedVideoSeconds ?? 6);
       setVideoRatio('9:16');
       // 根据 initialMode 或 prompt 的 tag 设置默认生成模式
+      let resolvedMode: string;
       if (initialMode) {
-        setMode(initialMode);
+        resolvedMode = initialMode;
       } else {
         const meta = promptResource?.metadata;
         if (meta && isTextMetadata(meta) && meta.tag === 'video') {
-          setMode('video');
+          resolvedMode = 'video';
         } else if (meta && isTextMetadata(meta) && meta.tag === 'image') {
-          setMode('image');
+          resolvedMode = 'image';
         } else {
-          setMode('text');
+          resolvedMode = 'text';
         }
       }
+      setMode(resolvedMode as GenerateMode);
     }
     prevVisibleRef.current = visible;
   }, [visible, promptContent, promptResource]);
