@@ -29,6 +29,7 @@ export interface TextTaskParams {
 export interface VideoTaskParams {
   imageResourceIds: string[];
   videoResourceIds: string[];
+  audioResourceIds: string[];
   duration: number;
   ratio: string;
   targetSectionId?: string;
@@ -150,6 +151,7 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
     draftId: task.draftId,
     imageResourceIds: params.imageResourceIds,
     videoResourceIds: params.videoResourceIds,
+    audioResourceIds: params.audioResourceIds,
     prompt: task.prompt,
     duration: params.duration,
     ratio: params.ratio,

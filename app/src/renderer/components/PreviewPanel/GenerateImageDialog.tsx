@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Modal, App, Empty, Select, Radio, Button, Input, Segmented, InputNumber, Checkbox, Spin } from 'antd';
-import { CopyOutlined, MinusOutlined, PlusOutlined, HistoryOutlined, DeleteOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { CopyOutlined, MinusOutlined, PlusOutlined, HistoryOutlined, DeleteOutlined, PlayCircleOutlined, SoundOutlined } from '@ant-design/icons';
 import type { Resource, ImageResolution, OperationResult } from '@shared/types';
-import { isTextMetadata, isVideoMetadata } from '@shared/types';
+import { isTextMetadata, isVideoMetadata, isAudioMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import { useSectionsStore } from '../../stores/sections';
@@ -136,6 +136,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const [videoDuration, setVideoDuration] = useState<number>(6);
   const [videoRatio, setVideoRatio] = useState<string>('9:16');
   const [targetVideoSection, setTargetVideoSection] = useState<string | null>(null);
+  const [videoModeAudioIds, setVideoModeAudioIds] = useState<string[]>([]);
 
   // 提示词历史
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
@@ -240,6 +241,19 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     const desc = parseFolderName(r.type);
     return desc?.mediaType === '视频';
   });
+
+  // 音频资源列表
+  const allAudios = resources.filter((r) => {
+    const desc = parseFolderName(r.type);
+    return desc?.mediaType === '声音';
+  });
+
+  // 多选音频的处理函数
+  const toggleAudioSelection = (audioId: string) => {
+    setVideoModeAudioIds((prev) =>
+      prev.includes(audioId) ? prev.filter((id) => id !== audioId) : [...prev, audioId]
+    );
+  };
 
   // 视频选择变化时，自动根据第一个选中视频的元数据更新时长和比例
   useEffect(() => {
@@ -384,6 +398,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         : null;
       setTargetVideoSection(cachedVideoSection?.id || (videoSections.length > 0 ? videoSections[0].id : null));
       setSelectedVideoIds([]);
+      setVideoModeAudioIds([]);
       setVideoDuration(6);
       setVideoRatio('9:16');
       // 根据 initialMode 或 prompt 的 tag 设置默认生成模式
@@ -533,6 +548,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       params: {
         imageResourceIds: videoModeImageIds,
         videoResourceIds: selectedVideoIds,
+        audioResourceIds: videoModeAudioIds,
         duration: videoDuration,
         ratio: videoRatio,
         targetSectionId: targetVideoSection || undefined,
@@ -1087,6 +1103,52 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* 参考音频选择 */}
+                {allAudios.length > 0 && (
+                  <div className={styles.section}>
+                    <div className={styles.sectionTitle}>
+                      音频（可选，用 @音频1 引用）
+                      <span className={styles.count}>
+                        已选 {videoModeAudioIds.length} / 共 {allAudios.length} 个
+                      </span>
+                    </div>
+                    <div className={styles.imageGrid} style={{ maxHeight: '20vh' }}>
+                      {allAudios.map((audio) => {
+                        const sel = videoModeAudioIds.includes(audio.id);
+                        const meta = isAudioMetadata(audio.metadata) ? audio.metadata : null;
+                        return (
+                          <div
+                            key={audio.id}
+                            className={`${styles.imageItem} ${sel ? styles.selected : ''}`}
+                            onClick={() => toggleAudioSelection(audio.id)}
+                          >
+                            <div className={styles.videoThumbPlaceholder} style={{ width: 120, height: 80 }}>
+                              <SoundOutlined style={{ fontSize: 24, color: 'var(--color-text-tertiary)' }} />
+                            </div>
+                            <div className={styles.imageName} title={audio.fileName}>
+                              {audio.fileName}
+                            </div>
+                            {meta && (
+                              <span style={{
+                                position: 'absolute', top: 4, left: 4,
+                                fontSize: 10, color: '#fff',
+                                background: 'rgba(0,0,0,0.5)', borderRadius: 3, padding: '1px 4px',
+                              }}>
+                                {Math.floor(meta.duration / 60)}:{String(Math.floor(meta.duration % 60)).padStart(2, '0')}
+                              </span>
+                            )}
+                            {sel && (
+                              <div className={styles.selectedBadge}>
+                                {videoModeAudioIds.indexOf(audio.id) + 1}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </>

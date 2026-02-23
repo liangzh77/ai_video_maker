@@ -21,6 +21,7 @@ export interface VideoGenerationParams {
   prompt: string;
   imageFiles: string[];    // 图片文件绝对路径 (最多 9 个)
   videoFiles: string[];    // 视频文件绝对路径 (最多 3 个)
+  audioFiles: string[];    // 音频文件绝对路径
   duration?: number;       // 4~15 秒
   ratio?: string;          // 1:1, 4:3, 3:4, 16:9, 9:16, 21:9
 }
@@ -135,10 +136,10 @@ async function uploadFileToRelay(relayUrl: string, filePath: string): Promise<st
 
 /**
  * 构建 promptParts
- * 支持用户在提示词中用 @图片N 引用图片，或自动添加所有图片引用
+ * 支持用户在提示词中用 @图片N / @音频N 引用媒体，或自动添加所有图片引用
  */
 function buildPromptParts(prompt: string, imageCount: number): PromptPart[] {
-  const atPattern = /@图片(\d+)/g;
+  const atPattern = /@(图片|视频|音频)(\d+)/g;
   const parts: PromptPart[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -149,7 +150,7 @@ function buildPromptParts(prompt: string, imageCount: number): PromptPart[] {
     if (match.index > lastIndex) {
       parts.push({ type: 'text', value: prompt.slice(lastIndex, match.index) });
     }
-    parts.push({ type: 'at', label: `图片${match[1]}` });
+    parts.push({ type: 'at', label: `${match[1]}${match[2]}` });
     lastIndex = match.index + match[0].length;
   }
 
@@ -320,6 +321,20 @@ export async function generateVideo(
 ): Promise<VideoGenerationResult> {
   const relayUrl = getRelayUrl();
 
+  // 0. 检查中转服务是否可用
+  try {
+    await axios.get(`${relayUrl}/api/health`, { timeout: 5000 });
+  } catch (err) {
+    if (err instanceof Error && 'code' in err && (err as any).code === 'ECONNREFUSED') {
+      throw new Error(`中转服务未启动，请先启动中转服务 (${relayUrl})。检查 .env.local 中 JIMENG_RELAY_URL 配置是否正确。`);
+    }
+    // health 端点不存在也没关系，说明服务至少在运行
+    const status = (err as any)?.response?.status;
+    if (!status) {
+      throw new Error(`无法连接中转服务 (${relayUrl})，请检查 .env.local 中 JIMENG_RELAY_URL 配置是否正确。`);
+    }
+  }
+
   // 1. 上传文件到中转服务
   onProgress?.('上传文件中');
   const imageMd5s: string[] = [];
@@ -338,16 +353,25 @@ export async function generateVideo(
     console.log(`[VideoAPI] Video MD5: ${md5}`);
   }
 
+  const audioMd5s: string[] = [];
+  for (const filePath of (params.audioFiles || [])) {
+    console.log(`[VideoAPI] Uploading audio: ${path.basename(filePath)}`);
+    const md5 = await uploadFileToRelay(relayUrl, filePath);
+    audioMd5s.push(md5);
+    console.log(`[VideoAPI] Audio MD5: ${md5}`);
+  }
+
   // 2. 构建 promptParts
   const promptParts = buildPromptParts(params.prompt, imageMd5s.length);
   console.log(`[VideoAPI] PromptParts: ${promptParts.length} parts`);
 
   // 3. 提交任务到中转服务
   onProgress?.('提交中');
-  console.log(`[VideoAPI] Submitting task: ${imageMd5s.length} images, ${videoMd5s.length} videos, refMode=全能参考`);
+  console.log(`[VideoAPI] Submitting task: ${imageMd5s.length} images, ${videoMd5s.length} videos, ${audioMd5s.length} audios, refMode=全能参考`);
   const submitResp = await axios.post(`${relayUrl}/api/task/submit`, {
     images: imageMd5s,
     videos: videoMd5s,
+    audios: audioMd5s.length > 0 ? audioMd5s : undefined,
     promptParts,
     model: 'seedance_2.0',
     refMode: '全能参考',

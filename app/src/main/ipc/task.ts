@@ -135,6 +135,7 @@ interface TaskGenerateVideoRequest {
   draftId: string;
   imageResourceIds: string[];
   videoResourceIds: string[];
+  audioResourceIds: string[];
   prompt: string;
   duration?: number;
   ratio?: string;
@@ -1351,6 +1352,16 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           videoFiles.push(res.filePath);
         }
 
+        // Collect audio file paths
+        const audioFiles: string[] = [];
+        for (const audioId of (request.audioResourceIds || [])) {
+          const res = await storage.resource.get(request.draftId, audioId);
+          if (!res) {
+            return { success: false, error: `音频资源未找到: ${audioId}` };
+          }
+          audioFiles.push(res.filePath);
+        }
+
         // Determine target section
         const targetSectionDesc = request.targetSectionId
           ? { id: request.targetSectionId }
@@ -1386,6 +1397,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           prompt: request.prompt,
           imageFiles,
           videoFiles,
+          audioFiles,
           duration: request.duration,
           ratio: request.ratio,
         }, onVideoProgress);
