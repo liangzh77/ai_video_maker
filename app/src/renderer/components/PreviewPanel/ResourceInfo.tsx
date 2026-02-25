@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button, Tooltip, Popconfirm, message } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
-import type { Resource } from '@shared/types';
+import type { Resource, ResourceMetadataFile } from '@shared/types';
 import { isVideoMetadata, isImageMetadata, isAudioMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
@@ -11,8 +11,29 @@ interface ResourceInfoProps {
   resource: Resource;
 }
 
+const GenerationTypeLabel: Record<string, string> = {
+  image: '图片生成',
+  text: '文本生成',
+  video: '视频生成',
+};
+
 const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
   const { deleteResource, selectResource } = useDraftStore();
+
+  // 加载生成信息
+  const [generationMeta, setGenerationMeta] = useState<ResourceMetadataFile['generation'] | null>(null);
+  useEffect(() => {
+    setGenerationMeta(null);
+    if (!resource.hasGenerationMeta) return;
+    window.api.resource.loadMetadata({
+      draftId: resource.draftId,
+      resourceId: resource.id,
+    }).then((result) => {
+      if (result.success && result.data?.generation) {
+        setGenerationMeta(result.data.generation);
+      }
+    }).catch(() => {});
+  }, [resource.id, resource.draftId, resource.hasGenerationMeta]);
 
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
@@ -24,8 +45,8 @@ const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
 
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    const secs = (seconds % 60).toFixed(2);
+    return `${mins}:${secs.padStart(5, '0')}`;
   };
 
   const getResourceTypeLabel = (type: string): string => {
@@ -128,6 +149,26 @@ const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
           <span className={styles.value}>{formatFileSize(resource.fileSize)}</span>
         </div>
       </div>
+
+      {generationMeta && (
+        <div className={styles.generation}>
+          <h4 className={styles.title}>生成信息</h4>
+          <div className={styles.grid}>
+            <div className={styles.item}>
+              <span className={styles.label}>生成类型</span>
+              <span className={styles.value}>{GenerationTypeLabel[generationMeta.type] || generationMeta.type}</span>
+            </div>
+            <div className={styles.item}>
+              <span className={styles.label}>生成时间</span>
+              <span className={styles.value}>{new Date(generationMeta.generatedAt).toLocaleString()}</span>
+            </div>
+          </div>
+          <div className={styles.promptBlock}>
+            <span className={styles.label}>提示词</span>
+            <p className={styles.promptText}>{generationMeta.prompt}</p>
+          </div>
+        </div>
+      )}
 
       <div className={styles.actions}>
         <Popconfirm

@@ -261,8 +261,10 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     const firstVideo = allVideos.find((v) => v.id === selectedVideoIds[0]);
     if (!firstVideo?.metadata || !isVideoMetadata(firstVideo.metadata)) return;
     const meta = firstVideo.metadata;
-    // 时长取整上限，限制在 4~15 范围
-    setVideoDuration(Math.min(15, Math.max(4, Math.ceil(meta.duration))));
+    // 时长取整：小数部分 < 0.3 舍去，>= 0.3 进 1，限制在 4~15 范围
+    const frac = meta.duration - Math.floor(meta.duration);
+    const rounded = frac < 0.3 ? Math.floor(meta.duration) : Math.ceil(meta.duration);
+    setVideoDuration(Math.min(15, Math.max(4, rounded)));
     // 比例从宽高推算
     if (meta.width > 0 && meta.height > 0) {
       setVideoRatio(calcRatioFromDimensions(meta.width, meta.height));
