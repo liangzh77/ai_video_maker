@@ -12,12 +12,20 @@ interface CompareTranscriptDialogProps {
 }
 
 // Diff 行类型
-type DiffType = 'equal' | 'removed' | 'added' | 'empty';
+type DiffType = 'equal' | 'removed' | 'added' | 'modified' | 'empty';
+
+// 字符级 diff 片段
+interface CharFragment {
+  text: string;
+  type: 'equal' | 'removed' | 'added';
+}
 
 interface DiffLine {
   leftText: string;
   rightText: string;
   type: DiffType;
+  leftFragments?: CharFragment[];   // modified 行的左侧字符级高亮
+  rightFragments?: CharFragment[];  // modified 行的右侧字符级高亮
 }
 
 // 按中文标点分句
@@ -25,8 +33,13 @@ function splitSentences(text: string): string[] {
   return text.split(/(?<=[。？！.?!\n])/).map(s => s.trim()).filter(s => s.length > 0);
 }
 
-// LCS diff 算法
-function computeDiff(left: string[], right: string[]): DiffLine[] {
+// 字符级 LCS diff
+function computeCharDiff(
+  leftStr: string,
+  rightStr: string,
+): { leftFragments: CharFragment[]; rightFragments: CharFragment[] } {
+  const left = [...leftStr];
+  const right = [...rightStr];
   const m = left.length;
   const n = right.length;
 
@@ -42,15 +55,128 @@ function computeDiff(left: string[], right: string[]): DiffLine[] {
     }
   }
 
+  // 回溯
+  const ops: Array<{ leftChar: string; rightChar: string; type: 'equal' | 'removed' | 'added' }> = [];
+  let i = m;
+  let j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && left[i - 1] === right[j - 1]) {
+      ops.push({ leftChar: left[i - 1], rightChar: right[j - 1], type: 'equal' });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      ops.push({ leftChar: '', rightChar: right[j - 1], type: 'added' });
+      j--;
+    } else {
+      ops.push({ leftChar: left[i - 1], rightChar: '', type: 'removed' });
+      i--;
+    }
+  }
+  ops.reverse();
+
+  // 合并连续同类型字符为片段
+  const leftFragments: CharFragment[] = [];
+  const rightFragments: CharFragment[] = [];
+
+  for (const op of ops) {
+    // 左侧片段：equal 和 removed 可见
+    if (op.type === 'equal' || op.type === 'removed') {
+      const lastLeft = leftFragments[leftFragments.length - 1];
+      if (lastLeft && lastLeft.type === op.type) {
+        lastLeft.text += op.leftChar;
+      } else {
+        leftFragments.push({ text: op.leftChar, type: op.type });
+      }
+    }
+    // 右侧片段：equal 和 added 可见
+    if (op.type === 'equal' || op.type === 'added') {
+      const lastRight = rightFragments[rightFragments.length - 1];
+      if (lastRight && lastRight.type === op.type) {
+        lastRight.text += op.rightChar;
+      } else {
+        rightFragments.push({ text: op.rightChar, type: op.type });
+      }
+    }
+  }
+
+  return { leftFragments, rightFragments };
+}
+
+// 字符串相似度（基于 LCS 长度比例，0~1）
+function stringSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (a.length === 0 || b.length === 0) return 0;
+  const charsA = [...a];
+  const charsB = [...b];
+  const m = charsA.length;
+  const n = charsB.length;
+  // 空间优化的 LCS 长度计算（只需要两行）
+  let prev = new Array(n + 1).fill(0);
+  let curr = new Array(n + 1).fill(0);
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (charsA[i - 1] === charsB[j - 1]) {
+        curr[j] = prev[j - 1] + 1;
+      } else {
+        curr[j] = Math.max(prev[j], curr[j - 1]);
+      }
+    }
+    [prev, curr] = [curr, prev];
+    curr.fill(0);
+  }
+  const lcsLen = prev[n];
+  return (2 * lcsLen) / (m + n);
+}
+
+// 相似度阈值：高于此值认为是同一句的修改版本
+const SIMILARITY_THRESHOLD = 0.5;
+
+// LCS diff 算法（句子级别，支持模糊匹配）
+function computeSentenceDiff(left: string[], right: string[]): DiffLine[] {
+  const m = left.length;
+  const n = right.length;
+
+  // 预计算相似度矩阵
+  const sim: number[][] = Array.from({ length: m }, () => new Array(n).fill(0));
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < n; j++) {
+      sim[i][j] = stringSimilarity(left[i], right[j]);
+    }
+  }
+
+  // 构建 LCS 表（相似度 >= 阈值即视为匹配）
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (sim[i - 1][j - 1] >= SIMILARITY_THRESHOLD) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
   // 回溯生成 diff
-  const result: DiffLine[] = [];
   let i = m;
   let j = n;
 
   const tempLines: DiffLine[] = [];
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && left[i - 1] === right[j - 1]) {
-      tempLines.push({ leftText: left[i - 1], rightText: right[j - 1], type: 'equal' });
+    if (i > 0 && j > 0 && sim[i - 1][j - 1] >= SIMILARITY_THRESHOLD) {
+      if (left[i - 1] === right[j - 1]) {
+        // 完全相同
+        tempLines.push({ leftText: left[i - 1], rightText: right[j - 1], type: 'equal' });
+      } else {
+        // 相似但有差异，标记为 modified 并计算字符级 diff
+        const { leftFragments, rightFragments } = computeCharDiff(left[i - 1], right[j - 1]);
+        tempLines.push({
+          leftText: left[i - 1],
+          rightText: right[j - 1],
+          type: 'modified',
+          leftFragments,
+          rightFragments,
+        });
+      }
       i--;
       j--;
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
@@ -63,7 +189,50 @@ function computeDiff(left: string[], right: string[]): DiffLine[] {
   }
 
   // 反转得到正序
-  return tempLines.reverse();
+  const rawLines = tempLines.reverse();
+
+  // 后处理：将相邻的 removed + added 如果相似度足够也合并为 modified
+  const result: DiffLine[] = [];
+  let idx = 0;
+  while (idx < rawLines.length) {
+    const cur = rawLines[idx];
+    const next = rawLines[idx + 1];
+
+    if (cur.type === 'removed' && next?.type === 'added') {
+      const s = stringSimilarity(cur.leftText, next.rightText);
+      if (s >= SIMILARITY_THRESHOLD) {
+        const { leftFragments, rightFragments } = computeCharDiff(cur.leftText, next.rightText);
+        result.push({
+          leftText: cur.leftText,
+          rightText: next.rightText,
+          type: 'modified',
+          leftFragments,
+          rightFragments,
+        });
+        idx += 2;
+        continue;
+      }
+    } else if (cur.type === 'added' && next?.type === 'removed') {
+      const s = stringSimilarity(next.leftText, cur.rightText);
+      if (s >= SIMILARITY_THRESHOLD) {
+        const { leftFragments, rightFragments } = computeCharDiff(next.leftText, cur.rightText);
+        result.push({
+          leftText: next.leftText,
+          rightText: cur.rightText,
+          type: 'modified',
+          leftFragments,
+          rightFragments,
+        });
+        idx += 2;
+        continue;
+      }
+    }
+
+    result.push(cur);
+    idx++;
+  }
+
+  return result;
 }
 
 const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
@@ -187,12 +356,23 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
     });
   }, []);
 
+  // 渲染字符级 diff 片段
+  const renderFragments = (fragments: CharFragment[], side: 'left' | 'right') => {
+    return fragments.map((frag, i) => {
+      if (frag.type === 'equal') {
+        return <span key={i}>{frag.text}</span>;
+      }
+      const className = side === 'left' ? styles.charRemoved : styles.charAdded;
+      return <span key={i} className={className}>{frag.text}</span>;
+    });
+  };
+
   // 计算 diff
   const diffLines: DiffLine[] = React.useMemo(() => {
     if (!leftText || !rightText) return [];
     const leftSentences = splitSentences(leftText);
     const rightSentences = splitSentences(rightText);
-    return computeDiff(leftSentences, rightSentences);
+    return computeSentenceDiff(leftSentences, rightSentences);
   }, [leftText, rightText]);
 
   const isLoading = leftLoading || rightLoading;
@@ -263,7 +443,11 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
                     key={idx}
                     className={`${styles.diffLine} ${styles[line.type]}`}
                   >
-                    {line.type === 'added' ? '\u00A0' : line.leftText}
+                    {line.type === 'added'
+                      ? '\u00A0'
+                      : line.type === 'modified' && line.leftFragments
+                        ? renderFragments(line.leftFragments, 'left')
+                        : line.leftText}
                   </div>
                 ))
               ) : leftText !== null ? (
@@ -289,7 +473,11 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
                     key={idx}
                     className={`${styles.diffLine} ${styles[line.type]}`}
                   >
-                    {line.type === 'removed' ? '\u00A0' : line.rightText}
+                    {line.type === 'removed'
+                      ? '\u00A0'
+                      : line.type === 'modified' && line.rightFragments
+                        ? renderFragments(line.rightFragments, 'right')
+                        : line.rightText}
                   </div>
                 ))
               ) : rightText !== null ? (
