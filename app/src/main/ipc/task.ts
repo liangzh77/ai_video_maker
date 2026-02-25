@@ -14,7 +14,7 @@ import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import imageApi from '../services/image-api';
 import videoApi from '../services/video-api';
-import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, getFFmpegPath } from '../services/python-bridge';
+import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, runSpeechRecognizer, getFFmpegPath } from '../services/python-bridge';
 import storage, { findOrCreateSection } from '../services/storage';
 import appConfigService from '../services/config';
 import type {
@@ -129,6 +129,12 @@ interface TaskGenerateTextRequest {
   prompt: string;
   systemPrompt?: string;
   modelEndpoint: string;
+}
+
+interface TaskRecognizeSpeechRequest {
+  filePath: string;        // 视频或音频文件路径
+  modelEndpoint: string;   // 如 "gemini:gemini-2.5-flash"
+  prompt?: string;         // 自定义提示词
 }
 
 interface TaskGenerateVideoRequest {
@@ -1415,6 +1421,57 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'VIDEO_GENERATION_ERROR',
+        };
+      }
+    }
+  );
+
+  // Recognize speech (direct call, supports video files by auto-extracting audio)
+  ipcMain.handle(
+    TASK_CHANNELS.RECOGNIZE_SPEECH,
+    async (_, request: TaskRecognizeSpeechRequest): Promise<OperationResult<{ text: string }>> => {
+      console.log('[TaskIPC] Received recognize speech request:', request.filePath);
+      try {
+        if (!request.modelEndpoint) {
+          return { success: false, error: '请先选择模型' };
+        }
+        if (!request.filePath) {
+          return { success: false, error: '文件路径不能为空' };
+        }
+
+        // 检查文件是否是视频，如果是则先提取音频
+        let audioPath = request.filePath;
+        let tempAudioPath: string | null = null;
+        const ext = path.extname(request.filePath).toLowerCase();
+        const videoExts = ['.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.wmv'];
+        if (videoExts.includes(ext)) {
+          const os = await import('os');
+          tempAudioPath = path.join(os.tmpdir(), `asr_${Date.now()}.mp3`);
+          const ffmpegPath = getFFmpegPath();
+          console.log('[TaskIPC] Extracting audio from video:', request.filePath);
+          await execAsync(`"${ffmpegPath}" -y -i "${request.filePath}" -vn -acodec libmp3lame "${tempAudioPath}"`);
+          audioPath = tempAudioPath;
+        }
+
+        try {
+          const result = await runSpeechRecognizer(
+            request.modelEndpoint,
+            audioPath,
+            request.prompt
+          );
+          console.log('[TaskIPC] Speech recognized, length:', result.text.length);
+          return { success: true, data: { text: result.text } };
+        } finally {
+          // 清理临时音频文件
+          if (tempAudioPath) {
+            fs.unlink(tempAudioPath).catch(() => {});
+          }
+        }
+      } catch (error) {
+        console.error('[TaskIPC] Failed to recognize speech:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'SPEECH_RECOGNITION_ERROR',
         };
       }
     }

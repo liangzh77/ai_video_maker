@@ -1,10 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import { Tooltip, App } from 'antd';
-import { PlayCircleOutlined, CloseOutlined, DeleteOutlined, VideoCameraOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, CloseOutlined, DeleteOutlined, VideoCameraOutlined, FileTextOutlined } from '@ant-design/icons';
 import type { Resource, VideoMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import MultiVideoPlayerDialog from './MultiVideoPlayerDialog';
+import CompareTranscriptDialog from './CompareTranscriptDialog';
 import styles from './MultiVideoDropZone.module.css';
 
 // 最多支持4个视频
@@ -16,6 +17,7 @@ const MultiVideoDropZone: React.FC = () => {
   const [videos, setVideos] = useState<Resource[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [compareDialogOpen, setCompareDialogOpen] = useState(false);
 
   // 判断是否是竖屏视频（宽高比 < 1）
   const isPortrait = useCallback((video: Resource): boolean => {
@@ -120,7 +122,7 @@ const MultiVideoDropZone: React.FC = () => {
       <div className={styles.header}>
         <span className={styles.title}>
           <VideoCameraOutlined className={styles.titleIcon} />
-          多视频播放
+          多视频对比
         </span>
         <span className={styles.count}>{videos.length}/{MAX_VIDEOS}</span>
         {videos.length > 0 && (
@@ -172,16 +174,30 @@ const MultiVideoDropZone: React.FC = () => {
       </div>
 
       {canPlay && (
-        <button className={styles.playButton} onClick={handlePlay}>
-          <PlayCircleOutlined />
-          <span>播放 {videos.length} 个视频</span>
-        </button>
+        <div className={styles.buttonGroup}>
+          <button className={styles.playButton} onClick={handlePlay}>
+            <PlayCircleOutlined />
+            <span>播放</span>
+          </button>
+          {videos.length === 2 && (
+            <button className={styles.compareButton} onClick={() => setCompareDialogOpen(true)}>
+              <FileTextOutlined />
+              <span>对比文案</span>
+            </button>
+          )}
+        </div>
       )}
 
       <MultiVideoPlayerDialog
         visible={dialogOpen}
         videos={videos}
         onClose={() => setDialogOpen(false)}
+      />
+
+      <CompareTranscriptDialog
+        visible={compareDialogOpen}
+        videos={videos}
+        onClose={() => setCompareDialogOpen(false)}
       />
     </div>
   );

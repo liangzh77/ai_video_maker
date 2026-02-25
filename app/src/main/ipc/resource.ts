@@ -785,7 +785,7 @@ export function registerResourceHandlers(): void {
     }
   );
 
-  // Save resource metadata (generation info, etc.)
+  // Save resource metadata (generation info, transcript, etc.)
   ipcMain.handle(
     RESOURCE_CHANNELS.SAVE_METADATA,
     async (
@@ -793,43 +793,59 @@ export function registerResourceHandlers(): void {
       request: {
         draftId: string;
         resourceId: string;
-        generation: {
+        generation?: {
           type: 'image' | 'text' | 'video';
           prompt: string;
           params: Record<string, any>;
           generatedAt: string;
         };
+        transcript?: string;  // 语音识别文案缓存
       }
     ): Promise<OperationResult> => {
       try {
-        // 从 params 中提取源文件引用，计算 SHA-256 哈希
-        const sourceFileHashes: Record<string, string> = {};
-        const sourceFileKeys = ['sourceImageIds', 'imageResourceIds', 'videoResourceIds'];
-        const filesDir = storage.getFilesPath(request.draftId);
+        const metaToSave: Record<string, any> = {};
 
-        for (const key of sourceFileKeys) {
-          const ids = request.generation.params[key] as string[] | undefined;
-          if (!ids) continue;
-          for (const id of ids) {
-            if (sourceFileHashes[id]) continue; // 已计算过
-            const filePath = path.join(filesDir, id);
-            try {
-              const { createHash } = await import('crypto');
-              const content = await fs.readFile(filePath);
-              const hash = createHash('sha256').update(content).digest('hex');
-              sourceFileHashes[id] = `sha256:${hash}`;
-            } catch {
-              // 源文件不存在，跳过
-              console.warn('[Resource] Source file not found for hash:', id);
+        // 处理 generation 字段
+        if (request.generation) {
+          // 从 params 中提取源文件引用，计算 SHA-256 哈希
+          const sourceFileHashes: Record<string, string> = {};
+          const sourceFileKeys = ['sourceImageIds', 'imageResourceIds', 'videoResourceIds'];
+          const filesDir = storage.getFilesPath(request.draftId);
+
+          for (const key of sourceFileKeys) {
+            const ids = request.generation.params[key] as string[] | undefined;
+            if (!ids) continue;
+            for (const id of ids) {
+              if (sourceFileHashes[id]) continue; // 已计算过
+              const filePath = path.join(filesDir, id);
+              try {
+                const { createHash } = await import('crypto');
+                const content = await fs.readFile(filePath);
+                const hash = createHash('sha256').update(content).digest('hex');
+                sourceFileHashes[id] = `sha256:${hash}`;
+              } catch {
+                // 源文件不存在，跳过
+                console.warn('[Resource] Source file not found for hash:', id);
+              }
             }
           }
-        }
 
-        await storage.metadata.save(request.draftId, request.resourceId, {
-          generation: {
+          metaToSave.generation = {
             ...request.generation,
             sourceFileHashes: Object.keys(sourceFileHashes).length > 0 ? sourceFileHashes : undefined,
-          },
+          };
+        }
+
+        // 处理 transcript 字段（合并到已有 metadata）
+        if (request.transcript !== undefined) {
+          metaToSave.transcript = request.transcript;
+        }
+
+        // 合并已有 metadata
+        const existingMeta = await storage.metadata.load(request.draftId, request.resourceId) || {};
+        await storage.metadata.save(request.draftId, request.resourceId, {
+          ...existingMeta,
+          ...metaToSave,
         });
         console.log('[Resource] Saved metadata for:', request.resourceId);
         return { success: true };

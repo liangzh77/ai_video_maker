@@ -206,7 +206,7 @@ const MultiVideoPlayerDialog: React.FC<MultiVideoPlayerDialogProps> = ({
 
   return (
     <Modal
-      title={`多视频播放 (${videos.length}个)`}
+      title={`多视频对比 (${videos.length}个)`}
       open={visible}
       onCancel={onClose}
       footer={null}

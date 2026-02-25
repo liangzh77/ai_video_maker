@@ -689,6 +689,77 @@ export async function runTextGenerator(
 }
 
 // ============================================
+// Speech Recognizer
+// ============================================
+
+export interface SpeechRecognizeResult {
+  text: string;
+}
+
+function getSpeechRecognizerPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'tools', 'speech_recognizer.exe');
+  }
+  return path.join(process.cwd(), '..', 'tools', 'dist', 'speech_recognizer', 'speech_recognizer.exe');
+}
+
+export async function runSpeechRecognizer(
+  modelId: string,
+  audioPath: string,
+  prompt?: string,
+  appConfig?: AppConfig
+): Promise<SpeechRecognizeResult> {
+  const outputLines: string[] = [];
+
+  const useExe = shouldUseExe();
+
+  let command: string;
+  let args: string[];
+
+  if (useExe) {
+    command = getSpeechRecognizerPath();
+    args = ['--model', modelId, '--audio', audioPath];
+  } else {
+    command = getPythonPath(appConfig);
+    args = [path.join(getToolsPath(), 'speech_recognizer.py'), '--model', modelId, '--audio', audioPath];
+  }
+
+  if (prompt) {
+    args.push('--prompt', prompt);
+  }
+
+  const envFilePath = app.isPackaged
+    ? path.join(process.resourcesPath, '..', '.env.local')
+    : path.join(process.cwd(), '.env.local');
+
+  console.log('[SpeechRecognizer] Starting with command:', command);
+  console.log('[SpeechRecognizer] Args:', args);
+  console.log('[SpeechRecognizer] ENV_FILE:', envFilePath);
+
+  await runProcess({
+    command,
+    args,
+    env: {
+      ENV_FILE: envFilePath,
+    },
+    onStdoutLine: (message: string) => {
+      console.log('[SpeechRecognizer]', message);
+      outputLines.push(message);
+    },
+    onStderrLine: (stderr: string) => {
+      console.log('[SpeechRecognizer stderr]', stderr);
+    },
+  });
+
+  const text = outputLines.join('\n');
+  if (!text.trim()) {
+    throw new Error('语音识别结果为空');
+  }
+
+  return { text };
+}
+
+// ============================================
 // Image Generator
 // ============================================
 
@@ -804,6 +875,7 @@ export const pythonBridge = {
   synthesizeVideo: runVideoSynthesizer,
   generateImage: runImageGenerator,
   generateText: runTextGenerator,
+  recognizeSpeech: runSpeechRecognizer,
 };
 
 export default pythonBridge;
