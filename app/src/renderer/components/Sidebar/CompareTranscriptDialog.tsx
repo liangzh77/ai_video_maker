@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Modal, Spin, App, Button } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
-import type { Resource } from '@shared/types';
+import type { Resource, TextMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import styles from './CompareTranscriptDialog.module.css';
 
 interface CompareTranscriptDialogProps {
   visible: boolean;
-  videos: Resource[];
+  resources: Resource[];
   onClose: () => void;
 }
 
@@ -235,9 +235,15 @@ function computeSentenceDiff(left: string[], right: string[]): DiffLine[] {
   return result;
 }
 
+// 判断资源是否是文本类型（提示词）
+function isTextResource(resource: Resource): boolean {
+  const desc = parseFolderName(resource.type);
+  return desc?.mediaType === '提示词';
+}
+
 const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
   visible,
-  videos,
+  resources,
   onClose,
 }) => {
   const { message } = App.useApp();
@@ -250,19 +256,31 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
   const rightBodyRef = useRef<HTMLDivElement>(null);
   const isSyncingScroll = useRef(false);
 
-  // 获取视频标签
-  const getVideoLabel = (video: Resource) => {
-    const desc = parseFolderName(video.type);
-    return desc?.label ? `${desc.label}/${video.fileName}` : video.fileName;
+  // 是否有需要语音识别的资源
+  const hasNonTextResource = useMemo(() => {
+    return resources.some(r => !isTextResource(r));
+  }, [resources]);
+
+  // 获取资源标签
+  const getResourceLabel = (resource: Resource) => {
+    const desc = parseFolderName(resource.type);
+    return desc?.label ? `${desc.label}/${resource.fileName}` : resource.fileName;
   };
 
-  // 语音识别单个视频
-  const transcribeVideo = useCallback(async (video: Resource, useCache = true): Promise<string> => {
+  // 获取单个资源的文案文本
+  const getResourceText = useCallback(async (resource: Resource, useCache = true): Promise<string> => {
+    // 提示词资源：直接读取 content
+    if (isTextResource(resource)) {
+      const meta = resource.metadata as TextMetadata;
+      return meta.content || '';
+    }
+
+    // 视频/音频资源：语音识别
     // 1. 检查 metadata 缓存
     if (useCache) {
       const metaResult = await window.api.resource.loadMetadata({
-        draftId: video.draftId,
-        resourceId: video.id,
+        draftId: resource.draftId,
+        resourceId: resource.id,
       });
       if (metaResult.success && metaResult.data?.transcript) {
         return metaResult.data.transcript;
@@ -271,7 +289,7 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
 
     // 2. 调用语音识别（handler 内部会自动提取音频）
     const recognizeResult = await window.api.task.recognizeSpeech({
-      filePath: video.filePath,
+      filePath: resource.filePath,
       modelEndpoint: 'gemini:gemini-2.5-flash',
     });
 
@@ -283,17 +301,17 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
 
     // 3. 缓存结果到 metadata
     await window.api.resource.saveMetadata({
-      draftId: video.draftId,
-      resourceId: video.id,
+      draftId: resource.draftId,
+      resourceId: resource.id,
       transcript: text,
     });
 
     return text;
   }, []);
 
-  // 并行识别两个视频
-  const startTranscription = useCallback(async (forceRefresh = false) => {
-    if (videos.length < 2) return;
+  // 并行获取两个资源的文本
+  const startComparison = useCallback(async (forceRefresh = false) => {
+    if (resources.length < 2) return;
 
     setError(null);
     setLeftText(null);
@@ -301,8 +319,7 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
     setLeftLoading(true);
     setRightLoading(true);
 
-    // 并行执行两个视频的语音识别
-    const leftPromise = transcribeVideo(videos[0], !forceRefresh)
+    const leftPromise = getResourceText(resources[0], !forceRefresh)
       .then((text) => {
         setLeftText(text);
         setLeftLoading(false);
@@ -310,12 +327,12 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
       .catch((err) => {
         setLeftLoading(false);
         setError((prev) => {
-          const msg = `左侧视频识别失败: ${err.message}`;
+          const msg = `左侧资源获取失败: ${err.message}`;
           return prev ? `${prev}\n${msg}` : msg;
         });
       });
 
-    const rightPromise = transcribeVideo(videos[1], !forceRefresh)
+    const rightPromise = getResourceText(resources[1], !forceRefresh)
       .then((text) => {
         setRightText(text);
         setRightLoading(false);
@@ -323,18 +340,18 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
       .catch((err) => {
         setRightLoading(false);
         setError((prev) => {
-          const msg = `右侧视频识别失败: ${err.message}`;
+          const msg = `右侧资源获取失败: ${err.message}`;
           return prev ? `${prev}\n${msg}` : msg;
         });
       });
 
     await Promise.allSettled([leftPromise, rightPromise]);
-  }, [videos, transcribeVideo]);
+  }, [resources, getResourceText]);
 
-  // 打开对话框时自动开始识别
+  // 打开对话框时自动开始
   useEffect(() => {
-    if (visible && videos.length >= 2) {
-      startTranscription();
+    if (visible && resources.length >= 2) {
+      startComparison();
     }
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -378,6 +395,20 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
   const isLoading = leftLoading || rightLoading;
   const hasResult = leftText !== null || rightText !== null;
 
+  // 加载提示文案
+  const loadingText = hasNonTextResource ? '正在识别语音...' : '正在加载...';
+
+  // 资源不足时不渲染内容
+  if (resources.length < 2) {
+    return (
+      <Modal title="对比文案" open={visible} onCancel={onClose} footer={null} centered destroyOnClose>
+        <div style={{ textAlign: 'center', padding: 24, color: 'var(--color-text-tertiary)' }}>
+          请先拖入至少 2 个资源
+        </div>
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       title="对比文案"
@@ -398,12 +429,12 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
       destroyOnClose
     >
       {/* 工具栏 */}
-      {hasResult && !isLoading && (
+      {hasResult && !isLoading && hasNonTextResource && (
         <div className={styles.toolbar}>
           <Button
             size="small"
             icon={<ReloadOutlined />}
-            onClick={() => startTranscription(true)}
+            onClick={() => startComparison(true)}
           >
             重新识别
           </Button>
@@ -419,7 +450,7 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
       {isLoading && !hasResult && (
         <div className={styles.loading}>
           <Spin size="large" />
-          <span className={styles.loadingText}>正在识别语音...</span>
+          <span className={styles.loadingText}>{loadingText}</span>
         </div>
       )}
 
@@ -429,7 +460,7 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
           {/* 左栏 */}
           <div className={styles.diffColumn}>
             <div className={styles.diffHeader}>
-              {getVideoLabel(videos[0])}
+              {getResourceLabel(resources[0])}
               {leftLoading && <Spin size="small" className={styles.headerSpin} />}
             </div>
             <div
@@ -459,7 +490,7 @@ const CompareTranscriptDialog: React.FC<CompareTranscriptDialogProps> = ({
           {/* 右栏 */}
           <div className={styles.diffColumn}>
             <div className={styles.diffHeader}>
-              {videos.length > 1 ? getVideoLabel(videos[1]) : ''}
+              {resources.length > 1 ? getResourceLabel(resources[1]) : ''}
               {rightLoading && <Spin size="small" className={styles.headerSpin} />}
             </div>
             <div

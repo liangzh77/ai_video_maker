@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Tooltip, Popconfirm, Dropdown, App } from 'antd';
 import { ReloadOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
@@ -31,23 +31,51 @@ const ResourcePanel: React.FC = () => {
     localStorage.setItem(CARD_SCALE_KEY, String(newScale));
   };
 
-  const handleDecreaseScale = () => {
-    const idx = SCALE_STEPS.indexOf(cardScale);
-    if (idx > 0) updateCardScale(SCALE_STEPS[idx - 1]);
-    else if (idx === -1) {
-      const smaller = SCALE_STEPS.filter(s => s < cardScale);
-      if (smaller.length > 0) updateCardScale(smaller[smaller.length - 1]);
-    }
-  };
+  const handleDecreaseScale = useCallback(() => {
+    setCardScale(prev => {
+      const idx = SCALE_STEPS.indexOf(prev);
+      let next: number;
+      if (idx > 0) next = SCALE_STEPS[idx - 1];
+      else if (idx === -1) {
+        const smaller = SCALE_STEPS.filter(s => s < prev);
+        next = smaller.length > 0 ? smaller[smaller.length - 1] : prev;
+      } else return prev;
+      localStorage.setItem(CARD_SCALE_KEY, String(next));
+      return next;
+    });
+  }, []);
 
-  const handleIncreaseScale = () => {
-    const idx = SCALE_STEPS.indexOf(cardScale);
-    if (idx >= 0 && idx < SCALE_STEPS.length - 1) updateCardScale(SCALE_STEPS[idx + 1]);
-    else if (idx === -1) {
-      const larger = SCALE_STEPS.filter(s => s > cardScale);
-      if (larger.length > 0) updateCardScale(larger[0]);
-    }
-  };
+  const handleIncreaseScale = useCallback(() => {
+    setCardScale(prev => {
+      const idx = SCALE_STEPS.indexOf(prev);
+      let next: number;
+      if (idx >= 0 && idx < SCALE_STEPS.length - 1) next = SCALE_STEPS[idx + 1];
+      else if (idx === -1) {
+        const larger = SCALE_STEPS.filter(s => s > prev);
+        next = larger.length > 0 ? larger[0] : prev;
+      } else return prev;
+      localStorage.setItem(CARD_SCALE_KEY, String(next));
+      return next;
+    });
+  }, []);
+
+  // Ctrl+滚轮缩放
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        handleIncreaseScale();
+      } else if (e.deltaY > 0) {
+        handleDecreaseScale();
+      }
+    };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [handleDecreaseScale, handleIncreaseScale]);
 
   // 加载 sections
   useEffect(() => {
@@ -186,7 +214,7 @@ const ResourcePanel: React.FC = () => {
         </Dropdown>
       </div>
 
-      <div className={styles.content}>
+      <div className={styles.content} ref={contentRef}>
         {sections.map((section) => {
           const resources = getResourcesByType(section.id);
 

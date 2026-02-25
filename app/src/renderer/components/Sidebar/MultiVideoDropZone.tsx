@@ -1,31 +1,31 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Tooltip, App } from 'antd';
-import { PlayCircleOutlined, CloseOutlined, DeleteOutlined, VideoCameraOutlined, FileTextOutlined } from '@ant-design/icons';
-import type { Resource, VideoMetadata } from '@shared/types';
+import { PlayCircleOutlined, CloseOutlined, DeleteOutlined, FileTextOutlined, SwapOutlined, AudioOutlined } from '@ant-design/icons';
+import type { Resource, VideoMetadata, AudioMetadata, TextMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
 import MultiVideoPlayerDialog from './MultiVideoPlayerDialog';
 import CompareTranscriptDialog from './CompareTranscriptDialog';
 import styles from './MultiVideoDropZone.module.css';
 
-// 最多支持4个视频
-const MAX_VIDEOS = 4;
+// 最多支持4个资源
+const MAX_RESOURCES = 4;
+
+// 允许的媒体类型
+const ALLOWED_MEDIA_TYPES = new Set(['视频', '声音', '提示词']);
 
 const MultiVideoDropZone: React.FC = () => {
   const { message } = App.useApp();
   const { getResourceById } = useDraftStore();
-  const [videos, setVideos] = useState<Resource[]>([]);
+  const [resources, setResources] = useState<Resource[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [compareDialogOpen, setCompareDialogOpen] = useState(false);
 
-  // 判断是否是竖屏视频（宽高比 < 1）
-  const isPortrait = useCallback((video: Resource): boolean => {
-    const meta = video.metadata as VideoMetadata;
-    if (meta.width && meta.height) {
-      return meta.height > meta.width;
-    }
-    return false;
+  // 获取资源的媒体类型
+  const getMediaType = useCallback((resource: Resource): string => {
+    const desc = parseFolderName(resource.type);
+    return desc?.mediaType || '';
   }, []);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
@@ -59,49 +59,55 @@ const MultiVideoDropZone: React.FC = () => {
 
     if (!resourceId) return;
 
-    // 只接受视频类型
+    // 检查媒体类型
     const desc = parseFolderName(resourceType);
-    if (!desc || desc.mediaType !== '视频') {
-      message.warning('只能添加视频');
+    if (!desc || !ALLOWED_MEDIA_TYPES.has(desc.mediaType)) {
+      message.warning('只能添加视频、音频或提示词');
       return;
     }
 
     // 检查是否已添加
-    if (videos.some(v => v.id === resourceId)) {
-      message.info('该视频已添加');
+    if (resources.some(r => r.id === resourceId)) {
+      message.info('该资源已添加');
       return;
     }
 
     // 检查数量限制
-    if (videos.length >= MAX_VIDEOS) {
-      message.warning(`最多只能添加 ${MAX_VIDEOS} 个视频`);
+    if (resources.length >= MAX_RESOURCES) {
+      message.warning(`最多只能添加 ${MAX_RESOURCES} 个资源`);
       return;
     }
 
     // 获取资源详情
     const resource = getResourceById(resourceId);
     if (resource) {
-      setVideos(prev => [...prev, resource]);
+      setResources(prev => [...prev, resource]);
     }
-  }, [videos, getResourceById, message]);
+  }, [resources, getResourceById, message]);
 
-  const handleRemoveVideo = useCallback((resourceId: string) => {
-    setVideos(prev => prev.filter(v => v.id !== resourceId));
+  const handleRemoveResource = useCallback((resourceId: string) => {
+    setResources(prev => prev.filter(r => r.id !== resourceId));
   }, []);
 
   const handleClearAll = useCallback(() => {
-    setVideos([]);
+    setResources([]);
   }, []);
 
-  const handlePlay = useCallback(() => {
-    if (videos.length < 2) {
-      message.info('至少需要2个视频才能播放');
-      return;
-    }
-    setDialogOpen(true);
-  }, [videos, message]);
+  // 筛选出视频资源
+  const videoResources = useMemo(() => {
+    return resources.filter(r => getMediaType(r) === '视频');
+  }, [resources, getMediaType]);
 
-  // 获取视频缩略图 URL
+  const allAreVideos = videoResources.length === resources.length && resources.length > 0;
+  const canPlay = allAreVideos && resources.length >= 2;
+  const canCompare = resources.length === 2;
+
+  const handlePlay = useCallback(() => {
+    if (!canPlay) return;
+    setDialogOpen(true);
+  }, [canPlay]);
+
+  // 获取本地文件 URL
   const getLocalFileUrl = (filePath: string, fileSize?: number) => {
     const normalizedPath = filePath.replace(/\\/g, '/');
     const cacheKey = fileSize ? `?v=${fileSize}` : '';
@@ -115,17 +121,82 @@ const MultiVideoDropZone: React.FC = () => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const canPlay = videos.length >= 2;
+  // 渲染单个资源项
+  const renderResourceItem = (resource: Resource) => {
+    const mediaType = getMediaType(resource);
+
+    if (mediaType === '视频') {
+      const meta = resource.metadata as VideoMetadata;
+      return (
+        <div key={resource.id} className={styles.resourceItem}>
+          <video
+            src={getLocalFileUrl(resource.filePath, resource.fileSize)}
+            className={styles.videoThumbnail}
+            muted
+          />
+          <span className={styles.badge}>
+            {formatDuration(meta.duration || 0)}
+          </span>
+          <button
+            className={styles.removeButton}
+            onClick={() => handleRemoveResource(resource.id)}
+          >
+            <CloseOutlined />
+          </button>
+        </div>
+      );
+    }
+
+    if (mediaType === '声音') {
+      const meta = resource.metadata as AudioMetadata;
+      return (
+        <div key={resource.id} className={`${styles.resourceItem} ${styles.audioItem}`}>
+          <AudioOutlined className={styles.resourceIcon} />
+          <span className={styles.resourceName}>{resource.fileName}</span>
+          <span className={styles.badge}>
+            {formatDuration(meta.duration || 0)}
+          </span>
+          <button
+            className={styles.removeButton}
+            onClick={() => handleRemoveResource(resource.id)}
+          >
+            <CloseOutlined />
+          </button>
+        </div>
+      );
+    }
+
+    if (mediaType === '提示词') {
+      const meta = resource.metadata as TextMetadata;
+      const preview = meta.content?.slice(0, 30) || resource.fileName;
+      return (
+        <div key={resource.id} className={`${styles.resourceItem} ${styles.textItem}`}>
+          <FileTextOutlined className={styles.resourceIcon} />
+          <span className={styles.resourceName} title={meta.content}>
+            {preview}{meta.content && meta.content.length > 30 ? '...' : ''}
+          </span>
+          <button
+            className={styles.removeButton}
+            onClick={() => handleRemoveResource(resource.id)}
+          >
+            <CloseOutlined />
+          </button>
+        </div>
+      );
+    }
+
+    return null;
+  };
 
   return (
     <div className={styles.container}>
       <div className={styles.header}>
         <span className={styles.title}>
-          <VideoCameraOutlined className={styles.titleIcon} />
-          多视频对比
+          <SwapOutlined className={styles.titleIcon} />
+          多资源比对
         </span>
-        <span className={styles.count}>{videos.length}/{MAX_VIDEOS}</span>
-        {videos.length > 0 && (
+        <span className={styles.count}>{resources.length}/{MAX_RESOURCES}</span>
+        {resources.length > 0 && (
           <Tooltip title="清空所有">
             <button className={styles.clearButton} onClick={handleClearAll}>
               <DeleteOutlined />
@@ -135,51 +206,33 @@ const MultiVideoDropZone: React.FC = () => {
       </div>
 
       <div
-        className={`${styles.dropZone} ${isDragOver ? styles.dragOver : ''} ${videos.length === 0 ? styles.empty : ''}`}
+        className={`${styles.dropZone} ${isDragOver ? styles.dragOver : ''} ${resources.length === 0 ? styles.empty : ''}`}
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {videos.length === 0 ? (
+        {resources.length === 0 ? (
           <div className={styles.placeholder}>
-            <VideoCameraOutlined className={styles.placeholderIcon} />
-            <span>拖入视频</span>
+            <SwapOutlined className={styles.placeholderIcon} />
+            <span>拖入资源</span>
           </div>
         ) : (
-          <div className={styles.videoGrid}>
-            {videos.map((video) => {
-              const meta = video.metadata as VideoMetadata;
-              return (
-                <div key={video.id} className={styles.videoItem}>
-                  <video
-                    src={getLocalFileUrl(video.filePath, video.fileSize)}
-                    className={styles.videoThumbnail}
-                    muted
-                  />
-                  <span className={styles.videoDuration}>
-                    {formatDuration(meta.duration || 0)}
-                  </span>
-                  <button
-                    className={styles.removeButton}
-                    onClick={() => handleRemoveVideo(video.id)}
-                  >
-                    <CloseOutlined />
-                  </button>
-                </div>
-              );
-            })}
+          <div className={styles.resourceGrid}>
+            {resources.map(renderResourceItem)}
           </div>
         )}
       </div>
 
-      {canPlay && (
+      {(canPlay || canCompare) && (
         <div className={styles.buttonGroup}>
-          <button className={styles.playButton} onClick={handlePlay}>
-            <PlayCircleOutlined />
-            <span>播放</span>
-          </button>
-          {videos.length === 2 && (
+          {canPlay && (
+            <button className={styles.playButton} onClick={handlePlay}>
+              <PlayCircleOutlined />
+              <span>播放</span>
+            </button>
+          )}
+          {canCompare && (
             <button className={styles.compareButton} onClick={() => setCompareDialogOpen(true)}>
               <FileTextOutlined />
               <span>对比文案</span>
@@ -190,13 +243,13 @@ const MultiVideoDropZone: React.FC = () => {
 
       <MultiVideoPlayerDialog
         visible={dialogOpen}
-        videos={videos}
+        videos={videoResources}
         onClose={() => setDialogOpen(false)}
       />
 
       <CompareTranscriptDialog
         visible={compareDialogOpen}
-        videos={videos}
+        resources={resources}
         onClose={() => setCompareDialogOpen(false)}
       />
     </div>
