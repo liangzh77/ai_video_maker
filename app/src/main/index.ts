@@ -101,6 +101,22 @@ function createWindow(): void {
     mainWindow?.show();
   });
 
+  // 禁用 Electron 内置的页面缩放，让渲染进程自行处理卡片缩放
+  // 1. 限制 pinch zoom（触控板双指缩放）
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
+  // 2. Ctrl+滚轮会触发 page zoom，通过 zoom-changed 事件立即还原为 100%
+  mainWindow.webContents.on('zoom-changed', () => {
+    mainWindow?.webContents.setZoomLevel(0);
+  });
+  // 3. 拦截 Ctrl+Plus/Minus/0 键盘缩放快捷键
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.control && !input.shift && !input.alt && !input.meta) {
+      if (input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0') {
+        event.preventDefault();
+      }
+    }
+  });
+
   // Load the renderer
   if (!app.isPackaged && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);

@@ -56,6 +56,7 @@ export const TASK_CHANNELS = {
   GENERATE_TEXT: 'task:generateText',
   GENERATE_VIDEO: 'task:generateVideo',          // Seedance 2.0 视频生成
   RECOGNIZE_SPEECH: 'task:recognizeSpeech',      // 语音识别（支持视频/音频文件）
+  EXPORT_AUDIO: 'task:exportAudio',              // 导出音频到用户选择的路径
   SYNTHESIZE_VIDEO: 'task:synthesizeVideo',
   CANCEL: 'task:cancel',
   GET_MODELS: 'task:getModels',
@@ -90,6 +91,7 @@ export const SECTION_CHANNELS = {
   DELETE: 'section:delete',
   RENAME: 'section:rename',
   REORDER: 'section:reorder',
+  OPEN_FOLDER: 'section:openFolder',
 } as const;
 
 // ============================================

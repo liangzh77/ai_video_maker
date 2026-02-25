@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Button, Tooltip, Space, App, Modal, Select } from 'antd';
-import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined, EditOutlined, LinkOutlined, SoundOutlined, PlaySquareOutlined } from '@ant-design/icons';
+import { FolderOpenOutlined, ScissorOutlined, SearchOutlined, ExpandOutlined, EditOutlined, LinkOutlined, SoundOutlined, PlaySquareOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useDraftStore } from '../../stores/draft';
 import { useSplitPointsStore } from '../../stores/splitPoints';
 import { usePlaybackStore, isContinuousPlayType } from '../../stores/playback';
@@ -324,6 +324,31 @@ const PreviewPanel: React.FC = () => {
     }
   }, [selectedDraftId, selectedResourceId, extractAudioTargetSection, message, loadResources]);
 
+  // 导出音频（下载到用户选择的路径）
+  const [exportAudioLoading, setExportAudioLoading] = useState(false);
+  const handleExportAudio = useCallback(async () => {
+    if (!selectedResource) return;
+
+    setExportAudioLoading(true);
+    try {
+      const baseName = selectedResource.fileName.replace(/\.[^.]+$/, '');
+      const result = await window.api.task.exportAudio({
+        videoPath: selectedResource.filePath,
+        defaultFileName: `${baseName}.mp3`,
+      });
+
+      if (result.success && result.data?.filePath) {
+        message.success('音频已导出');
+      } else if (!result.success) {
+        throw new Error(result.error || 'Export audio failed');
+      }
+    } catch (error) {
+      message.error('导出音频失败: ' + (error instanceof Error ? error.message : '未知错误'));
+    } finally {
+      setExportAudioLoading(false);
+    }
+  }, [selectedResource, message]);
+
   // Check if split points are for current video
   const hasSplitPoints = splitPoints.length > 0 && videoId === selectedResourceId;
 
@@ -587,11 +612,28 @@ const PreviewPanel: React.FC = () => {
         title="提取声音"
         open={extractAudioVisible}
         onCancel={() => setExtractAudioVisible(false)}
-        onOk={handleConfirmExtractAudio}
-        okText="提取"
-        cancelText="取消"
-        confirmLoading={extractAudioLoading}
-        okButtonProps={{ disabled: !extractAudioTargetSection }}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Button
+              icon={<DownloadOutlined />}
+              loading={exportAudioLoading}
+              onClick={handleExportAudio}
+            >
+              下载
+            </Button>
+            <Space>
+              <Button onClick={() => setExtractAudioVisible(false)}>取消</Button>
+              <Button
+                type="primary"
+                loading={extractAudioLoading}
+                disabled={!extractAudioTargetSection}
+                onClick={handleConfirmExtractAudio}
+              >
+                提取
+              </Button>
+            </Space>
+          </div>
+        }
         width={360}
       >
         {audioSections.length === 0 ? (

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Empty, App, Popconfirm, Tooltip, Modal, Select } from 'antd';
-import { InboxOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, LinkOutlined, ExpandOutlined, BlockOutlined, HolderOutlined } from '@ant-design/icons';
+import { InboxOutlined, PlusOutlined, DeleteOutlined, CloseOutlined, LinkOutlined, ExpandOutlined, BlockOutlined, HolderOutlined, FolderOpenOutlined } from '@ant-design/icons';
 import type { Resource, SectionDescriptor, PromptTag } from '@shared/types';
 import type { UpscaleDialogResult } from './UpscaleDialog';
 import type { SynthesizeDialogResult } from './SynthesizeDialog';
@@ -193,6 +193,12 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
       message.error('删除失败');
     }
   }, [selectedDraftId, sectionId, title, deleteSection, loadResources, message]);
+
+  // 打开文件夹
+  const handleOpenFolder = useCallback(async () => {
+    if (!selectedDraftId) return;
+    await window.api.section.openFolder({ draftId: selectedDraftId, sectionId });
+  }, [selectedDraftId, sectionId]);
 
   const canDrop = acceptFormats.length > 0;
   // 所有 section 都可以清除
@@ -905,6 +911,11 @@ const ResourceSection: React.FC<ResourceSectionProps> = ({
           <h3 className={styles.title} onDoubleClick={handleTitleDoubleClick}>{title}</h3>
         )}
         <span className={styles.count}>{resources.length}</span>
+        <Tooltip title="打开文件夹">
+          <button className={`${styles.addButton} ${styles.openFolderButton}`} onClick={handleOpenFolder}>
+            <FolderOpenOutlined />
+          </button>
+        </Tooltip>
         {isText && (
           <Tooltip title="添加提示词">
             <button className={`${styles.addButton} ${styles.upscaleButton}`} onClick={handleAddPrompt}>

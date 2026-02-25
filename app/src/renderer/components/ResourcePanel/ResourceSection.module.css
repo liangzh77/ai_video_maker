@@ -149,6 +149,10 @@
   cursor: not-allowed;
 }
 
+.openFolderButton {
+  margin-left: 0;
+}
+
 .clearButton {
   margin-left: 0;
 }

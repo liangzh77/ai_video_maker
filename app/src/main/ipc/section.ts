@@ -2,7 +2,7 @@
  * Section IPC Handlers
  * 管理动态卡片栏（section）的 CRUD 操作
  */
-import { ipcMain } from 'electron';
+import { ipcMain, shell } from 'electron';
 import { SECTION_CHANNELS } from '@shared/ipc-channels';
 import type { OperationResult, SectionDescriptor, MediaType } from '@shared/types';
 import storage from '../services/storage';
@@ -31,6 +31,11 @@ interface SectionRenameRequest {
 interface SectionReorderRequest {
   draftId: string;
   orderedIds: string[];
+}
+
+interface SectionOpenFolderRequest {
+  draftId: string;
+  sectionId: string;
 }
 
 export default function registerSectionHandlers(): void {
@@ -100,6 +105,21 @@ export default function registerSectionHandlers(): void {
       } catch (error) {
         console.error('[SectionIPC] Failed to reorder sections:', error);
         return { success: false, error: error instanceof Error ? error.message : 'SECTION_REORDER_ERROR' };
+      }
+    }
+  );
+
+  // Open section folder in file explorer
+  ipcMain.handle(
+    SECTION_CHANNELS.OPEN_FOLDER,
+    async (_, request: SectionOpenFolderRequest): Promise<OperationResult> => {
+      try {
+        const folderPath = storage.getResourceFolderPath(request.draftId, request.sectionId);
+        shell.openPath(folderPath);
+        return { success: true };
+      } catch (error) {
+        console.error('[SectionIPC] Failed to open folder:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'SECTION_OPEN_FOLDER_ERROR' };
       }
     }
   );

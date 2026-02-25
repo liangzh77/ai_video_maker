@@ -45,6 +45,7 @@ export interface ElectronAPI {
     generateImageDirect: (params: { draftId: string; sourceImageIds: string[]; promptResourceId?: string; prompt?: string; modelEndpoint: string; resolution?: '4K' | '2K'; targetSectionId?: string }) => Promise<any>;
     generateText: (params: { draftId: string; prompt: string; systemPrompt?: string; modelEndpoint: string }) => Promise<any>;
     recognizeSpeech: (params: { filePath: string; modelEndpoint: string; prompt?: string }) => Promise<any>;
+    exportAudio: (params: { videoPath: string; defaultFileName: string }) => Promise<any>;
     generateVideo: (params: { draftId: string; imageResourceIds: string[]; videoResourceIds: string[]; prompt: string; duration?: number; ratio?: string; targetSectionId?: string; taskId?: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any; targetSectionId?: string; newSectionLabel?: string }) => Promise<any>;
     extractAudio: (params: { draftId: string; videoResourceId: string; targetSectionId: string }) => Promise<any>;
@@ -63,6 +64,7 @@ export interface ElectronAPI {
     delete: (params: { draftId: string; sectionId: string }) => Promise<any>;
     rename: (params: { draftId: string; sectionId: string; newLabel: string }) => Promise<any>;
     reorder: (params: { draftId: string; orderedIds: string[] }) => Promise<any>;
+    openFolder: (params: { draftId: string; sectionId: string }) => Promise<any>;
   };
   links: {
     load: (params: { draftId: string }) => Promise<any>;
@@ -123,6 +125,7 @@ const api: ElectronAPI = {
     generateImageDirect: (params) => ipcRenderer.invoke('task:generateImageDirect', params),
     generateText: (params) => ipcRenderer.invoke('task:generateText', params),
     recognizeSpeech: (params) => ipcRenderer.invoke('task:recognizeSpeech', params),
+    exportAudio: (params) => ipcRenderer.invoke('task:exportAudio', params),
     generateVideo: (params) => ipcRenderer.invoke('task:generateVideo', params),
     synthesizeVideo: (params) => ipcRenderer.invoke('task:synthesizeVideo', params),
     extractAudio: (params) => ipcRenderer.invoke('task:extractAudio', params),
@@ -141,6 +144,7 @@ const api: ElectronAPI = {
     delete: (params) => ipcRenderer.invoke('section:delete', params),
     rename: (params) => ipcRenderer.invoke('section:rename', params),
     reorder: (params) => ipcRenderer.invoke('section:reorder', params),
+    openFolder: (params) => ipcRenderer.invoke('section:openFolder', params),
   },
   links: {
     load: (params) => ipcRenderer.invoke('links:load', params),

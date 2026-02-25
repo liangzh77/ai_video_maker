@@ -137,6 +137,11 @@ interface TaskRecognizeSpeechRequest {
   prompt?: string;         // 自定义提示词
 }
 
+interface TaskExportAudioRequest {
+  videoPath: string;       // 视频文件绝对路径
+  defaultFileName: string; // 默认文件名（如 "xxx.mp3"）
+}
+
 interface TaskGenerateVideoRequest {
   draftId: string;
   imageResourceIds: string[];
@@ -1472,6 +1477,43 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'SPEECH_RECOGNITION_ERROR',
+        };
+      }
+    }
+  );
+
+  // Export audio: open save dialog + extract audio with FFmpeg
+  ipcMain.handle(
+    TASK_CHANNELS.EXPORT_AUDIO,
+    async (event, request: TaskExportAudioRequest): Promise<OperationResult> => {
+      console.log('[TaskIPC] Received export audio request:', request.videoPath);
+      try {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        const { canceled, filePath: savePath } = await dialog.showSaveDialog(win!, {
+          title: '导出音频',
+          defaultPath: request.defaultFileName,
+          filters: [
+            { name: 'MP3 音频', extensions: ['mp3'] },
+            { name: '所有文件', extensions: ['*'] },
+          ],
+        });
+
+        if (canceled || !savePath) {
+          return { success: true }; // 用户取消，不算错误
+        }
+
+        const ffmpegPath = getFFmpegPath();
+        const ffmpegCmd = `"${ffmpegPath}" -y -i "${request.videoPath}" -vn -acodec libmp3lame "${savePath}"`;
+        console.log('[TaskIPC] Export audio command:', ffmpegCmd);
+        await execAsync(ffmpegCmd);
+
+        console.log('[TaskIPC] Audio exported to:', savePath);
+        return { success: true, data: { filePath: savePath } };
+      } catch (error) {
+        console.error('[TaskIPC] Failed to export audio:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'EXPORT_AUDIO_ERROR',
         };
       }
     }
