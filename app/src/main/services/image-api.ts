@@ -769,7 +769,32 @@ class OpenRouterProvider implements ImageProvider {
       }
     }
 
-    throw new Error('[OpenRouter] 响应中没有找到图片数据');
+    // 收集诊断信息
+    const finishReason = choices[0]?.finish_reason || 'unknown';
+    // finish_reason=error 时，错误详情可能在 choices[0].error 或 response.error
+    const choiceError = choices[0]?.error;
+    const responseError = response?.error;
+    let modelText = '';
+    if (choiceError) {
+      modelText = typeof choiceError === 'string' ? choiceError : JSON.stringify(choiceError).slice(0, 300);
+    } else if (responseError) {
+      modelText = typeof responseError === 'string' ? responseError : JSON.stringify(responseError).slice(0, 300);
+    } else if (typeof content === 'string') {
+      modelText = content.slice(0, 200);
+    } else if (Array.isArray(content)) {
+      const textPart = content.find((p: any) => p.type === 'text');
+      modelText = (textPart?.text || '').slice(0, 200);
+    }
+    // 兜底：如果还是没有有用信息，输出 choice 的关键字段
+    if (!modelText) {
+      const choiceSnapshot = JSON.stringify(choices[0], null, 0).slice(0, 300);
+      modelText = `choice: ${choiceSnapshot}`;
+    }
+    let detail = `finish_reason=${finishReason}`;
+    if (modelText) {
+      detail += `, ${modelText}`;
+    }
+    throw new Error(`[OpenRouter] 响应中没有找到图片数据 (${detail})`);
   }
 }
 

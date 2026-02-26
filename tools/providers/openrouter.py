@@ -113,7 +113,7 @@ class OpenRouterProvider(ImageGeneratorBase):
             "model": self.model,
             "messages": messages,
             "max_tokens": 4096,
-            "modalities": ["image", "text"],  # 关键：告诉 API 需要图片输出
+            "modalities": ["image", "text"],  # 需要图片输出
             "stream": False,  # 禁用流式响应，确保返回完整 JSON
         }
 
@@ -389,8 +389,26 @@ class OpenRouterProvider(ImageGeneratorBase):
                     image_data = base64.b64decode(match.group(1))
 
         if not image_data:
+            import json as _json
+            # 收集诊断信息：finish_reason、error 字段、模型文本
+            finish_reason = choices[0].get("finish_reason", "unknown")
+            choice_error = choices[0].get("error")
+            response_error = response.get("error")
+            model_text = ""
+            if choice_error:
+                model_text = choice_error if isinstance(choice_error, str) else _json.dumps(choice_error, ensure_ascii=False)[:300]
+            elif response_error:
+                model_text = response_error if isinstance(response_error, str) else _json.dumps(response_error, ensure_ascii=False)[:300]
+            elif revised_prompt:
+                model_text = revised_prompt[:200]
+            elif isinstance(content, str):
+                model_text = content[:200]
+            # 兜底：输出 choice 关键字段
+            if not model_text:
+                model_text = f"choice: {_json.dumps(choices[0], ensure_ascii=False)[:300]}"
+            detail = f"finish_reason={finish_reason}, {model_text}"
             raise ProviderError(
-                "响应中未找到图片数据",
+                f"响应中未找到图片数据 ({detail})",
                 provider=self.name,
                 raw_error=response
             )
