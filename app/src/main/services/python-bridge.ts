@@ -161,11 +161,11 @@ function runProcess(options: RunProcessOptions): Promise<void> {
       }
     });
 
-    // 按行处理 stderr
+    // 按行处理 stderr（tqdm 使用 \r 回车覆盖进度，需要按 \r 和 \n 都分割）
     let stderrBuffer = '';
     proc.stderr.on('data', (data: Buffer) => {
       stderrBuffer += data.toString('utf8');
-      const lines = stderrBuffer.split(/\r?\n/);
+      const lines = stderrBuffer.split(/\r\n|\r|\n/);
       stderrBuffer = lines.pop() || '';
       for (const line of lines) {
         if (line.trim()) {
@@ -317,6 +317,11 @@ export async function runVideoSplitter(
     },
     onStderrLine: (stderr: string) => {
       console.log('[VideoSplitter stderr]', stderr);
+      // tqdm 进度输出在 stderr，也需要解析
+      const progress = parseProgress(stderr);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
     },
   });
 
@@ -411,6 +416,10 @@ export async function runVideoAnalyzer(
     },
     onStderrLine: (stderr: string) => {
       console.log('[VideoAnalyzer stderr]', stderr);
+      const progress = parseProgress(stderr);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
     },
   });
 
@@ -510,6 +519,10 @@ export async function runVideoUpscaler(
     },
     onStderrLine: (stderr: string) => {
       console.log('[VideoUpscaler stderr]', stderr);
+      const progress = parseProgress(stderr);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
     },
   });
 
@@ -605,6 +618,10 @@ export async function runVideoSynthesizer(
     },
     onStderrLine: (stderr: string) => {
       console.log('[VideoSynthesizer stderr]', stderr);
+      const progress = parseProgress(stderr);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
     },
   });
 
@@ -853,6 +870,10 @@ export async function runImageGenerator(
     },
     onStderrLine: (stderr: string) => {
       console.log('[ImageGenerator stderr]', stderr);
+      const progress = parseProgress(stderr);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
     },
   });
 
