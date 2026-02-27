@@ -27,6 +27,11 @@
       "filter": ["**/*"]
     },
     {
+      "from": "../tools/dist/speech_recognizer",
+      "to": "tools",
+      "filter": ["**/*"]
+    },
+    {
       "from": "../bin",
       "to": "tools",
       "filter": ["ffmpeg.exe", "ffprobe.exe"]
