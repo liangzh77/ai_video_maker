@@ -357,9 +357,11 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     if (visible) {
       window.api.task.getModels().then((modelList) => {
         setModels(modelList);
-        // Select first model by default if available
+        // Select first matching model by default
         if (modelList.length > 0 && !selectedModel) {
-          setSelectedModel(modelList[0].id);
+          const capKey = mode === 'text' ? 'text' : 'image';
+          const first = modelList.find((m) => (m.capabilities || ['image']).includes(capKey));
+          if (first) setSelectedModel(first.id);
         }
       }).catch((err) => {
         console.error('Failed to load models:', err);
@@ -367,6 +369,17 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       });
     }
   }, [visible, message]);
+
+  // 切换 mode 时，如果当前选中模型不支持该 mode，自动切到第一个匹配的
+  useEffect(() => {
+    if (mode === 'video' || models.length === 0) return;
+    const capKey = mode === 'text' ? 'text' : 'image';
+    const current = models.find((m) => m.id === selectedModel);
+    if (!current || !(current.capabilities || ['image']).includes(capKey)) {
+      const first = models.find((m) => (m.capabilities || ['image']).includes(capKey));
+      if (first) setSelectedModel(first.id);
+    }
+  }, [mode, models]);
 
   // Reset state when dialog opens
   const prevVisibleRef = useRef(false);
@@ -718,7 +731,14 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                   onChange={setSelectedModel}
                   placeholder="请选择模型"
                   className={styles.modelSelect}
-                  options={models.map((m) => ({ value: m.id, label: m.name }))}
+                  options={models
+                    .filter((m) => {
+                      const caps = m.capabilities || ['image'];
+                      if (mode === 'image') return caps.includes('image');
+                      if (mode === 'text') return caps.includes('text');
+                      return true;
+                    })
+                    .map((m) => ({ value: m.id, label: m.name }))}
                 />
               </div>
             )}

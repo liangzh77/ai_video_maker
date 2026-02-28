@@ -31,11 +31,14 @@ if (!result.error) {
 
 export type ProviderType = 'doubao' | 'gemini' | 'gemini_proxy' | 'openrouter';
 
+export type ModelCapability = 'image' | 'text';
+
 export interface ModelInfo {
   id: string;           // 模型标识 (provider:endpoint)
   name: string;         // 显示名称
   provider: ProviderType;
   endpoint: string;     // 模型端点/名称
+  capabilities: ModelCapability[];  // 支持的能力: image/text
 }
 
 export interface ImageGenerationResult {
@@ -832,6 +835,43 @@ function createProvider(modelId: string): ImageProvider {
 // ============================================
 
 /**
+ * 解析环境变量中的模型配置
+ * 格式: endpoint:displayName[:capabilities]
+ * capabilities 可选，逗号分隔（如 image,text），默认为 ["image"]
+ */
+function parseModelEnv(envValue: string): { endpoint: string; name: string; capabilities: ModelCapability[] } | null {
+  // 从末尾检查是否有能力标签（image/text/image,text）
+  const lastColonIndex = envValue.lastIndexOf(':');
+  if (lastColonIndex <= 0) return null;
+
+  const possibleCaps = envValue.substring(lastColonIndex + 1);
+  const validCaps = ['image', 'text'];
+  const capsArray = possibleCaps.split(',').map(s => s.trim());
+  const isCapField = capsArray.every(c => validCaps.includes(c));
+
+  if (isCapField) {
+    // 有能力标签：endpoint:name:caps
+    const rest = envValue.substring(0, lastColonIndex);
+    const firstColon = rest.indexOf(':');
+    if (firstColon <= 0) return null;
+    return {
+      endpoint: rest.substring(0, firstColon),
+      name: rest.substring(firstColon + 1),
+      capabilities: capsArray as ModelCapability[],
+    };
+  } else {
+    // 无能力标签（旧格式）：endpoint:name，默认 image
+    const firstColon = envValue.indexOf(':');
+    if (firstColon <= 0) return null;
+    return {
+      endpoint: envValue.substring(0, firstColon),
+      name: envValue.substring(firstColon + 1),
+      capabilities: ['image'],
+    };
+  }
+}
+
+/**
  * 获取所有可用的模型列表
  * 从环境变量读取各 provider 的模型配置
  */
@@ -840,85 +880,30 @@ export function getAvailableModels(): ModelInfo[] {
 
   console.log('[ImageAPI] Reading models from environment...');
 
-  // 1. Gemini 官方模型 (GEMINI_MODEL_1, GEMINI_MODEL_2, ...)
-  // 格式: modelName:displayName
-  for (let i = 1; i <= 10; i++) {
-    const envKey = `GEMINI_MODEL_${i}`;
-    const envValue = process.env[envKey];
-    if (!envValue) continue;
+  // 通用读取函数
+  const readModels = (prefix: string, provider: ProviderType, displayPrefix: string) => {
+    for (let i = 1; i <= 10; i++) {
+      const envValue = process.env[`${prefix}_MODEL_${i}`];
+      if (!envValue) continue;
 
-    const colonIndex = envValue.indexOf(':');
-    if (colonIndex > 0) {
-      const endpoint = envValue.substring(0, colonIndex);
-      const name = envValue.substring(colonIndex + 1);
-      models.push({
-        id: `gemini:${endpoint}`,
-        name: `[Gemini] ${name}`,
-        provider: 'gemini',
-        endpoint,
-      });
+      const parsed = parseModelEnv(envValue);
+      if (parsed) {
+        models.push({
+          id: `${provider}:${parsed.endpoint}`,
+          name: `[${displayPrefix}] ${parsed.name}`,
+          provider,
+          endpoint: parsed.endpoint,
+          capabilities: parsed.capabilities,
+        });
+      }
     }
-  }
+  };
 
-  // 2. OpenRouter 模型 (OPENROUTER_MODEL_1, OPENROUTER_MODEL_2, ...)
-  // 格式: modelName:displayName
-  for (let i = 1; i <= 10; i++) {
-    const envKey = `OPENROUTER_MODEL_${i}`;
-    const envValue = process.env[envKey];
-    if (!envValue) continue;
-
-    const colonIndex = envValue.indexOf(':');
-    if (colonIndex > 0) {
-      const endpoint = envValue.substring(0, colonIndex);
-      const name = envValue.substring(colonIndex + 1);
-      models.push({
-        id: `openrouter:${endpoint}`,
-        name: `[OpenRouter] ${name}`,
-        provider: 'openrouter',
-        endpoint,
-      });
-    }
-  }
-
-  // 3. Doubao 豆包模型 - 已禁用（多图融合效果不佳）
-  // 保留代码但不加载，如需恢复取消注释即可
-  // for (let i = 1; i <= 10; i++) {
-  //   const envKey = `DOUBAO_MODEL_${i}`;
-  //   const envValue = process.env[envKey];
-  //   if (!envValue) continue;
-  //
-  //   const colonIndex = envValue.indexOf(':');
-  //   if (colonIndex > 0) {
-  //     const endpoint = envValue.substring(0, colonIndex);
-  //     const name = envValue.substring(colonIndex + 1);
-  //     models.push({
-  //       id: `doubao:${endpoint}`,
-  //       name: `[豆包] ${name}`,
-  //       provider: 'doubao',
-  //       endpoint,
-  //     });
-  //   }
-  // }
-
-  // 4. Gemini 中转模型 (GEMINI_PROXY_MODEL_1, GEMINI_PROXY_MODEL_2, ...)
-  // 格式: modelName:displayName
-  for (let i = 1; i <= 10; i++) {
-    const envKey = `GEMINI_PROXY_MODEL_${i}`;
-    const envValue = process.env[envKey];
-    if (!envValue) continue;
-
-    const colonIndex = envValue.indexOf(':');
-    if (colonIndex > 0) {
-      const endpoint = envValue.substring(0, colonIndex);
-      const name = envValue.substring(colonIndex + 1);
-      models.push({
-        id: `gemini_proxy:${endpoint}`,
-        name: `[Gemini中转] ${name}`,
-        provider: 'gemini_proxy',
-        endpoint,
-      });
-    }
-  }
+  readModels('GEMINI', 'gemini', 'Gemini');
+  readModels('OPENROUTER', 'openrouter', 'OpenRouter');
+  // Doubao 豆包模型 - 已禁用（多图融合效果不佳）
+  // readModels('DOUBAO', 'doubao', '豆包');
+  readModels('GEMINI_PROXY', 'gemini_proxy', 'Gemini中转');
 
   console.log(`[ImageAPI] Found ${models.length} models`);
   return models;

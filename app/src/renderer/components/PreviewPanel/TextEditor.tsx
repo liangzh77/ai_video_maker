@@ -83,18 +83,24 @@ const TextEditor: React.FC<TextEditorProps> = ({ resource }) => {
     setShowGenerateDialog(true);
   };
 
-  // 尝试从内容中提取 JSON（支持 ```json ... ``` 包裹）
+  // 尝试从内容中提取 JSON 数组（支持 ```json ... ``` 包裹和 ---SPLIT--- 分隔的多段）
   const extractJson = (text: string): unknown | null => {
-    let s = text.trim();
-    // 剥离 markdown 代码块
-    const fenceMatch = s.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
-    if (fenceMatch) s = fenceMatch[1].trim();
-    if (!s.startsWith('[') && !s.startsWith('{')) return null;
-    try {
-      return JSON.parse(s);
-    } catch {
-      return null;
+    // 先按 ---SPLIT--- 分割，支持可能被 ``` 包裹的分隔符
+    const segments = text.split(/```?\s*---SPLIT---\s*```?(?:json)?/);
+    for (const segment of segments) {
+      let s = segment.trim();
+      // 剥离 markdown 代码块
+      const fenceMatch = s.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/);
+      if (fenceMatch) s = fenceMatch[1].trim();
+      if (!s.startsWith('[') && !s.startsWith('{')) continue;
+      try {
+        const parsed = JSON.parse(s);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        continue;
+      }
     }
+    return null;
   };
 
   // 检查内容是否可分解（JSON 数组且至少有一项包含 prompt 字段）
@@ -161,7 +167,7 @@ const TextEditor: React.FC<TextEditorProps> = ({ resource }) => {
             icon={<SplitCellsOutlined />}
             onClick={handleDecompose}
             disabled={!canDecompose}
-            title={canDecompose ? '将 JSON 数组拆分为多个提示词卡片' : '内容需要是 JSON 数组且每项包含 prompt 字段'}
+            title={canDecompose ? '将 JSON 数组拆分为多个提示词卡片' : '内容需要是 JSON 数组且至少有 2 项包含 prompt 字段'}
           >
             分解
           </Button>
