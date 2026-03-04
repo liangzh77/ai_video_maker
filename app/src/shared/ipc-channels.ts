@@ -103,6 +103,16 @@ export const LINKS_CHANNELS = {
 } as const;
 
 // ============================================
+// Auth Channels (用户认证)
+// ============================================
+export const AUTH_CHANNELS = {
+  LOGIN: 'auth:login',
+  LOGOUT: 'auth:logout',
+  GET_STATE: 'auth:getState',
+  STATE_CHANGED: 'auth:stateChanged',      // Main -> Renderer 推送登录状态变化
+} as const;
+
+// ============================================
 // Prompt History Channels (提示词历史)
 // ============================================
 export const PROMPT_HISTORY_CHANNELS = {
@@ -122,6 +132,7 @@ export const ALL_CHANNELS = {
   ...CONFIG_CHANNELS,
   ...SECTION_CHANNELS,
   ...LINKS_CHANNELS,
+  ...AUTH_CHANNELS,
   ...PROMPT_HISTORY_CHANNELS,
 } as const;
 

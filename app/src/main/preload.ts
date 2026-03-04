@@ -70,6 +70,11 @@ export interface ElectronAPI {
     load: (params: { draftId: string }) => Promise<any>;
     save: (params: { draftId: string; links: { sourceToNew: Record<string, string> } }) => Promise<any>;
   };
+  auth: {
+    login: (params: { username: string; password: string; baseUrl?: string }) => Promise<{ success: boolean; error?: string; username?: string }>;
+    logout: () => Promise<{ success: boolean }>;
+    getState: () => Promise<{ isLoggedIn: boolean; username?: string }>;
+  };
   promptHistory: {
     load: (params: { draftId: string }) => Promise<any>;
     save: (params: { draftId: string; prompt: string }) => Promise<any>;
@@ -149,6 +154,11 @@ const api: ElectronAPI = {
   links: {
     load: (params) => ipcRenderer.invoke('links:load', params),
     save: (params) => ipcRenderer.invoke('links:save', params),
+  },
+  auth: {
+    login: (params) => ipcRenderer.invoke('auth:login', params),
+    logout: () => ipcRenderer.invoke('auth:logout'),
+    getState: () => ipcRenderer.invoke('auth:getState'),
   },
   promptHistory: {
     load: (params) => ipcRenderer.invoke('promptHistory:load', params),

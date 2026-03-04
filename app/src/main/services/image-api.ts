@@ -5,25 +5,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import axios, { AxiosError } from 'axios';
-import * as dotenv from 'dotenv';
-import { app } from 'electron';
 import type { ImageResolution } from '@shared/types';
-
-// Load environment variables
-function getEnvPath(): string {
-  if (app.isPackaged) {
-    return path.join(path.dirname(app.getPath('exe')), '.env.local');
-  }
-  return path.join(process.cwd(), '.env.local');
-}
-
-const envPath = getEnvPath();
-const result = dotenv.config({ path: envPath });
-if (!result.error) {
-  console.log('[ImageAPI] Loaded .env.local from:', envPath);
-} else {
-  console.log('[ImageAPI] Warning: .env.local not found at:', envPath);
-}
+import { keyStore } from './key-store';
 
 // ============================================
 // Types
@@ -203,14 +186,14 @@ class DoubaoProvider implements ImageProvider {
   private modelEndpoint: string;
 
   constructor(modelEndpoint: string) {
-    this.apiKey = process.env.DOUBAO_API_KEY || '';
+    this.apiKey = keyStore.get('DOUBAO_API_KEY');
     this.baseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
     this.modelEndpoint = modelEndpoint;
   }
 
   private validate(): void {
     if (!this.apiKey) {
-      throw new Error('DOUBAO_API_KEY 未配置');
+      throw new Error('[doubao] 豆包 API Key 未配置');
     }
   }
 
@@ -313,14 +296,14 @@ class GeminiProvider implements ImageProvider {
   private model: string;
 
   constructor(model: string) {
-    this.apiKey = process.env.GEMINI_API_KEY || '';
-    this.baseUrl = process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
+    this.apiKey = keyStore.get('GEMINI_API_KEY');
+    this.baseUrl = keyStore.get('GEMINI_BASE_URL') || 'https://generativelanguage.googleapis.com/v1beta';
     this.model = model;
   }
 
   private validate(): void {
     if (!this.apiKey) {
-      throw new Error('GEMINI_API_KEY 未配置');
+      throw new Error('[gemini] Gemini API Key 未配置');
     }
   }
 
@@ -448,17 +431,17 @@ class GeminiProxyProvider implements ImageProvider {
   private model: string;
 
   constructor(model: string) {
-    this.apiKey = process.env.GEMINI_PROXY_API_KEY || '';
-    this.baseUrl = process.env.GEMINI_PROXY_BASE_URL || '';
+    this.apiKey = keyStore.get('GEMINI_PROXY_API_KEY');
+    this.baseUrl = keyStore.get('GEMINI_PROXY_BASE_URL');
     this.model = model;
   }
 
   private validate(): void {
     if (!this.apiKey) {
-      throw new Error('GEMINI_PROXY_API_KEY 未配置');
+      throw new Error('[gemini_proxy] 中转 Gemini API Key 未配置');
     }
     if (!this.baseUrl) {
-      throw new Error('GEMINI_PROXY_BASE_URL 未配置');
+      throw new Error('[gemini_proxy] 中转 Gemini Base URL 未配置');
     }
   }
 
@@ -617,14 +600,14 @@ class OpenRouterProvider implements ImageProvider {
   private model: string;
 
   constructor(model: string) {
-    this.apiKey = process.env.OPENROUTER_API_KEY || '';
-    this.baseUrl = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+    this.apiKey = keyStore.get('OPENROUTER_API_KEY');
+    this.baseUrl = keyStore.get('OPENROUTER_BASE_URL') || 'https://openrouter.ai/api/v1';
     this.model = model;
   }
 
   private validate(): void {
     if (!this.apiKey) {
-      throw new Error('OPENROUTER_API_KEY 未配置');
+      throw new Error('[openrouter] OpenRouter API Key 未配置');
     }
   }
 
@@ -883,7 +866,7 @@ export function getAvailableModels(): ModelInfo[] {
   // 通用读取函数
   const readModels = (prefix: string, provider: ProviderType, displayPrefix: string) => {
     for (let i = 1; i <= 10; i++) {
-      const envValue = process.env[`${prefix}_MODEL_${i}`];
+      const envValue = keyStore.get(`${prefix}_MODEL_${i}`);
       if (!envValue) continue;
 
       const parsed = parseModelEnv(envValue);

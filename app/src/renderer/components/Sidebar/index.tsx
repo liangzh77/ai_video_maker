@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Badge, Button, Tooltip, App } from 'antd';
-import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined, AppstoreOutlined, ThunderboltOutlined, DashboardOutlined } from '@ant-design/icons';
+import { Badge, Button, Tooltip, Dropdown, App } from 'antd';
+import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined, AppstoreOutlined, ThunderboltOutlined, DashboardOutlined, UserOutlined, LogoutOutlined } from '@ant-design/icons';
 import DraftList from './DraftList';
 import MultiVideoDropZone from './MultiVideoDropZone';
 import TemplateDialog, { getTemplate } from './TemplateDialog';
 import GenerateImageDialog from '../PreviewPanel/GenerateImageDialog';
+import LoginModal from './LoginModal';
 import { useDraftStore, type DraftSortBy } from '../../stores/draft';
 import { useGenerationStore } from '../../stores/generation';
+import { useAuthStore } from '../../stores/auth';
 import styles from './Sidebar.module.css';
 
 interface WorkspaceInfo {
@@ -21,7 +23,9 @@ const Sidebar: React.FC = () => {
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [generateDialogInitialMode, setGenerateDialogInitialMode] = useState<'image' | 'text' | 'video' | 'tasks' | undefined>(undefined);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
   const activeTaskCount = useGenerationStore((s) => s.tasks.filter((t) => t.status === 'running' || t.status === 'pending').length);
+  const { isLoggedIn, username, logout } = useAuthStore();
 
   // 加载工作目录信息
   useEffect(() => {
@@ -93,6 +97,27 @@ const Sidebar: React.FC = () => {
     <div className={styles.sidebar}>
       <div className={styles.header}>
         <h1 className={styles.logo}>视频工坊</h1>
+        <div className={styles.userArea}>
+          {isLoggedIn ? (
+            <Dropdown
+              menu={{
+                items: [{ key: 'logout', icon: <LogoutOutlined />, label: '退出登录' }],
+                onClick: () => logout(),
+              }}
+              placement="bottomRight"
+            >
+              <Button type="text" size="small" icon={<UserOutlined />} className={styles.userButton}>
+                {username}
+              </Button>
+            </Dropdown>
+          ) : (
+            <Tooltip title="登录后可使用AI功能">
+              <Button type="text" size="small" icon={<UserOutlined />} onClick={() => setLoginModalOpen(true)} className={styles.userButton}>
+                登录
+              </Button>
+            </Tooltip>
+          )}
+        </div>
       </div>
 
       {/* 工作目录显示 */}
@@ -212,6 +237,9 @@ const Sidebar: React.FC = () => {
 
       {/* 多视频播放区域 */}
       <MultiVideoDropZone />
+
+      {/* 登录弹窗 */}
+      <LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
     </div>
   );
 };

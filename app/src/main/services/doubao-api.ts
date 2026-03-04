@@ -5,28 +5,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import axios, { AxiosError } from 'axios';
-import * as dotenv from 'dotenv';
-import { app } from 'electron';
 import config from './config';
-
-// Load environment variables from app directory
-// 打包后从 exe 所在目录读取，开发模式从 app 目录读取
-function getEnvPath(): string {
-  if (app.isPackaged) {
-    // 打包后，从 exe 所在目录读取（Windows: 安装目录）
-    return path.join(path.dirname(app.getPath('exe')), '.env.local');
-  }
-  // 开发模式，从 app 目录读取
-  return path.join(process.cwd(), '.env.local');
-}
-
-const envPath = getEnvPath();
-const result = dotenv.config({ path: envPath });
-if (!result.error) {
-  console.log('[DoubaoAPI] Loaded .env.local from:', envPath);
-} else {
-  console.log('[DoubaoAPI] Warning: .env.local not found at:', envPath);
-}
+import { keyStore } from './key-store';
 
 // ============================================
 // Types
@@ -140,7 +120,7 @@ export class DoubaoApiService {
    */
   private validateConfig(): void {
     if (!this.apiKey) {
-      throw new Error('DOUBAO_API_KEY_MISSING: API Key not configured, please set DOUBAO_API_KEY in .env.local');
+      throw new Error('[doubao] 豆包 API Key 未配置');
     }
     if (!this.modelEndpoint) {
       throw new Error('DOUBAO_MODEL_ENDPOINT_MISSING: Model endpoint not configured');
@@ -272,8 +252,8 @@ let serviceInstance: DoubaoApiService | null = null;
  */
 export async function getDoubaoService(): Promise<DoubaoApiService> {
   // Read from environment variables
-  const envApiKey = process.env.DOUBAO_API_KEY;
-  const envModelEndpoint = process.env.DOUBAO_MODEL_ENDPOINT;
+  const envApiKey = keyStore.get('DOUBAO_API_KEY');
+  const envModelEndpoint = keyStore.get('DOUBAO_MODEL_ENDPOINT');
 
   // Read from config file
   const appConfig = await config.load();
@@ -313,7 +293,7 @@ export function getAvailableModels(): ModelInfo[] {
   // Read DOUBAO_MODEL_1, DOUBAO_MODEL_2, ... format environment variables
   for (let i = 1; i <= 10; i++) {
     const envKey = `DOUBAO_MODEL_${i}`;
-    const envValue = process.env[envKey];
+    const envValue = keyStore.get(`DOUBAO_MODEL_${i}`);
     if (!envValue) {
       console.log(`[DoubaoAPI] ${envKey}: not set`);
       continue;
@@ -345,7 +325,7 @@ export function getAvailableModels(): ModelInfo[] {
  * Create service instance with specified model
  */
 export async function createDoubaoServiceWithModel(modelEndpoint: string): Promise<DoubaoApiService> {
-  const envApiKey = process.env.DOUBAO_API_KEY;
+  const envApiKey = keyStore.get('DOUBAO_API_KEY');
 
   const appConfig = await config.load();
   const configDoubao = appConfig.doubao as any;

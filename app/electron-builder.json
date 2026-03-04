@@ -17,6 +17,10 @@
   ],
   "extraResources": [
     {
+      "from": "default.config",
+      "to": "default.config"
+    },
+    {
       "from": "../tools/dist/video_tools",
       "to": "tools",
       "filter": ["**/*"]

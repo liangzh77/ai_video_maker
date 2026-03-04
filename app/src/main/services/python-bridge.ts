@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { app } from 'electron';
 import type { AppConfig, SplitConfig, UpscaleConfig, SynthesizeConfig } from '@shared/types';
+import { keyStore } from './key-store';
 
 // ============================================
 // Types
@@ -106,6 +107,27 @@ export function getFFprobePath(): string {
 
 function getPythonPath(config?: AppConfig): string {
   return config?.pythonPath || 'python';
+}
+
+/**
+ * 从 keyStore 导出 API 密钥作为环境变量传给 Python 子进程
+ * 替代之前通过 ENV_FILE 指向 .env.local 的方式
+ */
+function getKeyStoreEnv(): Record<string, string> {
+  const apiKeyNames = [
+    'GEMINI_API_KEY', 'GEMINI_BASE_URL',
+    'GEMINI_PROXY_API_KEY', 'GEMINI_PROXY_BASE_URL',
+    'OPENROUTER_API_KEY', 'OPENROUTER_BASE_URL',
+    'DOUBAO_API_KEY',
+  ];
+  const env: Record<string, string> = {};
+  for (const name of apiKeyNames) {
+    const val = keyStore.get(name);
+    if (val) {
+      env[name] = val;
+    }
+  }
+  return env;
 }
 
 // ============================================
@@ -674,20 +696,13 @@ export async function runTextGenerator(
     args.push('--system', systemPrompt);
   }
 
-  const envFilePath = app.isPackaged
-    ? path.join(process.resourcesPath, '..', '.env.local')
-    : path.join(process.cwd(), '.env.local');
-
   console.log('[TextGenerator] Starting with command:', command);
   console.log('[TextGenerator] Args:', args);
-  console.log('[TextGenerator] ENV_FILE:', envFilePath);
 
   await runProcess({
     command,
     args,
-    env: {
-      ENV_FILE: envFilePath,
-    },
+    env: getKeyStoreEnv(),
     onStdoutLine: (message: string) => {
       console.log('[TextGenerator]', message);
       outputLines.push(message);
@@ -745,20 +760,13 @@ export async function runSpeechRecognizer(
     args.push('--prompt', prompt);
   }
 
-  const envFilePath = app.isPackaged
-    ? path.join(process.resourcesPath, '..', '.env.local')
-    : path.join(process.cwd(), '.env.local');
-
   console.log('[SpeechRecognizer] Starting with command:', command);
   console.log('[SpeechRecognizer] Args:', args);
-  console.log('[SpeechRecognizer] ENV_FILE:', envFilePath);
 
   await runProcess({
     command,
     args,
-    env: {
-      ENV_FILE: envFilePath,
-    },
+    env: getKeyStoreEnv(),
     onStdoutLine: (message: string) => {
       console.log('[SpeechRecognizer]', message);
       outputLines.push(message);
@@ -830,22 +838,14 @@ export async function runImageGenerator(
     args.push('--aspect-ratio', aspectRatio);
   }
 
-  // 获取 .env.local 路径（打包后在安装目录根目录）
-  const envFilePath = app.isPackaged
-    ? path.join(process.resourcesPath, '..', '.env.local')
-    : path.join(process.cwd(), '.env.local');
-
   console.log('[ImageGenerator] Starting with command:', command);
   console.log('[ImageGenerator] Args:', args);
-  console.log('[ImageGenerator] ENV_FILE:', envFilePath);
   console.log('[ImageGenerator] Using exe mode:', useExe);
 
   await runProcess({
     command,
     args,
-    env: {
-      ENV_FILE: envFilePath,
-    },
+    env: getKeyStoreEnv(),
     onStdoutLine: (message: string) => {
       console.log('[ImageGenerator]', message);
 

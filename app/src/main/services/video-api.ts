@@ -10,6 +10,7 @@ import FormData from 'form-data';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { getFFprobePath } from './python-bridge';
+import { keyStore } from './key-store';
 
 const execAsync = promisify(exec);
 
@@ -44,7 +45,7 @@ type PromptPart = { type: 'text'; value: string } | { type: 'at'; label: string 
 // ============================================
 
 function getRelayUrl(): string {
-  return process.env.JIMENG_RELAY_URL || 'http://localhost:3080';
+  return keyStore.get('JIMENG_RELAY_URL') || 'http://localhost:3080';
 }
 
 // ============================================
@@ -326,12 +327,12 @@ export async function generateVideo(
     await axios.get(`${relayUrl}/api/health`, { timeout: 5000 });
   } catch (err) {
     if (err instanceof Error && 'code' in err && (err as any).code === 'ECONNREFUSED') {
-      throw new Error(`中转服务未启动，请先启动中转服务 (${relayUrl})。检查 .env.local 中 JIMENG_RELAY_URL 配置是否正确。`);
+      throw new Error(`中转服务未启动，请先启动中转服务 (${relayUrl})`);
     }
     // health 端点不存在也没关系，说明服务至少在运行
     const status = (err as any)?.response?.status;
     if (!status) {
-      throw new Error(`无法连接中转服务 (${relayUrl})，请检查 .env.local 中 JIMENG_RELAY_URL 配置是否正确。`);
+      throw new Error(`无法连接中转服务 (${relayUrl})`);
     }
   }
 

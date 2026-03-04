@@ -245,6 +245,9 @@ export interface AppConfig {
     theme: 'light' | 'dark';
     language: 'zh-CN' | 'en-US';
   };
+  auth?: {
+    baseUrl: string;
+  };
   pythonPath?: string;
 }
 

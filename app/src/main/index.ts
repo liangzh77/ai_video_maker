@@ -16,15 +16,20 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 import { join } from 'path';
-import { createReadStream, statSync } from 'fs';
+import { createReadStream, statSync, existsSync, readFileSync } from 'fs';
 import { lookup } from 'mime-types';
 import { Readable } from 'stream';
+import * as dotenv from 'dotenv';
 import storage from './services/storage';
 import registerDraftHandlers from './ipc/draft';
 import registerResourceHandlers from './ipc/resource';
 import registerTaskHandlers from './ipc/task';
 import registerSectionHandlers from './ipc/section';
 import registerConfigHandlers from './ipc/config';
+import registerAuthHandlers from './ipc/auth';
+import { authService } from './services/auth';
+import appConfig from './services/config';
+import { keyStore } from './services/key-store';
 
 /**
  * 将 Node.js Readable 流安全转换为 Web ReadableStream
@@ -199,6 +204,36 @@ app.whenReady().then(async () => {
   // Initialize storage
   await storage.init();
 
+  // ---- 分层加载密钥/配置 ----
+  // 1. 加载内置默认值（default.config，打包在安装包中）
+  const defaultConfigPath = app.isPackaged
+    ? join(process.resourcesPath, 'default.config')
+    : join(app.getAppPath(), 'default.config');
+  try {
+    const defaultConfig = dotenv.parse(readFileSync(defaultConfigPath));
+    keyStore.setAll(defaultConfig);
+    console.log(`[Init] Loaded default.config (${Object.keys(defaultConfig).length} entries)`);
+  } catch (err) {
+    console.error('[Init] Failed to load default.config:', (err as Error).message);
+  }
+
+  // 2. 如果本地有 .env.local，用它完全覆盖（开发/自定义场景）
+  const envLocalPath = join(app.getAppPath(), '.env.local');
+  if (existsSync(envLocalPath)) {
+    const parsed = dotenv.config({ path: envLocalPath });
+    if (parsed.parsed) {
+      keyStore.setAll(parsed.parsed);
+      console.log(`[Init] Loaded .env.local (${Object.keys(parsed.parsed).length} entries), overriding defaults`);
+    }
+  } else {
+    console.log('[Init] No .env.local found, using bundled defaults');
+  }
+
+  // 3. 尝试自动登录（云端密钥会 merge 到已有配置上）
+  const cfg = await appConfig.load();
+  const authBaseUrl = cfg.auth?.baseUrl || 'https://distribute-keys.vercel.app';
+  await authService.init(authBaseUrl);
+
   // Register IPC handlers
   registerDraftHandlers();
   registerResourceHandlers();
@@ -210,8 +245,9 @@ app.whenReady().then(async () => {
 
   createWindow();
 
-  // Register task handlers after window creation
+  // Register task handlers and auth handlers after window creation
   registerTaskHandlers(mainWindow);
+  registerAuthHandlers(mainWindow);
 
   app.on('activate', () => {
     // On macOS re-create a window when dock icon is clicked
