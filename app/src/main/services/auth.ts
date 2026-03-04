@@ -18,6 +18,14 @@ const REQUIRED_API_KEYS: Record<string, string> = {
   DOUBAO_API_KEY: '豆包',
 };
 
+/** Provider 到 API Key 名称的映射 */
+const PROVIDER_KEY_MAP: Record<string, string> = {
+  gemini: 'GEMINI_API_KEY',
+  gemini_proxy: 'GEMINI_PROXY_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+  doubao: 'DOUBAO_API_KEY',
+};
+
 interface PersistedAuth {
   token: string;
   username: string;
@@ -172,6 +180,30 @@ class AuthService {
       }
     }
     return missing;
+  }
+
+  /**
+   * 上报 API 使用记录（fire-and-forget，失败只打日志不影响业务）
+   * @param modelId 模型 ID，格式 provider:endpoint（如 gemini:gemini-3.1-flash）
+   * @param description 使用描述
+   */
+  reportUsage(modelId: string, description: string): void {
+    if (!this.token || !this.baseUrl) return;
+
+    const provider = modelId.split(':')[0];
+    const keyName = PROVIDER_KEY_MAP[provider];
+    if (!keyName) return;
+
+    const headers = { Authorization: `Bearer ${this.token}` };
+    axios.post(
+      `${this.baseUrl}/api/keys/${keyName}/usage`,
+      { description },
+      { headers, timeout: 10000 }
+    ).then(() => {
+      console.log(`[Auth] Usage reported: ${keyName}`);
+    }).catch((err) => {
+      console.warn(`[Auth] Failed to report usage for ${keyName}:`, err?.message || err);
+    });
   }
 
   // ============================================

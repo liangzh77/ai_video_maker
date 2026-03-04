@@ -17,6 +17,7 @@ import videoApi from '../services/video-api';
 import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, runSpeechRecognizer, getFFmpegPath } from '../services/python-bridge';
 import storage, { findOrCreateSection } from '../services/storage';
 import appConfigService from '../services/config';
+import { authService } from '../services/auth';
 import type {
   ProcessingTask,
   OperationResult,
@@ -244,6 +245,9 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
   onProgress(95);
 
   console.log('[TaskHandler] Image saved:', result.outputPath);
+
+  // 上报使用记录
+  authService.reportUsage(modelId, `图片生成 | 模型: ${modelId} | 分辨率: ${resolution} | 源图: ${sourceResources.length}张 | prompt: ${prompt.slice(0, 100)}`);
 
   // 构建资源 ID（相对路径）
   const resourceId = buildResourceId(draftId, filePath);
@@ -1315,6 +1319,9 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         const resourceId = buildResourceId(request.draftId, filePath);
         console.log('[TaskIPC] Direct image generated:', resourceId);
 
+        // 上报使用记录
+        authService.reportUsage(request.modelEndpoint, `图片生成(直接) | 模型: ${request.modelEndpoint} | 分辨率: ${resolution} | 宽高比: ${request.aspectRatio || '自动'} | 源图: ${sourcePaths.length}张 | prompt: ${prompt.slice(0, 100)}`);
+
         return { success: true, data: { resourceId } };
       } catch (error) {
         console.error('[TaskIPC] Direct image generation failed:', error);
@@ -1465,6 +1472,10 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
             request.prompt
           );
           console.log('[TaskIPC] Speech recognized, length:', result.text.length);
+
+          // 上报使用记录
+          authService.reportUsage(request.modelEndpoint, `语音识别 | 模型: ${request.modelEndpoint} | 文件: ${path.basename(request.filePath)} | 结果长度: ${result.text.length}`);
+
           return { success: true, data: { text: result.text } };
         } finally {
           // 清理临时音频文件
@@ -1549,6 +1560,9 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         );
 
         console.log('[TaskIPC] Text generated, length:', result.text.length);
+
+        // 上报使用记录
+        authService.reportUsage(request.modelEndpoint, `文本生成 | 模型: ${request.modelEndpoint} | prompt: ${request.prompt.slice(0, 100)} | 结果长度: ${result.text.length}`);
 
         return { success: true, data: { text: result.text } };
       } catch (error) {
