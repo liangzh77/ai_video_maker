@@ -94,7 +94,7 @@ class GeminiProvider(ImageGeneratorBase):
         """检查配置是否完整"""
         if not self.api_key:
             raise ProviderError(
-                "Gemini API Key 未配置，请在 .env.local 中设置 GEMINI_API_KEY",
+                "Gemini API Key 未配置，请先登录",
                 provider=self.name
             )
 

@@ -131,6 +131,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   // 参考提示词（文本模式）
   const [selectedTextIds, setSelectedTextIds] = useState<string[]>([]);
 
+  // 参考卡片栏（图片模式）
+  const [selectedSectionIds, setSelectedSectionIds] = useState<string[]>([]);
+
   // 视频生成状态
   const [selectedVideoIds, setSelectedVideoIds] = useState<string[]>([]);
   const [videoDuration, setVideoDuration] = useState<number>(6);
@@ -237,6 +240,29 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       } else {
         return [...prev, imageId];
       }
+    });
+  };
+
+  // 可供选择的参考卡片栏：图片类型的 section
+  const imageSectionsForRef = sections.filter((s) => s.mediaType === '图片');
+
+  // 获取某 section 下的图片资源（排序后）
+  const getSectionImages = (sectionId: string) =>
+    resources.filter((r) => r.type === sectionId).sort((a, b) => a.fileName.localeCompare(b.fileName, 'zh-CN', { numeric: true }));
+
+  // 所有选中卡片栏的图片数量（用于校验和显示）
+  const sectionImageCount = selectedSectionIds.length > 0
+    ? getSectionImages(selectedSectionIds[0]).length
+    : 0;
+
+  // 切换卡片栏选中
+  const toggleSectionSelection = (sectionId: string) => {
+    setSelectedSectionIds((prev) => {
+      const next = prev.includes(sectionId)
+        ? prev.filter((id) => id !== sectionId)
+        : [...prev, sectionId];
+      if (next.length > 0) setOneImagePerTask(false); // 互斥
+      return next;
     });
   };
 
@@ -356,6 +382,52 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     return null;
   };
 
+  // 校验 @图片N 引用（图片模式，考虑卡片栏选择）
+  const validateImageAndSectionReferences = (prompt: string): string | null => {
+    const refs = [...prompt.matchAll(/@图片(\d+)/g)];
+    const totalSlots = selectedImageIds.length + selectedSectionIds.length;
+
+    if (refs.length === 0 && totalSlots === 0) {
+      return null;
+    }
+    if (refs.length === 0 && totalSlots > 0) {
+      const parts = [];
+      if (selectedImageIds.length > 0) parts.push(`${selectedImageIds.length} 张参考图片`);
+      if (selectedSectionIds.length > 0) parts.push(`${selectedSectionIds.length} 个参考卡片栏`);
+      return `选择了 ${parts.join('和 ')}，但提示词中没有 @图片N 引用`;
+    }
+    if (refs.length > 0 && totalSlots === 0) {
+      return `提示词中包含 @图片 引用，但未选择参考图片或参考卡片栏`;
+    }
+
+    const refNumbers = [...new Set(refs.map((m) => parseInt(m[1], 10)))];
+    const maxRef = Math.max(...refNumbers);
+
+    if (maxRef > totalSlots) {
+      return `提示词中引用了 @图片${maxRef}，但只有 ${totalSlots} 个槽位（${selectedImageIds.length} 张图片 + ${selectedSectionIds.length} 个卡片栏）`;
+    }
+    if (refNumbers.length !== totalSlots) {
+      return `有 ${totalSlots} 个槽位（${selectedImageIds.length} 张图片 + ${selectedSectionIds.length} 个卡片栏），但提示词中引用了 ${refNumbers.length} 个`;
+    }
+
+    // 卡片栏校验
+    if (selectedSectionIds.length > 0) {
+      const counts = selectedSectionIds.map((sid) => getSectionImages(sid).length);
+      if (counts.some((c) => c === 0)) {
+        return '选中的卡片栏中没有图片';
+      }
+      const allSame = counts.every((c) => c === counts[0]);
+      if (!allSame) {
+        return `选中的卡片栏图片数量不一致：${selectedSectionIds.map((sid, i) => {
+          const sec = sections.find((s) => s.id === sid);
+          return `${sec?.label || sid}(${counts[i]}张)`;
+        }).join('、')}`;
+      }
+    }
+
+    return null;
+  };
+
   // 输出卡片栏变更时更新缓存
   const handleTargetImageSectionChange = (sectionId: string) => {
     setTargetImageSection(sectionId || null);
@@ -416,6 +488,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setSelectedImageIds([]);
       setVideoModeImageIds([]);
       setSelectedTextIds([]);
+      setSelectedSectionIds([]);
       setSystemPrompt('');
 
       // 尝试解析 JSON 格式提示词（提取 prompt / seconds）
@@ -504,8 +577,8 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       return;
     }
 
-    // 校验 @图片N 引用与选中图片数量一致
-    const imageRefError = validateImageReferences(editedPrompt, selectedImageIds);
+    // 校验 @图片N 引用（考虑卡片栏）
+    const imageRefError = validateImageAndSectionReferences(editedPrompt);
     if (imageRefError) {
       message.error(imageRefError);
       return;
@@ -513,10 +586,41 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
     savePromptToHistory(editedPrompt);
 
-    const taskCount = oneImagePerTask ? selectedImageIds.length : batchCount;
-    const newTasks = [];
+    const newTasks: Array<{
+      type: 'image';
+      draftId: string;
+      prompt: string;
+      label: string;
+      params: Record<string, any>;
+    }> = [];
 
-    if (oneImagePerTask && selectedImageIds.length > 0) {
+    if (selectedSectionIds.length > 0) {
+      // *** 卡片栏批量模式 ***
+      const sectionResources = selectedSectionIds.map((sid) => getSectionImages(sid));
+      const taskCount = sectionResources[0].length;
+
+      for (let i = 0; i < taskCount; i++) {
+        const sourceImageIds = [
+          ...selectedImageIds,
+          ...sectionResources.map((secRes) => secRes[i].id),
+        ];
+        newTasks.push({
+          type: 'image' as const,
+          draftId: selectedDraftId,
+          prompt: editedPrompt,
+          label: `图片 #${i + 1}`,
+          params: {
+            sourceImageIds,
+            modelEndpoint: selectedModel!,
+            resolution: selectedResolution,
+            aspectRatio: selectedAspectRatio !== 'auto' ? selectedAspectRatio : undefined,
+            targetSectionId: targetImageSection || undefined,
+            promptResourceId: promptResource?.id,
+          },
+        });
+      }
+    } else if (oneImagePerTask && selectedImageIds.length > 0) {
+      // *** 一图一任务模式 ***
       for (let i = 0; i < selectedImageIds.length; i++) {
         newTasks.push({
           type: 'image' as const,
@@ -534,6 +638,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
         });
       }
     } else {
+      // *** 普通批量模式 ***
       for (let i = 0; i < batchCount; i++) {
         newTasks.push({
           type: 'image' as const,
@@ -553,7 +658,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     }
 
     addTasks(newTasks);
-    message.success(`已提交 ${taskCount} 个图片任务`);
+    message.success(`已提交 ${newTasks.length} 个图片任务`);
     setMode('tasks');
   };
 
@@ -825,6 +930,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                       <Checkbox
                         checked={oneImagePerTask}
                         onChange={(e) => setOneImagePerTask(e.target.checked)}
+                        disabled={selectedSectionIds.length > 0}
                       >
                         一图一任务
                       </Checkbox>
@@ -835,9 +941,15 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                   <InputNumber
                     min={1}
                     max={50}
-                    value={(mode === 'image' && oneImagePerTask) ? selectedImageIds.length || 1 : batchCount}
+                    value={
+                      mode === 'image' && selectedSectionIds.length > 0
+                        ? sectionImageCount
+                        : (mode === 'image' && oneImagePerTask)
+                          ? selectedImageIds.length || 1
+                          : batchCount
+                    }
                     onChange={(v) => setBatchCount(v || 1)}
-                    disabled={mode === 'image' && oneImagePerTask}
+                    disabled={(mode === 'image' && oneImagePerTask) || (mode === 'image' && selectedSectionIds.length > 0)}
                     size="small"
                     style={{ width: 70 }}
                   />
@@ -1151,6 +1263,54 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Section Selection - Image mode only */}
+            {mode === 'image' && imageSectionsForRef.length > 0 && (
+              <div className={styles.section}>
+                <div className={styles.sectionTitle}>
+                  选择参考卡片栏（可选，用 @图片N 引用，批量生成）
+                  <span className={styles.count}>
+                    已选 {selectedSectionIds.length} 栏
+                    {selectedSectionIds.length > 0 && sectionImageCount > 0 &&
+                      `（每栏 ${sectionImageCount} 张，将生成 ${sectionImageCount} 个任务）`}
+                  </span>
+                </div>
+                <div className={styles.sectionRefGrid}>
+                  {imageSectionsForRef.map((sec) => {
+                    const secResources = getSectionImages(sec.id);
+                    const isSelected = selectedSectionIds.includes(sec.id);
+                    const selIdx = selectedSectionIds.indexOf(sec.id);
+                    return (
+                      <div
+                        key={sec.id}
+                        className={`${styles.sectionRefItem} ${isSelected ? styles.selected : ''}`}
+                        onClick={() => toggleSectionSelection(sec.id)}
+                      >
+                        <div className={styles.sectionPreview}>
+                          {secResources.slice(0, 3).map((img) => (
+                            <img key={img.id} src={getImageUrl(img)} alt={img.fileName} className={styles.sectionPreviewThumb} />
+                          ))}
+                          {secResources.length > 3 && (
+                            <span className={styles.sectionMoreCount}>+{secResources.length - 3}</span>
+                          )}
+                          {secResources.length === 0 && (
+                            <span className={styles.sectionMoreCount}>空</span>
+                          )}
+                        </div>
+                        <div className={styles.sectionRefLabel}>
+                          {sec.order}. {sec.label}（{secResources.length}张）
+                        </div>
+                        {isSelected && (
+                          <div className={styles.selectedBadge}>
+                            {selIdx + 1 + selectedImageIds.length}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
 

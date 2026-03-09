@@ -54,12 +54,12 @@ class GeminiProxyProvider(ImageGeneratorBase):
         """检查配置是否完整"""
         if not self.api_key:
             raise ProviderError(
-                "中转 Gemini API Key 未配置，请在 .env.local 中设置 GEMINI_PROXY_API_KEY",
+                "中转 Gemini API Key 未配置，请先登录",
                 provider=self.name
             )
         if not self.base_url:
             raise ProviderError(
-                "中转 Gemini Base URL 未配置，请在 .env.local 中设置 GEMINI_PROXY_BASE_URL",
+                "中转 Gemini Base URL 未配置，请先登录",
                 provider=self.name
             )
 
