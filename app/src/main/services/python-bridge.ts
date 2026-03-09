@@ -119,6 +119,7 @@ function getKeyStoreEnv(): Record<string, string> {
     'GEMINI_PROXY_API_KEY', 'GEMINI_PROXY_BASE_URL',
     'OPENROUTER_API_KEY', 'OPENROUTER_BASE_URL',
     'DOUBAO_API_KEY',
+    'RUNNINGHUB_API_KEY', 'RUNNINGHUB_BASE_URL',
   ];
   const env: Record<string, string> = {};
   for (const name of apiKeyNames) {
