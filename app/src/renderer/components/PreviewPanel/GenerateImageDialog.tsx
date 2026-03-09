@@ -141,6 +141,10 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   // 提示词历史
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
 
+  // 高亮提示词 refs
+  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const promptBackdropRef = useRef<HTMLDivElement>(null);
+
   // 进行中的任务数（running + pending）
   const activeCount = allStoreTasks.filter((t) => t.status === 'running' || t.status === 'pending').length;
 
@@ -329,6 +333,29 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     return { resolved };
   };
 
+  // 校验 @图片N 引用（imageIds 参数：图片模式传 selectedImageIds，视频模式传 videoModeImageIds）
+  const validateImageReferences = (prompt: string, imageIds: string[]): string | null => {
+    const refs = [...prompt.matchAll(/@图片(\d+)/g)];
+    if (refs.length === 0 && imageIds.length === 0) {
+      return null; // 都没有，正常
+    }
+    if (refs.length === 0 && imageIds.length > 0) {
+      return `选择了 ${imageIds.length} 张参考图片，但提示词中没有 @图片N 引用`;
+    }
+    if (refs.length > 0 && imageIds.length === 0) {
+      return `提示词中包含 @图片 引用，但未选择参考图片`;
+    }
+    const refNumbers = [...new Set(refs.map((m) => parseInt(m[1], 10)))];
+    const maxRef = Math.max(...refNumbers);
+    if (maxRef > imageIds.length) {
+      return `提示词中引用了 @图片${maxRef}，但只选择了 ${imageIds.length} 张参考图片`;
+    }
+    if (refNumbers.length < imageIds.length) {
+      return `选择了 ${imageIds.length} 张参考图片，但提示词中只引用了 ${refNumbers.length} 张`;
+    }
+    return null;
+  };
+
   // 输出卡片栏变更时更新缓存
   const handleTargetImageSectionChange = (sectionId: string) => {
     setTargetImageSection(sectionId || null);
@@ -477,6 +504,13 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       return;
     }
 
+    // 校验 @图片N 引用与选中图片数量一致
+    const imageRefError = validateImageReferences(editedPrompt, selectedImageIds);
+    if (imageRefError) {
+      message.error(imageRefError);
+      return;
+    }
+
     savePromptToHistory(editedPrompt);
 
     const taskCount = oneImagePerTask ? selectedImageIds.length : batchCount;
@@ -601,6 +635,13 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       }
     }
 
+    // 校验 @图片N 引用与选中图片数量一致
+    const imageRefError = validateImageReferences(editedPrompt, videoModeImageIds);
+    if (imageRefError) {
+      message.error(imageRefError);
+      return;
+    }
+
     savePromptToHistory(editedPrompt);
 
     addTasks([{
@@ -635,6 +676,38 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const getImageUrl = (resource: Resource) => {
     const normalizedPath = resource.filePath.replace(/\\/g, '/');
     return `local-file:///${normalizedPath}`;
+  };
+
+  // 提示词中 @引用 的高亮渲染
+  const renderHighlightedPrompt = (text: string): React.ReactNode => {
+    if (!text) return null;
+    const parts = text.split(/(@(?:图片|文本|音频|视频)\d+)/g);
+    return parts.map((part, i) => {
+      if (/@图片\d+/.test(part)) return <span key={i} className={styles.refImage}>{part}</span>;
+      if (/@文本\d+/.test(part)) return <span key={i} className={styles.refText}>{part}</span>;
+      if (/@音频\d+/.test(part)) return <span key={i} className={styles.refAudio}>{part}</span>;
+      if (/@视频\d+/.test(part)) return <span key={i} className={styles.refVideo}>{part}</span>;
+      return <span key={i}>{part}</span>;
+    });
+  };
+
+  // 自动调整 textarea 高度
+  useEffect(() => {
+    const textarea = promptTextareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      const lineHeight = 13 * 1.6; // fontSize * lineHeight
+      const minH = lineHeight * 2 + 10; // minRows=2 + padding
+      const maxH = lineHeight * 6 + 10; // maxRows=6 + padding
+      textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, minH), maxH)}px`;
+    }
+  }, [editedPrompt]);
+
+  // 同步 textarea 和 backdrop 滚动
+  const handlePromptScroll = () => {
+    if (promptTextareaRef.current && promptBackdropRef.current) {
+      promptBackdropRef.current.scrollTop = promptTextareaRef.current.scrollTop;
+    }
   };
 
   // 根据模式判断确定按钮是否可用
@@ -956,13 +1029,26 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                   />
                 </span>
               </div>
-              <Input.TextArea
-                value={editedPrompt}
-                onChange={(e) => setEditedPrompt(e.target.value)}
-                placeholder="输入提示词"
-                className={styles.promptInput}
-                autoSize={{ minRows: 2, maxRows: 6 }}
-              />
+              <div className={styles.promptWrapper}>
+                <div
+                  ref={promptBackdropRef}
+                  className={styles.promptBackdrop}
+                  aria-hidden="true"
+                >
+                  {renderHighlightedPrompt(editedPrompt)}
+                  {/* 末尾换行保持与 textarea 高度一致 */}
+                  <br />
+                </div>
+                <textarea
+                  ref={promptTextareaRef}
+                  value={editedPrompt}
+                  onChange={(e) => setEditedPrompt(e.target.value)}
+                  onScroll={handlePromptScroll}
+                  placeholder="输入提示词"
+                  className={styles.promptTextarea}
+                  rows={2}
+                />
+              </div>
             </div>
 
             {/* 参考提示词选择 - Text mode only */}
@@ -1004,7 +1090,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             {mode === 'image' && (
               <div className={styles.section}>
                 <div className={styles.sectionTitle}>
-                  选择参考图片（可选，支持多选）
+                  选择参考图片（可选，用 @图片1 @图片2 引用）
                   <span className={styles.count}>
                     已选 {selectedImageIds.length} / 共 {allImages.length} 张
                   </span>
@@ -1074,7 +1160,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                 {/* 参考图片选择 */}
                 <div className={styles.section}>
                   <div className={styles.sectionTitle}>
-                    参考图片（可选，最多 9 张）
+                    参考图片（可选，用 @图片1 @图片2 引用）
                     <span className={styles.count}>
                       已选 {videoModeImageIds.length} / 共 {allImages.length} 张
                     </span>

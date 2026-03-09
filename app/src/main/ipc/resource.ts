@@ -470,12 +470,20 @@ export function registerResourceHandlers(): void {
         let foundDraftId: string | null = null;
         let foundResource: Resource | null = null;
 
+        console.log('[Resource:COPY] request:', {
+          resourceId: request.resourceId,
+          sourceDraftId: request.sourceDraftId,
+          targetType: request.targetType,
+        });
+
         // 如果提供了 sourceDraftId，直接使用，避免遍历所有草稿
         if (request.sourceDraftId) {
           const resource = await storage.resource.get(request.sourceDraftId, request.resourceId);
           if (resource) {
             foundDraftId = request.sourceDraftId;
             foundResource = resource;
+          } else {
+            console.log('[Resource:COPY] resource not found in draft:', request.sourceDraftId);
           }
         } else {
           // 后备：遍历所有草稿查找（较慢）
@@ -491,6 +499,7 @@ export function registerResourceHandlers(): void {
         }
 
         if (!foundDraftId || !foundResource) {
+          console.log('[Resource:COPY] RESOURCE_NOT_FOUND for:', request.resourceId);
           return { success: false, error: 'RESOURCE_NOT_FOUND' };
         }
 

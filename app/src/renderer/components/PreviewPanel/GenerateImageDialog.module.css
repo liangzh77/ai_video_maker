@@ -54,6 +54,79 @@
   line-height: 1.6;
 }
 
+/* 高亮提示词容器 */
+.promptWrapper {
+  position: relative;
+}
+
+.promptBackdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 4px 11px;
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  border: 1px solid transparent;
+  color: var(--color-text-primary);
+}
+
+.promptTextarea {
+  position: relative;
+  width: 100%;
+  padding: 4px 11px;
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  resize: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: transparent;
+  caret-color: var(--color-text-primary);
+  outline: none;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.promptTextarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.06);
+}
+
+.promptTextarea::placeholder {
+  color: var(--color-text-quaternary);
+}
+
+/* @引用 高亮颜色 */
+.refImage {
+  color: #52c41a;
+  font-weight: 500;
+}
+
+.refText {
+  color: #1677ff;
+  font-weight: 500;
+}
+
+.refAudio {
+  color: #fa8c16;
+  font-weight: 500;
+}
+
+.refVideo {
+  color: #eb2f96;
+  font-weight: 500;
+}
+
 .promptActions {
   margin-left: auto;
   display: flex;

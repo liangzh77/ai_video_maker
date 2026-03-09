@@ -409,6 +409,7 @@ export const useDraftStore = create<DraftState>((set, get) => ({
 
   copyResource: async (id: string, targetSectionId?: string) => {
     const { selectedDraftId } = get();
+    console.log('[DraftStore] copyResource:', { id, targetSectionId, selectedDraftId });
     try {
       const result: OperationResult<Resource> = await window.api.resource.copy({
         resourceId: id,

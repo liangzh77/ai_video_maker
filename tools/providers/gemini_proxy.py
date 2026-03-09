@@ -48,7 +48,7 @@ class GeminiProxyProvider(ImageGeneratorBase):
         self.api_key = settings.GEMINI_PROXY_API_KEY
         self.base_url = settings.GEMINI_PROXY_BASE_URL
         self.model = model
-        self.timeout = 90.0  # 1分半超时
+        self.timeout = 300.0  # 5分钟超时
 
     def _check_config(self) -> None:
         """检查配置是否完整"""

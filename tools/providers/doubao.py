@@ -50,7 +50,7 @@ class DoubaoProvider(ImageGeneratorBase):
             self.client = BearerTokenClient(
                 base_url=self.base_url,
                 api_key=self.api_key,
-                timeout=90.0,  # 1分半超时
+                timeout=300.0,  # 5分钟超时
                 max_retries=2
             )
         else:

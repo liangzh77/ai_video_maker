@@ -1,9 +1,9 @@
 /**
  * 认证服务
  * 处理登录/登出、JWT token 持久化、从云端拉取 API 密钥
+ * 使用 Electron net.fetch() 以自动支持系统代理
  */
-import axios from 'axios';
-import { app, safeStorage } from 'electron';
+import { app, safeStorage, net } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { keyStore } from './key-store';
@@ -83,9 +83,20 @@ class AuthService {
     }
 
     try {
-      const resp = await axios.post(`${this.baseUrl}/api/auth/login`, { username, password }, { timeout: 15000 });
-      const { token, user } = resp.data;
+      const resp = await this.fetchWithTimeout(`${this.baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
 
+      const data = await resp.json();
+      if (!resp.ok) {
+        const raw = data?.error || data?.message || `HTTP ${resp.status}`;
+        const msg = typeof raw === 'object' && raw !== null ? (raw.message || JSON.stringify(raw)) : String(raw);
+        return { success: false, error: msg };
+      }
+
+      const { token, user } = data;
       this.token = token;
       this.username = user?.username || username;
 
@@ -103,10 +114,7 @@ class AuthService {
 
       return { success: true, username: this.username!, fetchedKeys, missingKeys };
     } catch (err: any) {
-      const raw = err?.response?.data?.error || err?.response?.data?.message || err?.message || '登录失败';
-      // 后端可能返回 {code, message} 对象，提取 message 字符串
-      const msg = typeof raw === 'object' && raw !== null ? (raw.message || JSON.stringify(raw)) : String(raw);
-      return { success: false, error: msg };
+      return { success: false, error: err?.message || '登录失败' };
     }
   }
 
@@ -140,11 +148,16 @@ class AuthService {
   private async fetchAndStoreKeys(): Promise<string[]> {
     if (!this.token) throw new Error('Not logged in');
 
-    const headers = { Authorization: `Bearer ${this.token}` };
+    const headers = {
+      'Authorization': `Bearer ${this.token}`,
+      'Content-Type': 'application/json',
+    };
 
     // 1. 获取可用密钥名称列表
-    const listResp = await axios.get(`${this.baseUrl}/api/keys`, { headers, timeout: 15000 });
-    const keyList: Array<{ id: number; keyName: string }> = listResp.data?.keys || [];
+    const listResp = await this.fetchWithTimeout(`${this.baseUrl}/api/keys`, { headers });
+    const listData = await listResp.json();
+    if (!listResp.ok) throw new Error(listData?.message || `HTTP ${listResp.status}`);
+    const keyList: Array<{ id: number; keyName: string }> = listData?.keys || [];
 
     if (keyList.length === 0) {
       console.log('[Auth] No keys available for this user');
@@ -155,13 +168,15 @@ class AuthService {
     console.log(`[Auth] Found ${keyNames.length} available keys, fetching values...`);
 
     // 2. 批量获取密钥值
-    const batchResp = await axios.post(
-      `${this.baseUrl}/api/keys`,
-      { keyNames },
-      { headers, timeout: 15000 }
-    );
+    const batchResp = await this.fetchWithTimeout(`${this.baseUrl}/api/keys`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ keyNames }),
+    });
+    const batchData = await batchResp.json();
+    if (!batchResp.ok) throw new Error(batchData?.message || `HTTP ${batchResp.status}`);
 
-    const keys: Record<string, string> = batchResp.data?.keys || {};
+    const keys: Record<string, string> = batchData?.keys || {};
     // 合并到已有配置上（不清空内置默认值和 .env.local 的值）
     keyStore.merge(keys);
     const fetchedNames = Object.keys(keys);
@@ -194,16 +209,38 @@ class AuthService {
     const keyName = PROVIDER_KEY_MAP[provider];
     if (!keyName) return;
 
-    const headers = { Authorization: `Bearer ${this.token}` };
-    axios.post(
-      `${this.baseUrl}/api/keys/${keyName}/usage`,
-      { description },
-      { headers, timeout: 10000 }
-    ).then(() => {
+    this.fetchWithTimeout(`${this.baseUrl}/api/keys/${keyName}/usage`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ description }),
+    }).then(() => {
       console.log(`[Auth] Usage reported: ${keyName}`);
     }).catch((err) => {
       console.warn(`[Auth] Failed to report usage for ${keyName}:`, err?.message || err);
     });
+  }
+
+  // ============================================
+  // 网络请求（使用 Electron net.fetch 支持系统代理）
+  // ============================================
+
+  private async fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = 15000): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await net.fetch(url, { ...init, signal: controller.signal });
+      return resp;
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        throw new Error(`请求超时 (${timeoutMs / 1000}s)`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // ============================================

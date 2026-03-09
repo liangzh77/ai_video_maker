@@ -1171,12 +1171,14 @@ export async function getResource(draftId: string, resourceId: string): Promise<
     // 检查文件是否存在
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) {
+      console.log('[Storage:getResource] not a file:', filePath);
       return null;
     }
 
     // 获取资源类型
     const resourceType = getResourceTypeFromPath(resourceId);
     if (!resourceType) {
+      console.log('[Storage:getResource] invalid resourceType for:', resourceId);
       return null;
     }
 
@@ -1197,8 +1199,9 @@ export async function getResource(draftId: string, resourceId: string): Promise<
     };
 
     return resource;
-  } catch {
+  } catch (err) {
     // 文件不存在或读取失败
+    console.log('[Storage:getResource] error for:', filePath, (err as Error).message);
     return null;
   }
 }

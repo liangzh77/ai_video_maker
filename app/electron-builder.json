@@ -31,6 +31,11 @@
       "filter": ["**/*"]
     },
     {
+      "from": "../tools/dist/text_generator",
+      "to": "tools",
+      "filter": ["**/*"]
+    },
+    {
       "from": "../tools/dist/speech_recognizer",
       "to": "tools",
       "filter": ["**/*"]
