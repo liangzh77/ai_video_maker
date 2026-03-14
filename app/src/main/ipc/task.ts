@@ -14,7 +14,7 @@ import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import imageApi from '../services/image-api';
 import videoApi from '../services/video-api';
-import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, runSpeechRecognizer, getFFmpegPath } from '../services/python-bridge';
+import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, runSpeechRecognizer, runRunningHubVideo, getFFmpegPath } from '../services/python-bridge';
 import storage, { findOrCreateSection } from '../services/storage';
 import appConfigService from '../services/config';
 import { authService } from '../services/auth';
@@ -1433,6 +1433,110 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'VIDEO_GENERATION_ERROR',
+        };
+      }
+    }
+  );
+
+  // Generate video via RunningHub API
+  ipcMain.handle(
+    TASK_CHANNELS.GENERATE_VIDEO_RUNNINGHUB,
+    async (_, request: {
+      draftId: string;
+      imageResourceId: string;
+      videoResourceId: string;
+      prompt: string;
+      width: number;
+      height: number;
+      fps: number;
+      runningFrames: number;
+      skipFrames: number;
+      targetSectionId?: string;
+      taskId?: string;
+    }): Promise<OperationResult<{ resourceId: string }>> => {
+      console.log('[TaskIPC] Received RunningHub video generation request');
+      try {
+        // Verify draft exists
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        // Verify prompt
+        if (!request.prompt || request.prompt.trim().length === 0) {
+          return { success: false, error: '提示词内容不能为空' };
+        }
+
+        // Get image file path
+        const imageRes = await storage.resource.get(request.draftId, request.imageResourceId);
+        if (!imageRes) {
+          return { success: false, error: `图片资源未找到: ${request.imageResourceId}` };
+        }
+
+        // Get video file path
+        const videoRes = await storage.resource.get(request.draftId, request.videoResourceId);
+        if (!videoRes) {
+          return { success: false, error: `视频资源未找到: ${request.videoResourceId}` };
+        }
+
+        // Determine target section
+        const targetSectionDesc = request.targetSectionId
+          ? { id: request.targetSectionId }
+          : await findOrCreateSection(request.draftId, '视频', '生成视频');
+        const targetSection = targetSectionDesc.id;
+
+        // Allocate sequence number with lock
+        const lockKey = `${request.draftId}:${targetSection}`;
+        const filePath = await withSequenceLock(
+          lockKey,
+          async () => {
+            const nextFromFs = await storage.getNextSequenceNumber(request.draftId, targetSection);
+            const nextFromMemory = (allocatedSequenceNumbers.get(lockKey) || 0) + 1;
+            const sequenceNumber = Math.max(nextFromFs, nextFromMemory);
+            allocatedSequenceNumbers.set(lockKey, sequenceNumber);
+            const fp = storage.getResourceFilePath(request.draftId, targetSection, '.mp4', sequenceNumber);
+            await fs.mkdir(path.dirname(fp), { recursive: true });
+            return fp;
+          },
+        );
+
+        // Progress reporting
+        const onProgress = request.taskId
+          ? (message: string) => {
+              mainWindowRef?.webContents.send(TASK_EVENTS.VIDEO_PROGRESS, {
+                taskId: request.taskId,
+                message,
+              });
+            }
+          : undefined;
+
+        // Call RunningHub via python-bridge
+        await runRunningHubVideo(
+          {
+            imageFile: imageRes.filePath,
+            videoFile: videoRes.filePath,
+            prompt: request.prompt,
+            width: request.width,
+            height: request.height,
+            fps: request.fps,
+            runningFrames: request.runningFrames,
+            skipFrames: request.skipFrames,
+            outputPath: filePath,
+          },
+          onProgress ? (progress) => onProgress(`进度: ${progress}%`) : undefined,
+          onProgress,
+        );
+
+        // Build resource ID
+        const resourceId = buildResourceId(request.draftId, filePath);
+        console.log('[TaskIPC] RunningHub video generated:', resourceId);
+
+        return { success: true, data: { resourceId } };
+      } catch (error) {
+        console.error('[TaskIPC] RunningHub video generation failed:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'RUNNINGHUB_VIDEO_GENERATION_ERROR',
         };
       }
     }

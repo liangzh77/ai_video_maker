@@ -41,6 +41,11 @@
       "filter": ["**/*"]
     },
     {
+      "from": "../tools/dist/runninghub_video",
+      "to": "tools",
+      "filter": ["**/*"]
+    },
+    {
       "from": "../bin",
       "to": "tools",
       "filter": ["ffmpeg.exe", "ffprobe.exe"]

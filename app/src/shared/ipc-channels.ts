@@ -55,6 +55,7 @@ export const TASK_CHANNELS = {
   GENERATE_IMAGE_DIRECT: 'task:generateImageDirect',  // 直接生成图片（不走任务队列，支持并发）
   GENERATE_TEXT: 'task:generateText',
   GENERATE_VIDEO: 'task:generateVideo',          // Seedance 2.0 视频生成
+  GENERATE_VIDEO_RUNNINGHUB: 'task:generateVideoRunningHub',  // RunningHub 视频生成
   RECOGNIZE_SPEECH: 'task:recognizeSpeech',      // 语音识别（支持视频/音频文件）
   EXPORT_AUDIO: 'task:exportAudio',              // 导出音频到用户选择的路径
   SYNTHESIZE_VIDEO: 'task:synthesizeVideo',

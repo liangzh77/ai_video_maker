@@ -887,6 +887,110 @@ export async function runImageGenerator(
 }
 
 // ============================================
+// RunningHub Video Generator
+// ============================================
+
+export interface RunningHubVideoParams {
+  imageFile: string;
+  videoFile: string;
+  prompt: string;
+  width: number;
+  height: number;
+  fps: number;
+  runningFrames: number;
+  skipFrames: number;
+  outputPath: string;
+}
+
+export interface RunningHubVideoResult {
+  outputPath: string;
+}
+
+const RUNNINGHUB_APP_ID = '1998011856453296130';
+const RUNNINGHUB_NEGATIVE_PROMPT = '色调艳丽，过曝，静态，细节模糊';
+
+export async function runRunningHubVideo(
+  params: RunningHubVideoParams,
+  onProgress?: (progress: number) => void,
+  onStatusMessage?: (message: string) => void,
+): Promise<RunningHubVideoResult> {
+  let resultPath = params.outputPath;
+
+  const useExe = shouldUseExe();
+  let command: string;
+  let args: string[];
+
+  if (useExe) {
+    command = app.isPackaged
+      ? path.join(process.resourcesPath, 'tools', 'runninghub_video.exe')
+      : path.join(process.cwd(), '..', 'tools', 'dist', 'runninghub_video', 'runninghub_video.exe');
+    args = [];
+  } else {
+    command = getPythonPath();
+    args = [path.join(getToolsPath(), 'runninghub_video.py')];
+  }
+
+  args.push(
+    '--app-id', RUNNINGHUB_APP_ID,
+    '--upload', params.imageFile,
+    '--upload', params.videoFile,
+    // 节点参数（硬编码工作流节点 ID）
+    '--node', `71:value=${params.width}`,
+    '--node', `72:value=${params.height}`,
+    '--node', `215:value=${params.fps}`,
+    '--node', `74:value=${params.runningFrames}`,
+    '--node', `91:value=${params.skipFrames}`,
+    '--node', '182:image={upload_0}',
+    '--node', '95:video={upload_1}',
+    '--node', '184:boolean=true',
+    '--node', '282:value=false',
+    '--node', '248:value=2.0',
+    '--node', '283:value=2026',
+    '--node', `50:prompt=${params.prompt}`,
+    '--node', `100:prompt=${RUNNINGHUB_NEGATIVE_PROMPT}`,
+    '--output', params.outputPath,
+  );
+
+  console.log('[RunningHubVideo] Starting with command:', command);
+  console.log('[RunningHubVideo] Args:', args.slice(0, 5), '...');
+
+  await runProcess({
+    command,
+    args,
+    env: getKeyStoreEnv(),
+    onStdoutLine: (message: string) => {
+      console.log('[RunningHubVideo]', message);
+
+      // 解析进度
+      const progress = parseProgress(message);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
+
+      // 解析状态消息（用于 UI 显示）
+      if (message.startsWith('[RunningHub]') && onStatusMessage) {
+        onStatusMessage(message.replace('[RunningHub] ', ''));
+      }
+
+      // 解析输出路径
+      const outputMatch = message.match(/^Output:\s*(.+)$/);
+      if (outputMatch) {
+        resultPath = outputMatch[1].trim();
+      }
+    },
+    onStderrLine: (stderr: string) => {
+      console.log('[RunningHubVideo stderr]', stderr);
+      const progress = parseProgress(stderr);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
+    },
+  });
+
+  return { outputPath: resultPath };
+}
+
+// ============================================
 // Exports
 // ============================================
 
@@ -898,6 +1002,7 @@ export const pythonBridge = {
   generateImage: runImageGenerator,
   generateText: runTextGenerator,
   recognizeSpeech: runSpeechRecognizer,
+  runningHubVideo: runRunningHubVideo,
 };
 
 export default pythonBridge;

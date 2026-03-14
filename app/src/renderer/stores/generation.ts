@@ -33,6 +33,13 @@ export interface VideoTaskParams {
   duration: number;
   ratio: string;
   targetSectionId?: string;
+  method?: 'jimeng' | 'runninghub';
+  // RunningHub 专属参数
+  rhWidth?: number;
+  rhHeight?: number;
+  rhFps?: number;
+  rhRunningFrames?: number;
+  rhSkipFrames?: number;
 }
 
 export interface GenerationTask {
@@ -147,6 +154,27 @@ async function executeTextTask(task: GenerationTask): Promise<{ text: string; re
 
 async function executeVideoTask(task: GenerationTask): Promise<string | undefined> {
   const params = task.params as VideoTaskParams;
+
+  if (params.method === 'runninghub') {
+    const result = await window.api.task.generateVideoRunningHub({
+      draftId: task.draftId,
+      imageResourceId: params.imageResourceIds[0],
+      videoResourceId: params.videoResourceIds[0],
+      prompt: task.prompt,
+      width: params.rhWidth || 576,
+      height: params.rhHeight || 1024,
+      fps: params.rhFps || 24,
+      runningFrames: params.rhRunningFrames || 120,
+      skipFrames: params.rhSkipFrames || 0,
+      targetSectionId: params.targetSectionId,
+      taskId: task.id,
+    });
+    if (!result.success) {
+      throw new Error(result.error || 'RunningHub 视频生成失败');
+    }
+    return result.data?.resourceId;
+  }
+
   const result = await window.api.task.generateVideo({
     draftId: task.draftId,
     imageResourceIds: params.imageResourceIds,

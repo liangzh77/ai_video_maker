@@ -92,7 +92,7 @@ class RunningHubClient:
 
     def __init__(self, api_key: str, base_url: str = DEFAULT_BASE_URL):
         if not api_key:
-            raise RunningHubError("RunningHub API Key 未配置，请先登录")
+            raise RunningHubError("RunningHub API Key 未配置")
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
 
