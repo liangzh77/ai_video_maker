@@ -19,6 +19,27 @@ const TAG_LABELS: Record<string, string> = { text: '文本', image: '图片', vi
 // 缓存每种生成模式上次选择的输出卡片栏标签（跨对话框打开保持）
 const targetSectionLabelCache: Record<string, string | null> = {};
 
+// 持久化每种生成模式上次选择的模型
+const LAST_MODEL_KEY = 'generate-last-model';
+function getLastModel(mode: string): string | null {
+  try {
+    const stored = localStorage.getItem(LAST_MODEL_KEY);
+    if (stored) {
+      const map = JSON.parse(stored);
+      return map[mode] || null;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+function saveLastModel(mode: string, modelId: string) {
+  try {
+    const stored = localStorage.getItem(LAST_MODEL_KEY);
+    const map = stored ? JSON.parse(stored) : {};
+    map[mode] = modelId;
+    localStorage.setItem(LAST_MODEL_KEY, JSON.stringify(map));
+  } catch { /* ignore */ }
+}
+
 /** 视频缩略图组件 */
 const VideoThumbnail: React.FC<{ resource: Resource; style?: React.CSSProperties }> = ({ resource, style }) => {
   const cacheKey = `${resource.id}_${resource.fileSize}`;
@@ -141,6 +162,22 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const [targetVideoSection, setTargetVideoSection] = useState<string | null>(null);
   const [videoModeAudioIds, setVideoModeAudioIds] = useState<string[]>([]);
 
+  // 视频生成方式
+  const [videoMethod, setVideoMethod] = useState<'jimeng' | 'runninghub'>(() => {
+    const saved = getLastModel('video');
+    return saved === 'runninghub' ? 'runninghub' : 'jimeng';
+  });
+
+  // RunningHub 专属状态
+  const [rhWidth, setRhWidth] = useState(576);
+  const [rhHeight, setRhHeight] = useState(1024);
+  const [rhFps, setRhFps] = useState(24);
+  const [rhRunningFrames, setRhRunningFrames] = useState(0);
+  const [rhSkipFrames, setRhSkipFrames] = useState(0);
+  const [rhImageId, setRhImageId] = useState<string | null>(null);
+  const [rhVideoId, setRhVideoId] = useState<string | null>(null);
+  const [rhFramesManual, setRhFramesManual] = useState(false);
+
   // 提示词历史
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
 
@@ -150,6 +187,17 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   // 进行中的任务数（running + pending）
   const activeCount = allStoreTasks.filter((t) => t.status === 'running' || t.status === 'pending').length;
+
+  // RunningHub: 选中视频后自动计算运行帧数
+  useEffect(() => {
+    if (rhVideoId && !rhFramesManual) {
+      const videoRes = resources.find((r) => r.id === rhVideoId);
+      if (videoRes && videoRes.metadata && isVideoMetadata(videoRes.metadata)) {
+        const frames = Math.round(videoRes.metadata.duration + 1) * rhFps;
+        setRhRunningFrames(frames);
+      }
+    }
+  }, [rhVideoId, rhFps, rhFramesManual, resources]);
 
   // 对话框打开时从文件加载提示词历史
   useEffect(() => {
@@ -456,11 +504,13 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     if (visible) {
       window.api.task.getModels().then((modelList) => {
         setModels(modelList);
-        // Select first matching model by default
+        // 优先恢复上次选择的模型，否则选第一个匹配的
         if (modelList.length > 0 && !selectedModel) {
           const capKey = mode === 'text' ? 'text' : 'image';
-          const first = modelList.find((m) => (m.capabilities || ['image']).includes(capKey));
-          if (first) setSelectedModel(first.id);
+          const lastId = getLastModel(mode);
+          const lastMatch = lastId && modelList.find((m) => m.id === lastId && (m.capabilities || ['image']).includes(capKey));
+          const target = lastMatch || modelList.find((m) => (m.capabilities || ['image']).includes(capKey));
+          if (target) setSelectedModel(target.id);
         }
       }).catch((err) => {
         console.error('Failed to load models:', err);
@@ -469,14 +519,20 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     }
   }, [visible, message]);
 
-  // 切换 mode 时，如果当前选中模型不支持该 mode，自动切到第一个匹配的
+  // 切换 mode 时，优先恢复该 mode 上次选择的模型，否则选第一个匹配的
   useEffect(() => {
     if (mode === 'video' || models.length === 0) return;
     const capKey = mode === 'text' ? 'text' : 'image';
-    const current = models.find((m) => m.id === selectedModel);
-    if (!current || !(current.capabilities || ['image']).includes(capKey)) {
-      const first = models.find((m) => (m.capabilities || ['image']).includes(capKey));
-      if (first) setSelectedModel(first.id);
+    const lastId = getLastModel(mode);
+    const lastMatch = lastId && models.find((m) => m.id === lastId && (m.capabilities || ['image']).includes(capKey));
+    if (lastMatch) {
+      setSelectedModel(lastMatch.id);
+    } else {
+      const current = models.find((m) => m.id === selectedModel);
+      if (!current || !(current.capabilities || ['image']).includes(capKey)) {
+        const first = models.find((m) => (m.capabilities || ['image']).includes(capKey));
+        if (first) setSelectedModel(first.id);
+      }
     }
   }, [mode, models]);
 
@@ -539,6 +595,12 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setVideoModeAudioIds([]);
       setVideoDuration(parsedVideoSeconds ?? 6);
       setVideoRatio('9:16');
+      // 重置 RunningHub 状态
+      setRhImageId(null);
+      setRhVideoId(null);
+      setRhRunningFrames(0);
+      setRhSkipFrames(0);
+      setRhFramesManual(false);
       // 根据 initialMode 或 prompt 的 tag 设置默认生成模式
       let resolvedMode: string;
       if (initialMode) {
@@ -717,6 +779,50 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       return;
     }
 
+    if (videoMethod === 'runninghub') {
+      // RunningHub 模式
+      if (!rhImageId) {
+        message.error('请选择一张图片');
+        return;
+      }
+      if (!rhVideoId) {
+        message.error('请选择一个视频');
+        return;
+      }
+      if (rhRunningFrames <= 0) {
+        message.error('运行帧数必须大于 0');
+        return;
+      }
+
+      savePromptToHistory(editedPrompt);
+
+      addTasks([{
+        type: 'video' as const,
+        draftId: selectedDraftId,
+        prompt: editedPrompt,
+        label: 'RH 视频 #1',
+        params: {
+          imageResourceIds: [rhImageId],
+          videoResourceIds: [rhVideoId],
+          audioResourceIds: [],
+          duration: 0,
+          ratio: `${rhWidth}:${rhHeight}`,
+          targetSectionId: targetVideoSection || undefined,
+          method: 'runninghub',
+          rhWidth,
+          rhHeight,
+          rhFps,
+          rhRunningFrames,
+          rhSkipFrames,
+        },
+      }]);
+
+      message.success('已提交 1 个 RunningHub 视频任务');
+      setMode('tasks');
+      return;
+    }
+
+    // 即梦模式（原有逻辑）
     // 校验 @音频N 占位符与选中音频数量一致
     const audioRefs = [...editedPrompt.matchAll(/@音频(\d+)/g)];
     if (audioRefs.length > 0 || videoModeAudioIds.length > 0) {
@@ -906,7 +1012,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                 <div className={styles.sectionTitle}>选择模型</div>
                 <Select
                   value={selectedModel}
-                  onChange={setSelectedModel}
+                  onChange={(val) => { setSelectedModel(val); saveLastModel(mode, val); }}
                   placeholder="请选择模型"
                   className={styles.modelSelect}
                   options={models
@@ -1052,32 +1158,59 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                 {mode === 'video' && (
                   <>
                     <span style={{ width: 16 }} />
-                    <span className={styles.batchLabel}>时长</span>
-                    <InputNumber
-                      min={4}
-                      max={15}
-                      value={videoDuration}
-                      onChange={(v) => setVideoDuration(v || 6)}
+                    <Segmented
                       size="small"
-                      style={{ width: 70 }}
-                      addonAfter="秒"
-                    />
-                    <span style={{ width: 8 }} />
-                    <span className={styles.batchLabel}>比例</span>
-                    <Select
-                      value={videoRatio}
-                      onChange={setVideoRatio}
-                      size="small"
-                      style={{ width: 90 }}
                       options={[
-                        { label: '1:1', value: '1:1' },
-                        { label: '4:3', value: '4:3' },
-                        { label: '3:4', value: '3:4' },
-                        { label: '16:9', value: '16:9' },
-                        { label: '9:16', value: '9:16' },
-                        { label: '21:9', value: '21:9' },
+                        { label: '即梦', value: 'jimeng' },
+                        { label: 'RunningHub', value: 'runninghub' },
                       ]}
+                      value={videoMethod}
+                      onChange={(val) => { const v = val as 'jimeng' | 'runninghub'; setVideoMethod(v); saveLastModel('video', v); }}
                     />
+                    <span style={{ width: 12 }} />
+                    {videoMethod === 'jimeng' ? (
+                      <>
+                        <span className={styles.batchLabel}>时长</span>
+                        <InputNumber
+                          min={4}
+                          max={15}
+                          value={videoDuration}
+                          onChange={(v) => setVideoDuration(v || 6)}
+                          size="small"
+                          style={{ width: 70 }}
+                          addonAfter="秒"
+                        />
+                        <span style={{ width: 8 }} />
+                        <span className={styles.batchLabel}>比例</span>
+                        <Select
+                          value={videoRatio}
+                          onChange={setVideoRatio}
+                          size="small"
+                          style={{ width: 90 }}
+                          options={[
+                            { label: '1:1', value: '1:1' },
+                            { label: '4:3', value: '4:3' },
+                            { label: '3:4', value: '3:4' },
+                            { label: '16:9', value: '16:9' },
+                            { label: '9:16', value: '9:16' },
+                            { label: '21:9', value: '21:9' },
+                          ]}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <span className={styles.batchLabel}>宽</span>
+                        <InputNumber value={rhWidth} onChange={(v) => setRhWidth(v || 576)} size="small" style={{ width: 65 }} />
+                        <span className={styles.batchLabel}>高</span>
+                        <InputNumber value={rhHeight} onChange={(v) => setRhHeight(v || 1024)} size="small" style={{ width: 65 }} />
+                        <span className={styles.batchLabel}>帧率</span>
+                        <InputNumber value={rhFps} onChange={(v) => { setRhFps(v || 24); setRhFramesManual(false); }} size="small" style={{ width: 55 }} />
+                        <span className={styles.batchLabel}>帧数</span>
+                        <InputNumber value={rhRunningFrames} onChange={(v) => { setRhRunningFrames(v || 0); setRhFramesManual(true); }} size="small" style={{ width: 65 }} />
+                        <span className={styles.batchLabel}>跳帧</span>
+                        <InputNumber value={rhSkipFrames} onChange={(v) => setRhSkipFrames(v || 0)} size="small" style={{ width: 55 }} min={0} />
+                      </>
+                    )}
                   </>
                 )}
               </div>
@@ -1315,7 +1448,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             )}
 
             {/* Video mode: Image & Video Selection */}
-            {mode === 'video' && (
+            {mode === 'video' && videoMethod === 'jimeng' && (
               <>
                 {/* 参考图片选择 */}
                 <div className={styles.section}>
@@ -1465,6 +1598,116 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                     </div>
                   </div>
                 )}
+              </>
+            )}
+
+            {/* Video mode: RunningHub - Image & Video Selection */}
+            {mode === 'video' && videoMethod === 'runninghub' && (
+              <>
+                {/* 选择图片（单选） */}
+                <div className={styles.section}>
+                  <div className={styles.sectionTitle}>
+                    选择图片（必选，1 张）
+                    <span className={styles.count}>
+                      {rhImageId ? '已选 1' : '未选'} / 共 {allImages.length} 张
+                    </span>
+                    <span className={styles.scaleControls}>
+                      <Button type="text" size="small" icon={<MinusOutlined />} onClick={handleDecreaseScale} disabled={cardScale <= SCALE_STEPS[0]} />
+                      <Button type="text" size="small" icon={<PlusOutlined />} onClick={handleIncreaseScale} disabled={cardScale >= SCALE_STEPS[SCALE_STEPS.length - 1]} />
+                    </span>
+                  </div>
+                  {allImages.length === 0 ? (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="暂无图片资源"
+                      className={styles.empty}
+                      style={{ padding: '8px 0' }}
+                    />
+                  ) : (
+                    <div className={styles.imageGrid} style={{ maxHeight: '30vh' }}>
+                      {allImages.map((img) => (
+                        <div
+                          key={img.id}
+                          className={`${styles.imageItem} ${rhImageId === img.id ? styles.selected : ''}`}
+                          onClick={() => setRhImageId(rhImageId === img.id ? null : img.id)}
+                        >
+                          <img
+                            src={getImageUrl(img)}
+                            alt={img.fileName}
+                            className={styles.thumbnail}
+                            style={{
+                              height: `calc(37.5vh * ${cardScale})`,
+                              maxWidth: `calc(52.5vw * ${cardScale})`,
+                            }}
+                          />
+                          {rhImageId === img.id && (
+                            <div className={styles.selectedBadge}>1</div>
+                          )}
+                          <div className={styles.imageName} title={img.fileName}>
+                            {img.fileName}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 选择视频（单选） */}
+                <div className={styles.section}>
+                  <div className={styles.sectionTitle}>
+                    选择视频（必选，1 个）
+                    <span className={styles.count}>
+                      {rhVideoId ? '已选 1' : '未选'} / 共 {allVideos.length} 个
+                    </span>
+                  </div>
+                  {allVideos.length === 0 ? (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="暂无视频资源"
+                      className={styles.empty}
+                      style={{ padding: '8px 0' }}
+                    />
+                  ) : (
+                    <div className={styles.imageGrid} style={{ maxHeight: '30vh' }}>
+                      {allVideos.map((vid) => {
+                        const vidMeta = vid.metadata && isVideoMetadata(vid.metadata) ? vid.metadata : null;
+                        return (
+                          <div
+                            key={vid.id}
+                            className={`${styles.imageItem} ${rhVideoId === vid.id ? styles.selected : ''}`}
+                            onClick={() => {
+                              setRhVideoId(rhVideoId === vid.id ? null : vid.id);
+                              setRhFramesManual(false);
+                            }}
+                          >
+                            <VideoThumbnail
+                              resource={vid}
+                              style={{
+                                height: `calc(37.5vh * ${cardScale})`,
+                                maxWidth: `calc(52.5vw * ${cardScale})`,
+                              }}
+                            />
+                            {rhVideoId === vid.id && (
+                              <div className={styles.selectedBadge}>1</div>
+                            )}
+                            <div className={styles.imageName} title={vid.fileName}>
+                              {vid.fileName}
+                            </div>
+                            {vidMeta && (
+                              <span style={{
+                                position: 'absolute', top: 4, left: 4,
+                                fontSize: 10, color: '#fff',
+                                background: 'rgba(0,0,0,0.5)', borderRadius: 3, padding: '1px 4px',
+                              }}>
+                                {vidMeta.duration.toFixed(1)}s
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </>
