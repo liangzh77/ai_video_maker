@@ -162,6 +162,51 @@ const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
               <span className={styles.label}>生成时间</span>
               <span className={styles.value}>{new Date(generationMeta.generatedAt).toLocaleString()}</span>
             </div>
+            {generationMeta.type === 'video' && generationMeta.params && (
+              generationMeta.params.method === 'runninghub' ? (
+                <>
+                  <div className={styles.item}>
+                    <span className={styles.label}>生成方式</span>
+                    <span className={styles.value}>RunningHub</span>
+                  </div>
+                  <div className={styles.item}>
+                    <span className={styles.label}>宽</span>
+                    <span className={styles.value}>{generationMeta.params.rhWidth}</span>
+                  </div>
+                  <div className={styles.item}>
+                    <span className={styles.label}>高</span>
+                    <span className={styles.value}>{generationMeta.params.rhHeight}</span>
+                  </div>
+                  <div className={styles.item}>
+                    <span className={styles.label}>帧率</span>
+                    <span className={styles.value}>{generationMeta.params.rhFps}</span>
+                  </div>
+                  <div className={styles.item}>
+                    <span className={styles.label}>帧数</span>
+                    <span className={styles.value}>{generationMeta.params.rhRunningFrames}</span>
+                  </div>
+                  <div className={styles.item}>
+                    <span className={styles.label}>跳帧</span>
+                    <span className={styles.value}>{generationMeta.params.rhSkipFrames}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className={styles.item}>
+                    <span className={styles.label}>生成方式</span>
+                    <span className={styles.value}>即梦</span>
+                  </div>
+                  <div className={styles.item}>
+                    <span className={styles.label}>时长</span>
+                    <span className={styles.value}>{generationMeta.params.duration}s</span>
+                  </div>
+                  <div className={styles.item}>
+                    <span className={styles.label}>比例</span>
+                    <span className={styles.value}>{generationMeta.params.ratio}</span>
+                  </div>
+                </>
+              )
+            )}
           </div>
           <div className={styles.promptBlock}>
             <span className={styles.label}>提示词</span>
