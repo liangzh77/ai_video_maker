@@ -152,27 +152,133 @@ async function executeTextTask(task: GenerationTask): Promise<{ text: string; re
   return { text, resourceId };
 }
 
+// ============================================
+// RunningHub API 提交排队机制
+// 同一时间只有一个任务在尝试 API 提交，提交成功后放行下一个
+// ============================================
+let rhApiSubmitting = false;
+const rhApiQueue: Array<{ resolve: () => void }> = [];
+
+function acquireRhApiSlot(): Promise<void> {
+  if (!rhApiSubmitting) {
+    rhApiSubmitting = true;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => rhApiQueue.push({ resolve }));
+}
+
+function releaseRhApiSlot() {
+  const next = rhApiQueue.shift();
+  if (next) {
+    next.resolve();
+  } else {
+    rhApiSubmitting = false;
+  }
+}
+
+// 等待 API 提交成功的回调注册表（taskId → resolve）
+const rhSubmittedCallbacks = new Map<string, () => void>();
+
+function waitForApiSubmitted(taskId: string): Promise<void> {
+  return new Promise((resolve) => {
+    rhSubmittedCallbacks.set(taskId, resolve);
+  });
+}
+
+function notifyApiSubmitted(taskId: string) {
+  const cb = rhSubmittedCallbacks.get(taskId);
+  if (cb) {
+    rhSubmittedCallbacks.delete(taskId);
+    cb();
+  }
+}
+
+const RH_RETRY_DELAY = 10_000; // 队列满重试间隔 10 秒
+
+function isQueueFullError(error: string): boolean {
+  return error.includes('队列已满') || error.includes('QUEUE') || error.includes('MAXED');
+}
+
 async function executeVideoTask(task: GenerationTask): Promise<string | undefined> {
   const params = task.params as VideoTaskParams;
 
   if (params.method === 'runninghub') {
-    const result = await window.api.task.generateVideoRunningHub({
-      draftId: task.draftId,
-      imageResourceId: params.imageResourceIds[0],
-      videoResourceId: params.videoResourceIds[0],
-      prompt: task.prompt,
-      width: params.rhWidth || 576,
-      height: params.rhHeight || 1024,
-      fps: params.rhFps || 24,
-      runningFrames: params.rhRunningFrames || 120,
-      skipFrames: params.rhSkipFrames || 0,
-      targetSectionId: params.targetSectionId,
-      taskId: task.id,
-    });
-    if (!result.success) {
-      throw new Error(result.error || 'RunningHub 视频生成失败');
+    // 等待轮到自己提交 API
+    await acquireRhApiSlot();
+    let slotReleased = false;
+    try {
+      // 循环重试直到 API 提交成功
+      while (true) {
+        // 检查任务是否被取消
+        const current = useGenerationStore.getState().tasks.find((t) => t.id === task.id);
+        if (current?.status === 'cancelled') {
+          releaseRhApiSlot();
+          slotReleased = true;
+          throw new Error('任务已取消');
+        }
+
+        // 注册 API 提交成功回调，收到 API_SUBMITTED 消息后释放槽位
+        const submittedPromise = waitForApiSubmitted(task.id);
+
+        const resultPromise = window.api.task.generateVideoRunningHub({
+          draftId: task.draftId,
+          imageResourceId: params.imageResourceIds[0],
+          videoResourceId: params.videoResourceIds[0],
+          prompt: task.prompt,
+          width: params.rhWidth || 576,
+          height: params.rhHeight || 1024,
+          fps: params.rhFps || 24,
+          runningFrames: params.rhRunningFrames || 120,
+          skipFrames: params.rhSkipFrames || 0,
+          targetSectionId: params.targetSectionId,
+          taskId: task.id,
+        });
+
+        // 等待 API 提交成功或整个任务完成（取先到达的）
+        // API 提交成功 → 释放槽位让下一个任务开始
+        submittedPromise.then(() => {
+          if (!slotReleased) {
+            releaseRhApiSlot();
+            slotReleased = true;
+          }
+        });
+
+        const result = await resultPromise;
+
+        // 清理未触发的回调
+        rhSubmittedCallbacks.delete(task.id);
+
+        if (result.success) {
+          if (!slotReleased) {
+            releaseRhApiSlot();
+            slotReleased = true;
+          }
+          return result.data?.resourceId;
+        }
+
+        // 队列满 → 等 10 秒重试
+        if (isQueueFullError(result.error || '')) {
+          useGenerationStore.setState((state) => ({
+            tasks: state.tasks.map((t) =>
+              t.id === task.id ? { ...t, progressMessage: '队列已满，10秒后重试...' } : t,
+            ),
+          }));
+          await new Promise((r) => setTimeout(r, RH_RETRY_DELAY));
+          continue;
+        }
+
+        // 其他错误直接失败
+        if (!slotReleased) {
+          releaseRhApiSlot();
+          slotReleased = true;
+        }
+        throw new Error(result.error || 'RunningHub 视频生成失败');
+      }
+    } catch (err) {
+      rhSubmittedCallbacks.delete(task.id);
+      if (!slotReleased) releaseRhApiSlot();
+      throw err;
     }
-    return result.data?.resourceId;
   }
 
   const result = await window.api.task.generateVideo({
@@ -201,6 +307,11 @@ function setupVideoProgressListener() {
     const { tasks } = useGenerationStore.getState();
     const task = tasks.find((t) => t.id === data.taskId);
     if (task && task.status === 'running') {
+      // 检测 API 提交成功标记，释放排队槽位
+      if (data.message.includes('API_SUBMITTED')) {
+        notifyApiSubmitted(data.taskId);
+        return; // 不显示这个内部标记
+      }
       useGenerationStore.setState((state) => ({
         tasks: state.tasks.map((t) =>
           t.id === data.taskId ? { ...t, progressMessage: data.message } : t,
@@ -318,12 +429,25 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
     const state = get();
     const maxThreads = state.threadCounts[type];
     const running = state.tasks.filter((t) => t.type === type && t.status === 'running').length;
-    const available = maxThreads - running;
-
-    if (available <= 0) return;
-
     const pending = state.tasks.filter((t) => t.type === type && t.status === 'pending');
-    const toStart = pending.slice(0, available);
+
+    // RunningHub 视频任务不受并发限制，全部立即启动
+    let rhToStart: typeof pending = [];
+    let regularToStart: typeof pending = [];
+    if (type === 'video') {
+      rhToStart = pending.filter((t) => (t.params as VideoTaskParams).method === 'runninghub');
+      const regularPending = pending.filter((t) => (t.params as VideoTaskParams).method !== 'runninghub');
+      const regularRunning = state.tasks.filter(
+        (t) => t.type === 'video' && t.status === 'running' && (t.params as VideoTaskParams).method !== 'runninghub',
+      ).length;
+      const regularAvailable = maxThreads - regularRunning;
+      regularToStart = regularAvailable > 0 ? regularPending.slice(0, regularAvailable) : [];
+    } else {
+      const available = maxThreads - running;
+      regularToStart = available > 0 ? pending.slice(0, available) : [];
+    }
+
+    const toStart = [...rhToStart, ...regularToStart];
 
     if (toStart.length === 0) return;
 

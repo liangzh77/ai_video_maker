@@ -67,7 +67,7 @@ UPLOAD_TIMEOUT = 120.0       # 上传超时 120 秒
 DOWNLOAD_TIMEOUT = 300.0     # 下载超时 5 分钟
 MAX_UPLOAD_RETRIES = 3       # 上传重试次数
 QUEUE_FULL_RETRY_DELAY = 10  # 队列满时重试间隔（秒）
-MAX_QUEUE_RETRIES = 6        # 队列满时最大重试次数
+MAX_QUEUE_RETRIES = 1        # 队列满时不重试，由前端控制重试
 
 
 # ============================================
@@ -487,6 +487,9 @@ async def run(args) -> dict:
         task_id = await client.create_task(args.workflow_id, node_info_list)
     else:
         raise RunningHubError("必须指定 --app-id 或 --workflow-id")
+
+    # 通知前端 API 提交成功（用于释放排队槽位）
+    print("[RunningHub] API_SUBMITTED")
 
     # 4. 轮询任务
     print(f"进度: 25%")
