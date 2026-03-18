@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { DRAFT_CHANNELS, LINKS_CHANNELS, PROMPT_HISTORY_CHANNELS } from '@shared/ipc-channels';
-import storage, { LinksFile, PromptHistoryFile } from '../services/storage';
+import storage, { LinksFile, PromptHistoryFile, getFirstMediaFilePath } from '../services/storage';
+import * as thumbnailCache from '../services/thumbnailCache';
 import { checkAndMigrate } from '../services/migration';
 import type { Draft, OperationResult, PaginatedResult } from '@shared/types';
 
@@ -244,6 +245,35 @@ export function registerDraftHandlers(): void {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to migrate draft',
         };
+      }
+    }
+  );
+
+  // Get draft thumbnail (first video frame or first image)
+  ipcMain.handle(
+    DRAFT_CHANNELS.GET_THUMBNAIL,
+    async (_, request: { draftId: string }): Promise<OperationResult<string>> => {
+      try {
+        const media = await getFirstMediaFilePath(request.draftId);
+        if (!media) {
+          return { success: true, data: '' };
+        }
+
+        const draftPath = storage.getDraftPath(request.draftId);
+        const thumbPath = await thumbnailCache.getOrGenerateThumbnail(
+          draftPath,
+          media.filePath,
+          media.mediaType,
+        );
+
+        if (!thumbPath) {
+          return { success: true, data: '' };
+        }
+
+        return { success: true, data: thumbPath };
+      } catch (error) {
+        console.error('[Draft] GET_THUMBNAIL error:', error);
+        return { success: true, data: '' };
       }
     }
   );

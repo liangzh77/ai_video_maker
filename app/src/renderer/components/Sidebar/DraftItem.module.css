@@ -53,6 +53,15 @@
   font-size: 14px;
 }
 
+.thumbnail {
+  width: 48px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+  margin-left: var(--spacing-sm);
+}
+
 .menuButton {
   display: flex;
   align-items: center;

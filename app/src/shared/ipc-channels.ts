@@ -12,6 +12,7 @@ export const DRAFT_CHANNELS = {
   DELETE: 'draft:delete',
   COPY: 'draft:copy',                   // 复制草稿
   CLEANUP_FILES: 'draft:cleanupFiles',  // 清理未被引用的文件
+  GET_THUMBNAIL: 'draft:getThumbnail',  // 获取草稿缩略图
 } as const;
 
 // ============================================

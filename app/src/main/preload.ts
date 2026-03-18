@@ -10,6 +10,7 @@ export interface ElectronAPI {
     delete: (params: { id: string }) => Promise<any>;
     copy: (params: { id: string; count: number }) => Promise<any>;
     cleanupFiles: (params: { draftId: string }) => Promise<any>;
+    getThumbnail: (params: { draftId: string }) => Promise<any>;
   };
   resource: {
     list: (params: { draftId: string; type?: string }) => Promise<any>;
@@ -96,6 +97,7 @@ const api: ElectronAPI = {
     delete: (params) => ipcRenderer.invoke('draft:delete', params),
     copy: (params) => ipcRenderer.invoke('draft:copy', params),
     cleanupFiles: (params) => ipcRenderer.invoke('draft:cleanupFiles', params),
+    getThumbnail: (params) => ipcRenderer.invoke('draft:getThumbnail', params),
   },
   resource: {
     list: (params) => ipcRenderer.invoke('resource:list', params),

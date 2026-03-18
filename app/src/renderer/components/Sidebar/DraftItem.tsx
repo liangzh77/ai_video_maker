@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Input, InputNumber, Dropdown, Modal, message } from 'antd';
 import type { MenuProps } from 'antd';
 import { MoreOutlined, EditOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
 import type { Draft } from '@shared/types';
 import { useDraftStore } from '../../stores/draft';
+import { useSectionsStore } from '../../stores/sections';
 import styles from './DraftItem.module.css';
 
 interface DraftItemProps {
@@ -13,11 +14,30 @@ interface DraftItemProps {
 
 const DraftItem: React.FC<DraftItemProps> = ({ draft, isSelected }) => {
   const { selectDraft, updateDraft, deleteDraft, copyDraft, resources } = useDraftStore();
+  const { sections } = useSectionsStore();
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(draft.name);
   const [copyDialogVisible, setCopyDialogVisible] = useState(false);
   const [copyCount, setCopyCount] = useState(1);
   const [isCopying, setIsCopying] = useState(false);
+  const [thumbnailPath, setThumbnailPath] = useState<string | null>(null);
+
+  // 选中草稿的资源/卡片栏变化时，重新计算缩略图刷新 key
+  const thumbRefreshKey = isSelected
+    ? `${sections.map((s) => s.id).join(',')}_${resources.map((r) => r.id).join(',')}`
+    : '';
+
+  // 加载草稿缩略图
+  useEffect(() => {
+    let cancelled = false;
+    setThumbnailPath(null);
+    window.api.draft.getThumbnail({ draftId: draft.id }).then((result) => {
+      if (!cancelled && result.success && result.data) {
+        setThumbnailPath(result.data);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [draft.id, draft.updatedAt, thumbRefreshKey]);
 
   const handleClick = () => {
     if (!isEditing) {
@@ -152,6 +172,14 @@ const DraftItem: React.FC<DraftItemProps> = ({ draft, isSelected }) => {
             )}
           </div>
         </div>
+
+        {thumbnailPath && (
+          <img
+            className={styles.thumbnail}
+            src={`local-file:///${thumbnailPath.replace(/\\/g, '/')}`}
+            alt=""
+          />
+        )}
 
         <Dropdown menu={{ items: menuItems }} trigger={['click']}>
           <button

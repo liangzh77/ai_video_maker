@@ -1470,6 +1470,47 @@ export async function removePromptHistory(draftId: string, prompt: string): Prom
 }
 
 // ============================================
+// Draft Thumbnail (轻量级：只找第一个媒体文件路径)
+// ============================================
+
+const VIDEO_EXTS = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm']);
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']);
+
+/**
+ * 获取草稿中第一个视频或图片文件的路径和媒体类型
+ * 按 section 顺序 → 文件名排序，找到即停止
+ */
+export async function getFirstMediaFilePath(draftId: string): Promise<{ filePath: string; mediaType: 'video' | 'image' } | null> {
+  const filesDir = getFilesPath(draftId);
+  try {
+    await fs.access(filesDir);
+  } catch {
+    return null;
+  }
+
+  const sections = await scanSections(draftId);
+  for (const section of sections) {
+    const folderPath = path.join(filesDir, section.id);
+    try {
+      const entries = await fs.readdir(folderPath);
+      const sorted = entries.filter(n => !n.startsWith('.') && !n.startsWith('_temp_') && !n.endsWith('.json')).sort();
+      for (const name of sorted) {
+        const ext = path.extname(name).toLowerCase();
+        if (VIDEO_EXTS.has(ext)) {
+          return { filePath: path.join(folderPath, name), mediaType: 'video' };
+        }
+        if (IMAGE_EXTS.has(ext)) {
+          return { filePath: path.join(folderPath, name), mediaType: 'image' };
+        }
+      }
+    } catch {
+      // 文件夹不存在，跳过
+    }
+  }
+  return null;
+}
+
+// ============================================
 // Exports
 // ============================================
 
