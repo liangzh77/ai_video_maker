@@ -1,0 +1,337 @@
+[
+  {
+    "type": "style_config",
+    "style_prefix": "真实人物摄影风格，自然光线，手机实拍质感，浅景深，电影色彩分级",
+    "platform": "即梦 Seedance",
+    "reference_mode": "全能参考",
+    "video_orientation": "9:16",
+    "total_segments": 5,
+    "total_estimated_duration_seconds": 60,
+    "total_generation_duration_seconds": 55,
+    "voiceover_characters": [
+      {
+        "name": "朋友",
+        "role": "正在接孩子的另一位家长",
+        "voice_type": "成年女声",
+        "emotion_default": "惊讶、质疑"
+      }
+    ],
+    "rhythm_plan": ["hook", "pain_point", "core_selling", "trust", "cta"]
+  },
+  {
+    "type": "character_image",
+    "id": "C01-A",
+    "character_id": "C01",
+    "name": "高知家长",
+    "role": "30岁左右高知女性，优雅自信",
+    "visual_traits": "30岁左右，亮色高知休闲装（柠檬黄针织衫），气质知性，淡妆，齐肩发",
+    "view": "正面半身",
+    "prompt": "真实人物摄影风格，自然光线，手机实拍质感。一位30岁左右的高知中国女性，面容清秀知性，穿着柠檬黄色轻便针织衫，亮色系休闲穿搭。背景是略显模糊的小学校门口，氛围温馨真实。她面带自然微笑，眼神聪慧，半身照，平视角度。"
+  },
+  {
+    "type": "character_image",
+    "id": "C01-B",
+    "character_id": "C01",
+    "name": "高知家长",
+    "role": "30岁左右高知女性，侧面视角",
+    "visual_traits": "柠檬黄针织衫，知性气质，侧面轮廓清晰",
+    "view": "侧面半身",
+    "prompt": "真实人物摄影风格，自然光线。30岁高知女性侧面视角，穿着柠檬黄色针织衫，正在与人交谈的神态。背景是放学时分热闹的小学门口，光线柔和，侧面轮廓优雅，手势自然。"
+  },
+  {
+    "type": "scene_image",
+    "id": "S01",
+    "name": "小学门口",
+    "description": "重点小学放学场景",
+    "prompt": "真实人物摄影风格，自然光线。繁华的小学门口，背景是现代化的宏伟教学楼，没有国旗。街道上有许多家长在等待接孩子，穿着休闲服的小学生三五成群走动，不佩戴红领巾。整体色调明亮，充满生活气息。无人物特写，全景构图。"
+  },
+  {
+    "type": "segment",
+    "segment_number": 1,
+    "ratio": "9:16",
+    "rhythm_position": "hook",
+    "estimated_duration_seconds": 9,
+    "generation_duration_seconds": 8,
+    "duration_calc": "49字÷6+0.5≈9秒，生成时长=9-1=8秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-B", "purpose": "角色侧面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "哎，你报那个英语班多少钱？" },
+      { "character": "朋友", "type": "off_screen", "line": "5000多。" },
+      { "character": "高知家长", "type": "on_screen", "line": "学一年啊？" },
+      { "character": "朋友", "type": "off_screen", "line": "一个月。" },
+      { "character": "高知家长", "type": "on_screen", "line": "我给你看，我报那个满分英语，199你猜能学几年，6年！" },
+      { "character": "朋友", "type": "off_screen", "line": "靠谱吗？" }
+    ],
+    "director_notes": "开场对话，侧机位拍摄。角色与画外音互动，表情要有明显的惊讶和反差感。",
+    "prompt": "@图片1 @图片2 侧机位近景。角色侧身对着镜头外的画外音角色，露出惊讶表情，歪头询问，随后抿嘴笑并低头指了指手中的手机。高知家长说：'哎，你报那个英语班多少钱？' 画外女声说：'五千多。' 角色睁大眼睛：'学一年啊？' 画外音：'一个月。' 角色得意地伸出六个手指：'我给你看，我报那个满分英语，一百九十九你猜能学几年，六年！' 画外音：'靠谱吗？'。真实vlog风格，手持轻微晃动。无字幕，无文字叠加。",
+    "prompt_char_count": 145,
+    "continuity_from_prev": null,
+    "continuity_to_next": "保持侧身姿势，开始进入安利状态"
+  },
+  {
+    "type": "segment",
+    "segment_number": 2,
+    "ratio": "9:16",
+    "rhythm_position": "pain_point",
+    "estimated_duration_seconds": 13,
+    "generation_duration_seconds": 12,
+    "duration_calc": "73字÷6+0.5≈13秒，生成时长=13-1=12秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-A", "purpose": "角色正面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "肯定不比你的差，人家现在这不开学季活动嘛，所以才只要199，还有那个399词典笔，14天免费试听，还有学霸都在用的那个单速快拼王功能，这些都是送的。" }
+    ],
+    "director_notes": "介绍活动内容，转为正面半身。动作要自信，语速较快。",
+    "prompt": "@图片1 @图片2 中景，平视角度。角色面向镜头略微侧身，自信地摊开手掌比划，眼神真诚。高知家长说：'肯定不比你的差，人家现在这不开学季活动嘛，所以才只要一百九十九，还有那个三百九十九词典笔，十四天免费试听，还有学霸都在用的那个单速快拼王功能，这些都是送的。' 真实vlog风格，背景是小学教学楼和走动的接送家长，阳光自然。无字幕，无文字叠加。",
+    "prompt_char_count": 138,
+    "continuity_from_prev": "从侧身转为接近正面的姿态",
+    "continuity_to_next": "继续列举课程细节，保持兴奋感"
+  },
+  {
+    "type": "segment",
+    "segment_number": 3,
+    "ratio": "9:16",
+    "rhythm_position": "core_selling",
+    "estimated_duration_seconds": 10,
+    "generation_duration_seconds": 9,
+    "duration_calc": "52字÷6+0.5≈10秒，生成时长=10-1=9秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-A", "purpose": "角色正面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "320节一线名师真人互动，全部对标校内，课上学完，课后班主任直接盯着练，也不用咱们家长操心了。" }
+    ],
+    "director_notes": "强调师资和服务。用肯定的点头动作增强信任感。",
+    "prompt": "@图片1 @图片2 中景。角色双手交握在胸前，频率轻快地缓缓点头，嘴角上扬，神态轻松。高知家长说：'三百二十节一线名师真人互动，全部对标校内，课上学完，课后班主任直接盯着练，也不用咱们家长操心了。' 真实vlog风格，背景是学校门口的人群，光线温暖。无字幕，无文字叠加。",
+    "prompt_char_count": 115,
+    "continuity_from_prev": "保持正面，情绪从兴奋转为分享经验的稳重",
+    "continuity_to_next": "准备列举具体课程模块"
+  },
+  {
+    "type": "segment",
+    "segment_number": 4,
+    "ratio": "9:16",
+    "rhythm_position": "trust",
+    "estimated_duration_seconds": 15,
+    "generation_duration_seconds": 14,
+    "duration_calc": "85字÷6+0.5≈15秒，生成时长=15-1=14秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-A", "purpose": "角色正面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "而且我告诉你，它不仅教自然拼读、教音标、教听力，还教单词速记，教语法时态，就是把小学英语直接给你做到了四合一，学完了还有像什么连线题、拖拽题、AI互动，当场就纠音打分。" }
+    ],
+    "director_notes": "详细列举课程功能。配合手势，分层次表达。",
+    "prompt": "@图片1 @图片2 中景。角色竖起食指强调，随后手掌平摊做展示状，眼神专注。高知家长说：'而且我告诉你，它不仅教自然拼读、教音标、教听力，还教单词速记，教语法时态，就是把小学英语直接给你做到了四合一，学完了还有像什么连线题、拖拽题、AI互动，当场就纠音打分。' 真实vlog风格，侧后方有背着书包的学生走过。无字幕，无文字叠加。",
+    "prompt_char_count": 135,
+    "continuity_from_prev": "保持专业讲解者的姿态",
+    "continuity_to_next": "进入结尾反问和催促"
+  },
+  {
+    "type": "segment",
+    "segment_number": 5,
+    "ratio": "9:16",
+    "rhythm_position": "cta",
+    "estimated_duration_seconds": 13,
+    "generation_duration_seconds": 12,
+    "duration_calc": "72字÷6+0.5≈13秒，生成时长=13-1=12秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-B", "purpose": "角色侧面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "小学6年从基础到拔高，一套就直接给你搞定了，你告诉我哪个线下班能做到，你那个行么？反正这个活动马上截止了，你没抢到，到时候别后悔啊。" }
+    ],
+    "director_notes": "收尾。回到侧机位，增加与画外音的亲密感，带点开玩笑的责备语气。",
+    "prompt": "@图片1 @图片2 侧机位近景。角色身体略微向画外音方向倾斜，挑了挑眉，露出调皮又诚恳的笑容，拍了拍空气（示意朋友肩膀）。高知家长说：'小学六年从基础到拔高，一套就直接给你搞定了，你告诉我哪个线下班能做到，你那个行么？反正这个活动马上截止了，你没抢到，到时候别后悔啊。' 真实vlog风格，放学的人群逐渐散去，背景柔和。无字幕，无文字叠加。",
+    "prompt_char_count": 140,
+    "continuity_from_prev": "从正面转回侧面，回归对话感",
+    "continuity_to_next": null
+  }
+]
+```---SPLIT---```json
+[
+  {
+    "type": "style_config",
+    "style_prefix": "真实人物摄影风格，自然光线，手机实拍质感，浅景深，电影色彩分级",
+    "platform": "即梦 Seedance",
+    "reference_mode": "全能参考",
+    "video_orientation": "9:16",
+    "total_segments": 5,
+    "total_estimated_duration_seconds": 60,
+    "total_generation_duration_seconds": 55,
+    "voiceover_characters": [
+      {
+        "name": "朋友",
+        "role": "正在接孩子的另一位家长",
+        "voice_type": "成年女声",
+        "emotion_default": "惊讶、质疑"
+      }
+    ],
+    "rhythm_plan": ["hook", "pain_point", "core_selling", "trust", "cta"]
+  },
+  {
+    "type": "character_image",
+    "id": "C01-A",
+    "character_id": "C01",
+    "name": "高知家长",
+    "role": "30岁左右高知女性，优雅自信",
+    "visual_traits": "30岁左右，亮色高知休闲装（柠檬黄针织衫），气质知性，淡妆，齐肩发",
+    "view": "正面半身",
+    "prompt": "真实人物摄影风格，自然光线，手机实拍质感。一位30岁左右的高知中国女性，面容清秀知性，穿着柠檬黄色轻便针织衫，亮色系休闲穿搭。背景是略显模糊的小学校门口，氛围温馨真实。她面带自然微笑，眼神聪慧，半身照，平视角度。"
+  },
+  {
+    "type": "character_image",
+    "id": "C01-B",
+    "character_id": "C01",
+    "name": "高知家长",
+    "role": "30岁左右高知女性，侧面视角",
+    "visual_traits": "柠檬黄针织衫，知性气质，侧面轮廓清晰",
+    "view": "侧面半身",
+    "prompt": "真实人物摄影风格，自然光线。30岁高知女性侧面视角，穿着柠檬黄色针织衫，正在与人交谈的神态。背景是放学时分热闹的小学门口，光线柔和，侧面轮廓优雅，手势自然。"
+  },
+  {
+    "type": "scene_image",
+    "id": "S01",
+    "name": "小学门口",
+    "description": "重点小学放学场景",
+    "prompt": "真实人物摄影风格，自然光线。繁华的小学门口，背景是现代化的宏伟教学楼，没有国旗。街道上有许多家长在等待接孩子，穿着休闲服的小学生三五成群走动，不佩戴红领巾。整体色调明亮，充满生活气息。无人物特写，全景构图。"
+  },
+  {
+    "type": "segment",
+    "segment_number": 1,
+    "ratio": "9:16",
+    "rhythm_position": "hook",
+    "estimated_duration_seconds": 9,
+    "generation_duration_seconds": 8,
+    "duration_calc": "49字÷6+0.5≈9秒，生成时长=9-1=8秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-B", "purpose": "角色侧面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "哎，你报那个英语班多少钱？" },
+      { "character": "朋友", "type": "off_screen", "line": "5000多。" },
+      { "character": "高知家长", "type": "on_screen", "line": "学一年啊？" },
+      { "character": "朋友", "type": "off_screen", "line": "一个月。" },
+      { "character": "高知家长", "type": "on_screen", "line": "我给你看，我报那个满分英语，199你猜能学几年，6年！" },
+      { "character": "朋友", "type": "off_screen", "line": "靠谱吗？" }
+    ],
+    "director_notes": "开场对话，侧机位拍摄。角色与画外音互动，表情要有明显的惊讶和反差感。",
+    "prompt": "@图片1 @图片2 侧机位近景。角色侧身对着镜头外的画外音角色，露出惊讶表情，歪头询问，随后抿嘴笑并低头指了指手中的手机。高知家长说：'哎，你报那个英语班多少钱？' 画外女声说：'五千多。' 角色睁大眼睛：'学一年啊？' 画外音：'一个月。' 角色得意地伸出手指比划数字：'我给你看，我报那个满分英语，一百九十九你猜能学几年，六年！' 画外音：'靠谱吗？'。真实vlog风格，手持轻微晃动。无字幕，无文字叠加。",
+    "prompt_char_count": 145,
+    "continuity_from_prev": null,
+    "continuity_to_next": "保持侧身姿势，开始进入安利状态"
+  },
+  {
+    "type": "segment",
+    "segment_number": 2,
+    "ratio": "9:16",
+    "rhythm_position": "pain_point",
+    "estimated_duration_seconds": 13,
+    "generation_duration_seconds": 12,
+    "duration_calc": "73字÷6+0.5≈13秒，生成时长=13-1=12秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-A", "purpose": "角色正面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "肯定不比你的差，人家现在这不开学季活动嘛，所以才只要199，还有那个399词典笔，14天免费试听，还有学霸都在用的那个单速快拼王功能，这些都是送的。" }
+    ],
+    "director_notes": "介绍活动内容，转为正面半身。动作要自信，语速较快。",
+    "prompt": "@图片1 @图片2 中景，平视角度。角色面向镜头略微侧身，自信地摊开手掌比划，眼神真诚。高知家长说：'肯定不比你的差，人家现在这不开学季活动嘛，所以才只要一百九十九，还有那个三百九十九词典笔，十四天免费试听，还有学霸都在用的那个单速快拼王功能，这些都是送的。' 真实vlog风格，背景是小学教学楼和走动的接送家长，阳光自然。无字幕，无文字叠加。",
+    "prompt_char_count": 138,
+    "continuity_from_prev": "从侧身转为接近正面的姿态",
+    "continuity_to_next": "继续列举课程细节，保持兴奋感"
+  },
+  {
+    "type": "segment",
+    "segment_number": 3,
+    "ratio": "9:16",
+    "rhythm_position": "core_selling",
+    "estimated_duration_seconds": 10,
+    "generation_duration_seconds": 9,
+    "duration_calc": "52字÷6+0.5≈10秒，生成时长=10-1=9秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-A", "purpose": "角色正面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "320节一线名师真人互动，全部对标校内，课上学完，课后班主任直接盯着练，也不用咱们家长操心了。" }
+    ],
+    "director_notes": "强调师资和服务。用肯定的点头动作增强信任感。",
+    "prompt": "@图片1 @图片2 中景。角色双手交握在胸前，频率轻快地缓缓点头，嘴角上扬，神态轻松。高知家长说：'三百二十节一线名师真人互动，全部对标校内，课上学完，课后班主任直接盯着练，也不用咱们家长操心了。' 真实vlog风格，背景是学校门口的人群，光线温暖。无字幕，无文字叠加。",
+    "prompt_char_count": 115,
+    "continuity_from_prev": "保持正面，情绪从兴奋转为分享经验的稳重",
+    "continuity_to_next": "准备列举具体课程模块"
+  },
+  {
+    "type": "segment",
+    "segment_number": 4,
+    "ratio": "9:16",
+    "rhythm_position": "trust",
+    "estimated_duration_seconds": 15,
+    "generation_duration_seconds": 14,
+    "duration_calc": "85字÷6+0.5≈15秒，生成时长=15-1=14秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-A", "purpose": "角色正面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "而且我告诉你，它不仅教自然拼读、教音标、教听力，还教单词速记，教语法时态，就是把小学英语直接给你做到了四合一，学完了还有像什么连线题、拖拽题、AI互动，当场就纠音打分。" }
+    ],
+    "director_notes": "详细列举课程功能。配合手势，分层次表达。",
+    "prompt": "@图片1 @图片2 中景。角色竖起食指强调，随后手掌平摊做展示状，眼神专注。高知家长说：'而且我告诉你，它不仅教自然拼读、教音标、教听力，还教单词速记，教语法时态，就是把小学英语直接给你做到了四合一，学完了还有像什么连线题、拖拽题、AI互动，当场就纠音打分。' 真实vlog风格，侧后方有背着书包的学生走过。无字幕，无文字叠加。",
+    "prompt_char_count": 135,
+    "continuity_from_prev": "保持专业讲解者的姿态",
+    "continuity_to_next": "进入结尾反问和催促"
+  },
+  {
+    "type": "segment",
+    "segment_number": 5,
+    "ratio": "9:16",
+    "rhythm_position": "cta",
+    "estimated_duration_seconds": 13,
+    "generation_duration_seconds": 12,
+    "duration_calc": "72字÷6+0.5≈13秒，生成时长=13-1=12秒",
+    "scene_id": "S01",
+    "scene_change": null,
+    "upload_map": [
+      {"slot": "图片1", "asset_id": "C01-B", "purpose": "角色侧面参考"},
+      {"slot": "图片2", "asset_id": "S01", "purpose": "场景参考"}
+    ],
+    "dialogue": [
+      { "character": "高知家长", "type": "on_screen", "line": "小学6年从基础到拔高，一套就直接给你搞定了，你告诉我哪个线下班能做到，你那个行么？反正这个活动马上截止了，你没抢到，到时候别后悔啊。" }
+    ],
+    "director_notes": "收尾。回到侧机位，增加与画外音的亲密感，带点开玩笑的责备语气。",
+    "prompt": "@图片1 @图片2 侧机位近景。角色身体略微向画外音方向倾斜，挑了挑眉，露出调皮又诚恳的笑容，手指在空气中虚晃。高知家长说：'小学六年从基础到拔高，一套就直接给你搞定了，你告诉我哪个线下班能做到，你那个行么？反正这个活动马上截止了，你没抢到，到时候别后悔啊。' 真实vlog风格，放学的人群逐渐散去，背景柔和。无字幕，无文字叠加。",
+    "prompt_char_count": 140,
+    "continuity_from_prev": "从正面转回侧面，回归对话感",
+    "continuity_to_next": null
+  }
+]
