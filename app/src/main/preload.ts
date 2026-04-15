@@ -49,6 +49,7 @@ export interface ElectronAPI {
     exportAudio: (params: { videoPath: string; defaultFileName: string }) => Promise<any>;
     generateVideo: (params: { draftId: string; imageResourceIds: string[]; videoResourceIds: string[]; prompt: string; duration?: number; ratio?: string; targetSectionId?: string; taskId?: string }) => Promise<any>;
     generateVideoRunningHub: (params: { draftId: string; imageResourceId: string; videoResourceId: string; prompt: string; width: number; height: number; fps: number; runningFrames: number; skipFrames: number; targetSectionId?: string; taskId?: string }) => Promise<any>;
+    generateVideoInfinitetalk: (params: { draftId: string; imageResourceId: string; audioResourceId: string; prompt?: string; maxSize?: number; targetSectionId?: string; taskId?: string }) => Promise<any>;
     synthesizeVideo: (params: { draftId: string; videoResourceIds: string[]; config?: any; targetSectionId?: string; newSectionLabel?: string }) => Promise<any>;
     extractAudio: (params: { draftId: string; videoResourceId: string; targetSectionId: string }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
@@ -136,6 +137,7 @@ const api: ElectronAPI = {
     exportAudio: (params) => ipcRenderer.invoke('task:exportAudio', params),
     generateVideo: (params) => ipcRenderer.invoke('task:generateVideo', params),
     generateVideoRunningHub: (params) => ipcRenderer.invoke('task:generateVideoRunningHub', params),
+    generateVideoInfinitetalk: (params) => ipcRenderer.invoke('task:generateVideoInfinitetalk', params),
     synthesizeVideo: (params) => ipcRenderer.invoke('task:synthesizeVideo', params),
     extractAudio: (params) => ipcRenderer.invoke('task:extractAudio', params),
     cancel: (params) => ipcRenderer.invoke('task:cancel', params),

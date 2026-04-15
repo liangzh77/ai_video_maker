@@ -14,7 +14,7 @@ import { TASK_CHANNELS, TASK_EVENTS } from '@shared/ipc-channels';
 import { taskQueue, TaskHandler } from '../services/task-queue';
 import imageApi from '../services/image-api';
 import videoApi from '../services/video-api';
-import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, runSpeechRecognizer, runRunningHubVideo, getFFmpegPath } from '../services/python-bridge';
+import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesizer, runImageGenerator, runTextGenerator, runSpeechRecognizer, runRunningHubVideo, runInfinitetalkVideo, getFFmpegPath } from '../services/python-bridge';
 import storage, { findOrCreateSection } from '../services/storage';
 import appConfigService from '../services/config';
 import { authService } from '../services/auth';
@@ -1537,6 +1537,89 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'RUNNINGHUB_VIDEO_GENERATION_ERROR',
+        };
+      }
+    }
+  );
+
+  // Generate video via Infinitetalk (portrait animator)
+  ipcMain.handle(
+    TASK_CHANNELS.GENERATE_VIDEO_INFINITETALK,
+    async (_, request: {
+      draftId: string;
+      imageResourceId: string;
+      audioResourceId: string;
+      prompt?: string;
+      maxSize?: number;
+      targetSectionId?: string;
+      taskId?: string;
+    }): Promise<OperationResult<{ resourceId: string }>> => {
+      console.log('[TaskIPC] Received Infinitetalk video generation request');
+      try {
+        const draft = await storage.draft.get(request.draftId);
+        if (!draft) {
+          return { success: false, error: 'DRAFT_NOT_FOUND' };
+        }
+
+        const imageRes = await storage.resource.get(request.draftId, request.imageResourceId);
+        if (!imageRes) {
+          return { success: false, error: `图片资源未找到: ${request.imageResourceId}` };
+        }
+
+        const audioRes = await storage.resource.get(request.draftId, request.audioResourceId);
+        if (!audioRes) {
+          return { success: false, error: `音频资源未找到: ${request.audioResourceId}` };
+        }
+
+        const targetSectionDesc = request.targetSectionId
+          ? { id: request.targetSectionId }
+          : await findOrCreateSection(request.draftId, '视频', '生成视频');
+        const targetSection = targetSectionDesc.id;
+
+        const lockKey = `${request.draftId}:${targetSection}`;
+        const filePath = await withSequenceLock(
+          lockKey,
+          async () => {
+            const nextFromFs = await storage.getNextSequenceNumber(request.draftId, targetSection);
+            const nextFromMemory = (allocatedSequenceNumbers.get(lockKey) || 0) + 1;
+            const sequenceNumber = Math.max(nextFromFs, nextFromMemory);
+            allocatedSequenceNumbers.set(lockKey, sequenceNumber);
+            const fp = storage.getResourceFilePath(request.draftId, targetSection, '.mp4', sequenceNumber);
+            await fs.mkdir(path.dirname(fp), { recursive: true });
+            return fp;
+          },
+        );
+
+        const onProgress = request.taskId
+          ? (message: string) => {
+              mainWindowRef?.webContents.send(TASK_EVENTS.VIDEO_PROGRESS, {
+                taskId: request.taskId,
+                message,
+              });
+            }
+          : undefined;
+
+        await runInfinitetalkVideo(
+          {
+            imageFile: imageRes.filePath,
+            audioFile: audioRes.filePath,
+            prompt: request.prompt,
+            maxSize: request.maxSize,
+            outputPath: filePath,
+          },
+          onProgress ? (progress) => onProgress(`进度: ${progress}%`) : undefined,
+          onProgress,
+        );
+
+        const resourceId = buildResourceId(request.draftId, filePath);
+        console.log('[TaskIPC] Infinitetalk video generated:', resourceId);
+
+        return { success: true, data: { resourceId } };
+      } catch (error) {
+        console.error('[TaskIPC] Infinitetalk video generation failed:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'INFINITETALK_VIDEO_GENERATION_ERROR',
         };
       }
     }

@@ -33,13 +33,17 @@ export interface VideoTaskParams {
   duration: number;
   ratio: string;
   targetSectionId?: string;
-  method?: 'jimeng' | 'runninghub';
+  method?: 'jimeng' | 'runninghub' | 'infinitetalk';
   // RunningHub 专属参数
   rhWidth?: number;
   rhHeight?: number;
   rhFps?: number;
   rhRunningFrames?: number;
   rhSkipFrames?: number;
+  // Infinitetalk 专属参数
+  itImageResourceId?: string;
+  itAudioResourceId?: string;
+  itMaxSize?: number;
 }
 
 export interface GenerationTask {
@@ -281,6 +285,71 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
     }
   }
 
+  if (params.method === 'infinitetalk') {
+    await acquireRhApiSlot();
+    let slotReleased = false;
+    try {
+      while (true) {
+        const current = useGenerationStore.getState().tasks.find((t) => t.id === task.id);
+        if (current?.status === 'cancelled') {
+          releaseRhApiSlot();
+          slotReleased = true;
+          throw new Error('任务已取消');
+        }
+
+        const submittedPromise = waitForApiSubmitted(task.id);
+
+        const resultPromise = window.api.task.generateVideoInfinitetalk({
+          draftId: task.draftId,
+          imageResourceId: params.itImageResourceId || params.imageResourceIds[0],
+          audioResourceId: params.itAudioResourceId || params.audioResourceIds[0],
+          prompt: task.prompt || undefined,
+          maxSize: params.itMaxSize,
+          targetSectionId: params.targetSectionId,
+          taskId: task.id,
+        });
+
+        submittedPromise.then(() => {
+          if (!slotReleased) {
+            releaseRhApiSlot();
+            slotReleased = true;
+          }
+        });
+
+        const result = await resultPromise;
+        rhSubmittedCallbacks.delete(task.id);
+
+        if (result.success) {
+          if (!slotReleased) {
+            releaseRhApiSlot();
+            slotReleased = true;
+          }
+          return result.data?.resourceId;
+        }
+
+        if (isQueueFullError(result.error || '')) {
+          useGenerationStore.setState((state) => ({
+            tasks: state.tasks.map((t) =>
+              t.id === task.id ? { ...t, progressMessage: '队列已满，10秒后重试...' } : t,
+            ),
+          }));
+          await new Promise((r) => setTimeout(r, RH_RETRY_DELAY));
+          continue;
+        }
+
+        if (!slotReleased) {
+          releaseRhApiSlot();
+          slotReleased = true;
+        }
+        throw new Error(result.error || 'Infinitetalk 视频生成失败');
+      }
+    } catch (err) {
+      rhSubmittedCallbacks.delete(task.id);
+      if (!slotReleased) releaseRhApiSlot();
+      throw err;
+    }
+  }
+
   const result = await window.api.task.generateVideo({
     draftId: task.draftId,
     imageResourceIds: params.imageResourceIds,
@@ -435,10 +504,19 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
     let rhToStart: typeof pending = [];
     let regularToStart: typeof pending = [];
     if (type === 'video') {
-      rhToStart = pending.filter((t) => (t.params as VideoTaskParams).method === 'runninghub');
-      const regularPending = pending.filter((t) => (t.params as VideoTaskParams).method !== 'runninghub');
+      rhToStart = pending.filter((t) => {
+        const m = (t.params as VideoTaskParams).method;
+        return m === 'runninghub' || m === 'infinitetalk';
+      });
+      const regularPending = pending.filter((t) => {
+        const m = (t.params as VideoTaskParams).method;
+        return m !== 'runninghub' && m !== 'infinitetalk';
+      });
       const regularRunning = state.tasks.filter(
-        (t) => t.type === 'video' && t.status === 'running' && (t.params as VideoTaskParams).method !== 'runninghub',
+        (t) => {
+          const m = (t.params as VideoTaskParams).method;
+          return t.type === 'video' && t.status === 'running' && m !== 'runninghub' && m !== 'infinitetalk';
+        },
       ).length;
       const regularAvailable = maxThreads - regularRunning;
       regularToStart = regularAvailable > 0 ? regularPending.slice(0, regularAvailable) : [];

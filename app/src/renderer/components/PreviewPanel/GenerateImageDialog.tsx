@@ -163,9 +163,11 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const [videoModeAudioIds, setVideoModeAudioIds] = useState<string[]>([]);
 
   // 视频生成方式
-  const [videoMethod, setVideoMethod] = useState<'jimeng' | 'runninghub'>(() => {
+  const [videoMethod, setVideoMethod] = useState<'jimeng' | 'runninghub' | 'infinitetalk'>(() => {
     const saved = getLastModel('video');
-    return saved === 'runninghub' ? 'runninghub' : 'jimeng';
+    if (saved === 'runninghub') return 'runninghub';
+    if (saved === 'infinitetalk') return 'infinitetalk';
+    return 'jimeng';
   });
 
   // RunningHub 专属状态
@@ -177,6 +179,11 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   const [rhImageId, setRhImageId] = useState<string | null>(null);
   const [rhVideoId, setRhVideoId] = useState<string | null>(null);
   const [rhFramesManual, setRhFramesManual] = useState(false);
+
+  // Infinitetalk 专属状态
+  const [itImageId, setItImageId] = useState<string | null>(null);
+  const [itAudioId, setItAudioId] = useState<string | null>(null);
+  const [itMaxSize, setItMaxSize] = useState(1280);
 
   // 提示词历史
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
@@ -568,7 +575,10 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
           } catch { /* not JSON, ignore */ }
         }
       }
-      setEditedPrompt(resolvedPrompt);
+      const finalPrompt = (!resolvedPrompt.trim() && videoMethod === 'infinitetalk')
+        ? '人物在说话'
+        : resolvedPrompt;
+      setEditedPrompt(finalPrompt);
 
       // 图片模式：从缓存恢复，或默认第一个
       const imageSections = sections.filter((s) => s.mediaType === '图片');
@@ -601,6 +611,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       setRhRunningFrames(0);
       setRhSkipFrames(0);
       setRhFramesManual(false);
+      // 重置 Infinitetalk 状态
+      setItImageId(null);
+      setItAudioId(null);
       // 根据 initialMode 或 prompt 的 tag 设置默认生成模式
       let resolvedMode: string;
       if (initialMode) {
@@ -818,6 +831,42 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       }]);
 
       message.success('已提交 1 个 RunningHub 视频任务');
+      setMode('tasks');
+      return;
+    }
+
+    if (videoMethod === 'infinitetalk') {
+      if (!itImageId) {
+        message.error('请选择一张图片');
+        return;
+      }
+      if (!itAudioId) {
+        message.error('请选择一段音频');
+        return;
+      }
+
+      savePromptToHistory(editedPrompt);
+
+      addTasks([{
+        type: 'video' as const,
+        draftId: selectedDraftId,
+        prompt: editedPrompt,
+        label: 'Infinitetalk #1',
+        params: {
+          imageResourceIds: [itImageId],
+          videoResourceIds: [],
+          audioResourceIds: [itAudioId],
+          duration: 0,
+          ratio: '',
+          targetSectionId: targetVideoSection || undefined,
+          method: 'infinitetalk',
+          itImageResourceId: itImageId,
+          itAudioResourceId: itAudioId,
+          itMaxSize,
+        },
+      }]);
+
+      message.success('已提交 1 个 Infinitetalk 视频任务');
       setMode('tasks');
       return;
     }
@@ -1158,17 +1207,42 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                 {mode === 'video' && (
                   <>
                     <span style={{ width: 16 }} />
-                    <Segmented
+                    <Select
                       size="small"
+                      style={{ width: 160 }}
                       options={[
                         { label: '即梦', value: 'jimeng' },
-                        { label: 'RunningHub', value: 'runninghub' },
+                        { label: 'Wan2.2 Animation', value: 'runninghub' },
+                        { label: 'Infinitetalk', value: 'infinitetalk' },
                       ]}
                       value={videoMethod}
-                      onChange={(val) => { const v = val as 'jimeng' | 'runninghub'; setVideoMethod(v); saveLastModel('video', v); }}
+                      onChange={(val) => {
+                        const v = val as 'jimeng' | 'runninghub' | 'infinitetalk';
+                        setVideoMethod(v);
+                        saveLastModel('video', v);
+                        if (v === 'infinitetalk' && !editedPrompt.trim()) {
+                          setEditedPrompt('人物在说话');
+                        }
+                      }}
                     />
+                    {videoMethod === 'infinitetalk' && (
+                      <>
+                        <span style={{ width: 8 }} />
+                        <span className={styles.batchLabel}>最长边尺寸</span>
+                        <InputNumber
+                          min={480}
+                          max={2160}
+                          step={120}
+                          value={itMaxSize}
+                          onChange={(v) => setItMaxSize(v || 1080)}
+                          size="small"
+                          style={{ width: 100 }}
+                          addonAfter="px"
+                        />
+                      </>
+                    )}
                     <span style={{ width: 12 }} />
-                    {videoMethod === 'jimeng' ? (
+                    {videoMethod === 'jimeng' && (
                       <>
                         <span className={styles.batchLabel}>时长</span>
                         <InputNumber
@@ -1197,7 +1271,8 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                           ]}
                         />
                       </>
-                    ) : (
+                    )}
+                    {videoMethod === 'runninghub' && (
                       <>
                         <span className={styles.batchLabel}>宽</span>
                         <InputNumber value={rhWidth} onChange={(v) => setRhWidth(v || 576)} size="small" style={{ width: 65 }} />
@@ -1598,6 +1673,99 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                     </div>
                   </div>
                 )}
+              </>
+            )}
+
+            {/* Video mode: Infinitetalk - Image & Audio Selection */}
+            {mode === 'video' && videoMethod === 'infinitetalk' && (
+              <>
+                {/* 选择图片（单选） */}
+                <div className={styles.section}>
+                  <div className={styles.sectionTitle}>
+                    选择图片（必选，1 张）
+                    <span className={styles.count}>
+                      {itImageId ? '已选 1' : '未选'} / 共 {allImages.length} 张
+                    </span>
+                    <span className={styles.scaleControls}>
+                      <Button type="text" size="small" icon={<MinusOutlined />} onClick={handleDecreaseScale} disabled={cardScale <= SCALE_STEPS[0]} />
+                      <Button type="text" size="small" icon={<PlusOutlined />} onClick={handleIncreaseScale} disabled={cardScale >= SCALE_STEPS[SCALE_STEPS.length - 1]} />
+                    </span>
+                  </div>
+                  {allImages.length === 0 ? (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="暂无图片资源"
+                      className={styles.empty}
+                      style={{ padding: '8px 0' }}
+                    />
+                  ) : (
+                    <div className={styles.imageGrid} style={{ maxHeight: '30vh' }}>
+                      {allImages.map((img) => (
+                        <div
+                          key={img.id}
+                          className={`${styles.imageItem} ${itImageId === img.id ? styles.selected : ''}`}
+                          onClick={() => setItImageId(itImageId === img.id ? null : img.id)}
+                        >
+                          <img
+                            src={getImageUrl(img)}
+                            alt={img.fileName}
+                            className={styles.thumbnail}
+                            style={{
+                              height: `calc(37.5vh * ${cardScale})`,
+                              maxWidth: `calc(52.5vw * ${cardScale})`,
+                            }}
+                          />
+                          {itImageId === img.id && (
+                            <div className={styles.selectedBadge}>1</div>
+                          )}
+                          <div className={styles.imageName} title={img.fileName}>
+                            {img.fileName}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 选择音频（单选） */}
+                <div className={styles.section}>
+                  <div className={styles.sectionTitle}>
+                    选择音频（必选，1 段）
+                    <span className={styles.count}>
+                      {itAudioId ? '已选 1' : '未选'} / 共 {allAudios.length} 段
+                    </span>
+                  </div>
+                  {allAudios.length === 0 ? (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="暂无音频资源"
+                      className={styles.empty}
+                      style={{ padding: '8px 0' }}
+                    />
+                  ) : (
+                    <div className={styles.imageGrid} style={{ maxHeight: '20vh' }}>
+                      {allAudios.map((audio) => (
+                        <div
+                          key={audio.id}
+                          className={`${styles.imageItem} ${itAudioId === audio.id ? styles.selected : ''}`}
+                          onClick={() => setItAudioId(itAudioId === audio.id ? null : audio.id)}
+                          style={{ minWidth: 120 }}
+                        >
+                          <div style={{
+                            height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            background: 'rgba(255,255,255,0.05)', borderRadius: 4, fontSize: 22,
+                          }}>🎵</div>
+                          {itAudioId === audio.id && (
+                            <div className={styles.selectedBadge}>1</div>
+                          )}
+                          <div className={styles.imageName} title={audio.fileName}>
+                            {audio.fileName}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </>
             )}
 

@@ -172,13 +172,21 @@ class RunningHubClient:
         }
         return await self._submit_task(url, payload)
 
-    async def create_ai_app_task(self, webapp_id: str, node_info_list: list) -> str:
+    async def create_ai_app_task(
+        self,
+        webapp_id: str,
+        node_info_list: list,
+        instance_type: str = None,
+        use_personal_queue: str = None,
+    ) -> str:
         """
         创建 AI 应用任务（V2 API）
 
         Args:
             webapp_id: AI 应用 ID
             node_info_list: 节点参数列表 [{nodeId, fieldName, fieldValue}, ...]
+            instance_type: 实例类型，如 "default"、"plus"（可选）
+            use_personal_queue: 是否使用个人队列，"true"/"false"（可选）
 
         Returns:
             任务 ID
@@ -191,6 +199,10 @@ class RunningHubClient:
         payload = {
             "nodeInfoList": node_info_list,
         }
+        if instance_type is not None:
+            payload["instanceType"] = instance_type
+        if use_personal_queue is not None:
+            payload["usePersonalQueue"] = use_personal_queue
         return await self._submit_task(url, payload, headers=headers)
 
     async def _submit_task(self, url: str, payload: dict, headers: dict = None) -> str:

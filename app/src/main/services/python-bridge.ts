@@ -991,6 +991,90 @@ export async function runRunningHubVideo(
 }
 
 // ============================================
+// Infinitetalk Portrait Animator
+// ============================================
+
+export interface InfinitetalkVideoParams {
+  imageFile: string;
+  audioFile: string;
+  prompt?: string;
+  maxSize?: number;
+  outputPath: string;
+}
+
+export interface InfinitetalkVideoResult {
+  outputPath: string;
+}
+
+export async function runInfinitetalkVideo(
+  params: InfinitetalkVideoParams,
+  onProgress?: (progress: number) => void,
+  onStatusMessage?: (message: string) => void,
+): Promise<InfinitetalkVideoResult> {
+  let resultPath = params.outputPath;
+
+  const useExe = shouldUseExe();
+  let command: string;
+  let args: string[];
+
+  if (useExe) {
+    command = app.isPackaged
+      ? path.join(process.resourcesPath, 'tools', 'portrait_animator.exe')
+      : path.join(process.cwd(), '..', 'tools', 'dist', 'portrait_animator', 'portrait_animator.exe');
+    args = [];
+  } else {
+    command = getPythonPath();
+    args = [path.join(getToolsPath(), 'portrait_animator.py')];
+  }
+
+  args.push(
+    '--image', params.imageFile,
+    '--audio', params.audioFile,
+    '--output', params.outputPath,
+  );
+  if (params.prompt) {
+    args.push('--prompt', params.prompt);
+  }
+  if (params.maxSize) {
+    args.push('--max-size', String(params.maxSize));
+  }
+
+  console.log('[InfinitetalkVideo] Starting with command:', command);
+
+  await runProcess({
+    command,
+    args,
+    env: getKeyStoreEnv(),
+    onStdoutLine: (message: string) => {
+      console.log('[InfinitetalkVideo]', message);
+
+      const progress = parseProgress(message);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
+
+      if (message.startsWith('[PortraitAnimator]') && onStatusMessage) {
+        onStatusMessage(message.replace('[PortraitAnimator] ', ''));
+      }
+
+      const outputMatch = message.match(/^Output:\s*(.+)$/);
+      if (outputMatch) {
+        resultPath = outputMatch[1].trim();
+      }
+    },
+    onStderrLine: (stderr: string) => {
+      console.log('[InfinitetalkVideo stderr]', stderr);
+      const progress = parseProgress(stderr);
+      if (progress !== null && onProgress) {
+        onProgress(progress);
+      }
+    },
+  });
+
+  return { outputPath: resultPath };
+}
+
+// ============================================
 // Exports
 // ============================================
 
@@ -1003,6 +1087,7 @@ export const pythonBridge = {
   generateText: runTextGenerator,
   recognizeSpeech: runSpeechRecognizer,
   runningHubVideo: runRunningHubVideo,
+  infinitetalkVideo: runInfinitetalkVideo,
 };
 
 export default pythonBridge;
