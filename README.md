@@ -118,6 +118,7 @@ pip install pyinstaller numpy opencv-python tqdm click platformdirs av
 
 ```bash
 cd tools
+pyinstaller portrait_animator.spec --noconfirm
 pyinstaller video_tools.spec --noconfirm
 pyinstaller image_generator.spec --noconfirm
 ```

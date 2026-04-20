@@ -46,6 +46,11 @@
       "filter": ["**/*"]
     },
     {
+      "from": "../tools/dist/portrait_animator",
+      "to": "tools",
+      "filter": ["**/*"]
+    },
+    {
       "from": "../bin",
       "to": "tools",
       "filter": ["ffmpeg.exe", "ffprobe.exe"]
