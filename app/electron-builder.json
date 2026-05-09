@@ -6,13 +6,14 @@
     "buildResources": "build",
     "output": "release"
   },
+  "publish": null,
   "files": [
     "out/**/*"
   ],
   "extraFiles": [
     {
-      "from": ".env.local",
-      "to": "."
+      "from": "config.json",
+      "to": "config.json"
     }
   ],
   "extraResources": [
@@ -22,32 +23,32 @@
     },
     {
       "from": "../tools/dist/video_tools",
-      "to": "tools",
+      "to": "tools/video_tools",
       "filter": ["**/*"]
     },
     {
       "from": "../tools/dist/image_generator",
-      "to": "tools",
+      "to": "tools/image_generator",
       "filter": ["**/*"]
     },
     {
       "from": "../tools/dist/text_generator",
-      "to": "tools",
+      "to": "tools/text_generator",
       "filter": ["**/*"]
     },
     {
       "from": "../tools/dist/speech_recognizer",
-      "to": "tools",
+      "to": "tools/speech_recognizer",
       "filter": ["**/*"]
     },
     {
       "from": "../tools/dist/runninghub_video",
-      "to": "tools",
+      "to": "tools/runninghub_video",
       "filter": ["**/*"]
     },
     {
       "from": "../tools/dist/portrait_animator",
-      "to": "tools",
+      "to": "tools/portrait_animator",
       "filter": ["**/*"]
     },
     {

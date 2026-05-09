@@ -51,8 +51,7 @@ export interface AnalyzeSceneResult {
 
 function getVideoToolsPath(): string {
   if (app.isPackaged) {
-    // 打包后，video_tools.exe 在 resources/tools 目录
-    return path.join(process.resourcesPath, 'tools', 'video_tools.exe');
+    return path.join(process.resourcesPath, 'tools', 'video_tools', 'video_tools.exe');
   }
   // 开发模式下，使用打包好的 exe
   return path.join(process.cwd(), '..', 'tools', 'dist', 'video_tools', 'video_tools.exe');
@@ -60,8 +59,7 @@ function getVideoToolsPath(): string {
 
 function getImageGeneratorPath(): string {
   if (app.isPackaged) {
-    // 打包后，image_generator.exe 在 resources/tools 目录
-    return path.join(process.resourcesPath, 'tools', 'image_generator.exe');
+    return path.join(process.resourcesPath, 'tools', 'image_generator', 'image_generator.exe');
   }
   // 开发模式下，使用打包好的 exe
   return path.join(process.cwd(), '..', 'tools', 'dist', 'image_generator', 'image_generator.exe');
@@ -669,7 +667,7 @@ export interface TextGenerateResult {
 
 function getTextGeneratorPath(): string {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'tools', 'text_generator.exe');
+    return path.join(process.resourcesPath, 'tools', 'text_generator', 'text_generator.exe');
   }
   return path.join(process.cwd(), '..', 'tools', 'dist', 'text_generator', 'text_generator.exe');
 }
@@ -734,7 +732,7 @@ export interface SpeechRecognizeResult {
 
 function getSpeechRecognizerPath(): string {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'tools', 'speech_recognizer.exe');
+    return path.join(process.resourcesPath, 'tools', 'speech_recognizer', 'speech_recognizer.exe');
   }
   return path.join(process.cwd(), '..', 'tools', 'dist', 'speech_recognizer', 'speech_recognizer.exe');
 }
@@ -928,7 +926,7 @@ export async function runRunningHubVideo(
 
   if (useExe) {
     command = app.isPackaged
-      ? path.join(process.resourcesPath, 'tools', 'runninghub_video.exe')
+      ? path.join(process.resourcesPath, 'tools', 'runninghub_video', 'runninghub_video.exe')
       : path.join(process.cwd(), '..', 'tools', 'dist', 'runninghub_video', 'runninghub_video.exe');
     args = [];
   } else {
@@ -1026,7 +1024,7 @@ export async function runInfinitetalkVideo(
 
   if (useExe) {
     command = app.isPackaged
-      ? path.join(process.resourcesPath, 'tools', 'portrait_animator.exe')
+      ? path.join(process.resourcesPath, 'tools', 'portrait_animator', 'portrait_animator.exe')
       : path.join(process.cwd(), '..', 'tools', 'dist', 'portrait_animator', 'portrait_animator.exe');
     args = [];
   } else {
