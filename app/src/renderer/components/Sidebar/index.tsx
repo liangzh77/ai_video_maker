@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Badge, Button, Tooltip, Dropdown, App } from 'antd';
-import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined, AppstoreOutlined, ThunderboltOutlined, DashboardOutlined, UserOutlined, LogoutOutlined } from '@ant-design/icons';
+import { Badge, Button, Tooltip, Dropdown, App, Input } from 'antd';
+import { PlusOutlined, FolderOpenOutlined, ClockCircleOutlined, SortAscendingOutlined, SortDescendingOutlined, ReloadOutlined, AppstoreOutlined, ThunderboltOutlined, DashboardOutlined, UserOutlined, LogoutOutlined, KeyOutlined, DeleteOutlined } from '@ant-design/icons';
 import DraftList from './DraftList';
 import MultiVideoDropZone from './MultiVideoDropZone';
 import TemplateDialog, { getTemplate } from './TemplateDialog';
@@ -17,7 +17,7 @@ interface WorkspaceInfo {
 }
 
 const Sidebar: React.FC = () => {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const { createDraft, selectDraft, loadDrafts, loadResources, selectedDraftId, sortBy, sortOrder, setSortBy } = useDraftStore();
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
@@ -25,7 +25,7 @@ const Sidebar: React.FC = () => {
   const [generateDialogInitialMode, setGenerateDialogInitialMode] = useState<'image' | 'text' | 'video' | 'tasks' | undefined>(undefined);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const activeTaskCount = useGenerationStore((s) => s.tasks.filter((t) => t.status === 'running' || t.status === 'pending').length);
-  const { isLoggedIn, username, logout } = useAuthStore();
+  const { isLoggedIn, username, logout, resetPassword, deleteAccount } = useAuthStore();
 
   // 加载工作目录信息
   useEffect(() => {
@@ -101,8 +101,47 @@ const Sidebar: React.FC = () => {
           {isLoggedIn ? (
             <Dropdown
               menu={{
-                items: [{ key: 'logout', icon: <LogoutOutlined />, label: '退出登录' }],
-                onClick: () => logout(),
+                items: [
+                  { key: 'resetPassword', icon: <KeyOutlined />, label: '重置密码' },
+                  { key: 'deleteAccount', icon: <DeleteOutlined />, label: '注销账号', danger: true },
+                  { type: 'divider' },
+                  { key: 'logout', icon: <LogoutOutlined />, label: '退出登录' },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'logout') {
+                    logout();
+                  } else if (key === 'resetPassword') {
+                    let password = '';
+                    modal.confirm({
+                      title: '重置密码',
+                      content: (
+                        <Input.Password
+                          placeholder="新密码"
+                          onChange={(event) => { password = event.target.value; }}
+                        />
+                      ),
+                      onOk: async () => {
+                        if (!password) {
+                          message.error('请输入新密码');
+                          return Promise.reject();
+                        }
+                        const ok = await resetPassword(password);
+                        if (ok) message.success('密码已重置');
+                      },
+                    });
+                  } else if (key === 'deleteAccount') {
+                    modal.confirm({
+                      title: '确认注销账号？',
+                      content: '注销后 Keychain 中的托管用户会被删除，本地登录态也会清除。',
+                      okText: '注销账号',
+                      okButtonProps: { danger: true },
+                      onOk: async () => {
+                        const ok = await deleteAccount();
+                        if (ok) message.success('账号已注销');
+                      },
+                    });
+                  }
+                },
               }}
               placement="bottomRight"
             >

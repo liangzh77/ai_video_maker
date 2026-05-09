@@ -18,6 +18,7 @@ import { runVideoSplitter, runVideoAnalyzer, runVideoUpscaler, runVideoSynthesiz
 import storage, { findOrCreateSection } from '../services/storage';
 import appConfigService from '../services/config';
 import { authService } from '../services/auth';
+import keychainRuntime, { providerKeyEnvName, runtimeModelString, type DispatchResult } from '../services/keychain-runtime';
 import type {
   ProcessingTask,
   OperationResult,
@@ -43,6 +44,40 @@ import type {
 function buildResourceId(draftId: string, filePath: string): string {
   const filesDir = storage.getFilesPath(draftId);
   return path.relative(filesDir, filePath).replace(/\\/g, '/');
+}
+
+function temporaryEnvForDispatch(dispatch: DispatchResult): Record<string, string> {
+  return {
+    [providerKeyEnvName(dispatch.providerName)]: dispatch.key,
+  };
+}
+
+async function withRuntimeModel<T>(
+  modelEndpoint: string,
+  callback: (runtimeModelId: string, temporaryEnv: Record<string, string>, dispatch: DispatchResult) => Promise<T>,
+): Promise<T> {
+  const userId = authService.requireUserId();
+  return keychainRuntime.withDispatch(modelEndpoint, userId, async (dispatch) => {
+    return callback(
+      runtimeModelString(dispatch.providerName, dispatch.modelName),
+      temporaryEnvForDispatch(dispatch),
+      dispatch,
+    );
+  });
+}
+
+async function withFirstProviderModel<T>(
+  providerName: string,
+  callback: (temporaryEnv: Record<string, string>, dispatch: DispatchResult) => Promise<T>,
+): Promise<T> {
+  const model = await keychainRuntime.findFirstModelByProvider(providerName);
+  if (!model) {
+    throw new Error(`Keychain 中没有可用的 ${providerName} 模型`);
+  }
+  const userId = authService.requireUserId();
+  return keychainRuntime.withDispatch(model.id, userId, async (dispatch) => {
+    return callback(temporaryEnvForDispatch(dispatch), dispatch);
+  });
 }
 
 // ============================================
@@ -230,8 +265,8 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
 
   // 调用 Python 图片生成工具（支持多图）
-  const result = await runImageGenerator(
-    modelId,
+  const result = await withRuntimeModel(modelId, (runtimeModelId, temporaryEnv) => runImageGenerator(
+    runtimeModelId,
     sourcePaths,
     prompt,
     resolution,
@@ -239,15 +274,15 @@ const generateImageHandler: TaskHandler = async (task, onProgress) => {
     (progress) => {
       // Map progress to 5-95
       onProgress(5 + Math.floor(progress * 0.9));
-    }
-  );
+    },
+    undefined,
+    undefined,
+    temporaryEnv,
+  ));
 
   onProgress(95);
 
   console.log('[TaskHandler] Image saved:', result.outputPath);
-
-  // 上报使用记录
-  authService.reportUsage(modelId, `图片生成 | 模型: ${modelId} | 分辨率: ${resolution} | 源图: ${sourceResources.length}张 | prompt: ${prompt.slice(0, 100)}`);
 
   // 构建资源 ID（相对路径）
   const resourceId = buildResourceId(draftId, filePath);
@@ -633,7 +668,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
   // Get available models (from all providers)
   ipcMain.handle(TASK_CHANNELS.GET_MODELS, async () => {
     console.log('[TaskIPC] Getting model list');
-    const models = imageApi.getAvailableModels();
+    const models = await imageApi.getAvailableModels();
     console.log('[TaskIPC] Available models:', models);
     return models;
   });
@@ -1304,8 +1339,8 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         );
 
         // Call Python image generator directly (锁已释放，可并发执行)
-        await runImageGenerator(
-          request.modelEndpoint,
+        await withRuntimeModel(request.modelEndpoint, (runtimeModelId, temporaryEnv) => runImageGenerator(
+          runtimeModelId,
           sourcePaths,
           prompt,
           resolution,
@@ -1313,14 +1348,12 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           undefined,  // onProgress
           undefined,  // appConfig
           request.aspectRatio,
-        );
+          temporaryEnv,
+        ));
 
         // Build resource ID
         const resourceId = buildResourceId(request.draftId, filePath);
         console.log('[TaskIPC] Direct image generated:', resourceId);
-
-        // 上报使用记录
-        authService.reportUsage(request.modelEndpoint, `图片生成(直接) | 模型: ${request.modelEndpoint} | 分辨率: ${resolution} | 宽高比: ${request.aspectRatio || '自动'} | 源图: ${sourcePaths.length}张 | prompt: ${prompt.slice(0, 100)}`);
 
         return { success: true, data: { resourceId } };
       } catch (error) {
@@ -1510,8 +1543,8 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
             }
           : undefined;
 
-        // Call RunningHub via python-bridge
-        await runRunningHubVideo(
+        // Call RunningHub via python-bridge with a one-shot Keychain key
+        await withFirstProviderModel('runninghub', (temporaryEnv) => runRunningHubVideo(
           {
             imageFile: imageRes.filePath,
             videoFile: videoRes.filePath,
@@ -1525,7 +1558,8 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           },
           onProgress ? (progress) => onProgress(`进度: ${progress}%`) : undefined,
           onProgress,
-        );
+          temporaryEnv,
+        ));
 
         // Build resource ID
         const resourceId = buildResourceId(request.draftId, filePath);
@@ -1599,7 +1633,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
             }
           : undefined;
 
-        await runInfinitetalkVideo(
+        await withFirstProviderModel('runninghub', (temporaryEnv) => runInfinitetalkVideo(
           {
             imageFile: imageRes.filePath,
             audioFile: audioRes.filePath,
@@ -1609,7 +1643,8 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
           },
           onProgress ? (progress) => onProgress(`进度: ${progress}%`) : undefined,
           onProgress,
-        );
+          temporaryEnv,
+        ));
 
         const resourceId = buildResourceId(request.draftId, filePath);
         console.log('[TaskIPC] Infinitetalk video generated:', resourceId);
@@ -1653,15 +1688,14 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         }
 
         try {
-          const result = await runSpeechRecognizer(
-            request.modelEndpoint,
+          const result = await withRuntimeModel(request.modelEndpoint, (runtimeModelId, temporaryEnv) => runSpeechRecognizer(
+            runtimeModelId,
             audioPath,
-            request.prompt
-          );
+            request.prompt,
+            undefined,
+            temporaryEnv,
+          ));
           console.log('[TaskIPC] Speech recognized, length:', result.text.length);
-
-          // 上报使用记录
-          authService.reportUsage(request.modelEndpoint, `语音识别 | 模型: ${request.modelEndpoint} | 文件: ${path.basename(request.filePath)} | 结果长度: ${result.text.length}`);
 
           return { success: true, data: { text: result.text } };
         } finally {
@@ -1740,16 +1774,15 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         }
 
         // Generate text
-        const result = await runTextGenerator(
-          request.modelEndpoint,
+        const result = await withRuntimeModel(request.modelEndpoint, (runtimeModelId, temporaryEnv) => runTextGenerator(
+          runtimeModelId,
           request.prompt,
-          request.systemPrompt
-        );
+          request.systemPrompt,
+          undefined,
+          temporaryEnv,
+        ));
 
         console.log('[TaskIPC] Text generated, length:', result.text.length);
-
-        // 上报使用记录
-        authService.reportUsage(request.modelEndpoint, `文本生成 | 模型: ${request.modelEndpoint} | prompt: ${request.prompt.slice(0, 100)} | 结果长度: ${result.text.length}`);
 
         return { success: true, data: { text: result.text } };
       } catch (error) {

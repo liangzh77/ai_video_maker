@@ -28,6 +28,7 @@ app/out/
 .env
 .env.*
 !.env.example
+app/config.json
 
 # IDE
 .vscode/

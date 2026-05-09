@@ -7,6 +7,7 @@ import * as path from 'path';
 import axios, { AxiosError } from 'axios';
 import type { ImageResolution } from '@shared/types';
 import { keyStore } from './key-store';
+import keychainRuntime, { runtimeModelString, type DispatchResult } from './keychain-runtime';
 
 // ============================================
 // Types
@@ -185,8 +186,8 @@ class DoubaoProvider implements ImageProvider {
   private baseUrl: string;
   private modelEndpoint: string;
 
-  constructor(modelEndpoint: string) {
-    this.apiKey = keyStore.get('DOUBAO_API_KEY');
+  constructor(modelEndpoint: string, apiKey: string) {
+    this.apiKey = apiKey;
     this.baseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
     this.modelEndpoint = modelEndpoint;
   }
@@ -295,8 +296,8 @@ class GeminiProvider implements ImageProvider {
   private baseUrl: string;
   private model: string;
 
-  constructor(model: string) {
-    this.apiKey = keyStore.get('GEMINI_API_KEY');
+  constructor(model: string, apiKey: string) {
+    this.apiKey = apiKey;
     this.baseUrl = keyStore.get('GEMINI_BASE_URL') || 'https://generativelanguage.googleapis.com/v1beta';
     this.model = model;
   }
@@ -430,8 +431,8 @@ class GeminiProxyProvider implements ImageProvider {
   private baseUrl: string;
   private model: string;
 
-  constructor(model: string) {
-    this.apiKey = keyStore.get('GEMINI_PROXY_API_KEY');
+  constructor(model: string, apiKey: string) {
+    this.apiKey = apiKey;
     this.baseUrl = keyStore.get('GEMINI_PROXY_BASE_URL');
     this.model = model;
   }
@@ -599,8 +600,8 @@ class OpenRouterProvider implements ImageProvider {
   private baseUrl: string;
   private model: string;
 
-  constructor(model: string) {
-    this.apiKey = keyStore.get('OPENROUTER_API_KEY');
+  constructor(model: string, apiKey: string) {
+    this.apiKey = apiKey;
     this.baseUrl = keyStore.get('OPENROUTER_BASE_URL') || 'https://openrouter.ai/api/v1';
     this.model = model;
   }
@@ -788,7 +789,7 @@ class OpenRouterProvider implements ImageProvider {
 // Provider Factory
 // ============================================
 
-function createProvider(modelId: string): ImageProvider {
+function createProvider(modelId: string, apiKey: string): ImageProvider {
   // modelId 格式: provider:endpoint
   // 例如: doubao:ep-xxx, gemini:gemini-2.0-flash, openrouter:google/gemini-2.0-flash
   const colonIndex = modelId.indexOf(':');
@@ -801,13 +802,13 @@ function createProvider(modelId: string): ImageProvider {
 
   switch (provider) {
     case 'doubao':
-      return new DoubaoProvider(endpoint);
+      return new DoubaoProvider(endpoint, apiKey);
     case 'gemini':
-      return new GeminiProvider(endpoint);
+      return new GeminiProvider(endpoint, apiKey);
     case 'gemini_proxy':
-      return new GeminiProxyProvider(endpoint);
+      return new GeminiProxyProvider(endpoint, apiKey);
     case 'openrouter':
-      return new OpenRouterProvider(endpoint);
+      return new OpenRouterProvider(endpoint, apiKey);
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
@@ -818,78 +819,13 @@ function createProvider(modelId: string): ImageProvider {
 // ============================================
 
 /**
- * 解析环境变量中的模型配置
- * 格式: endpoint:displayName[:capabilities]
- * capabilities 可选，逗号分隔（如 image,text），默认为 ["image"]
- */
-function parseModelEnv(envValue: string): { endpoint: string; name: string; capabilities: ModelCapability[] } | null {
-  // 从末尾检查是否有能力标签（image/text/image,text）
-  const lastColonIndex = envValue.lastIndexOf(':');
-  if (lastColonIndex <= 0) return null;
-
-  const possibleCaps = envValue.substring(lastColonIndex + 1);
-  const validCaps = ['image', 'text'];
-  const capsArray = possibleCaps.split(',').map(s => s.trim());
-  const isCapField = capsArray.every(c => validCaps.includes(c));
-
-  if (isCapField) {
-    // 有能力标签：endpoint:name:caps
-    const rest = envValue.substring(0, lastColonIndex);
-    const firstColon = rest.indexOf(':');
-    if (firstColon <= 0) return null;
-    return {
-      endpoint: rest.substring(0, firstColon),
-      name: rest.substring(firstColon + 1),
-      capabilities: capsArray as ModelCapability[],
-    };
-  } else {
-    // 无能力标签（旧格式）：endpoint:name，默认 image
-    const firstColon = envValue.indexOf(':');
-    if (firstColon <= 0) return null;
-    return {
-      endpoint: envValue.substring(0, firstColon),
-      name: envValue.substring(firstColon + 1),
-      capabilities: ['image'],
-    };
-  }
-}
-
-/**
  * 获取所有可用的模型列表
- * 从环境变量读取各 provider 的模型配置
+ * 从 Keychain Runtime API 读取 provider/model 配置
  */
-export function getAvailableModels(): ModelInfo[] {
-  const models: ModelInfo[] = [];
-
-  console.log('[ImageAPI] Reading models from environment...');
-
-  // 通用读取函数
-  const readModels = (prefix: string, provider: ProviderType, displayPrefix: string) => {
-    for (let i = 1; i <= 10; i++) {
-      const envValue = keyStore.get(`${prefix}_MODEL_${i}`);
-      if (!envValue) continue;
-
-      const parsed = parseModelEnv(envValue);
-      if (parsed) {
-        models.push({
-          id: `${provider}:${parsed.endpoint}`,
-          name: `[${displayPrefix}] ${parsed.name}`,
-          provider,
-          endpoint: parsed.endpoint,
-          capabilities: parsed.capabilities,
-        });
-      }
-    }
-  };
-
-  readModels('GEMINI', 'gemini', 'Gemini');
-  readModels('OPENROUTER', 'openrouter', 'OpenRouter');
-  // Doubao 豆包模型 - 已禁用（多图融合效果不佳）
-  // readModels('DOUBAO', 'doubao', '豆包');
-  readModels('GEMINI_PROXY', 'gemini_proxy', 'Gemini中转');
-
-  console.log(`[ImageAPI] Found ${models.length} models`);
-  return models;
+export async function getAvailableModels(): Promise<ModelInfo[]> {
+  const models = await keychainRuntime.listRuntimeModels();
+  console.log(`[ImageAPI] Found ${models.length} Keychain models`);
+  return models as ModelInfo[];
 }
 
 /**
@@ -905,11 +841,16 @@ export async function imageToImage(
   sourceImagePath: string,
   prompt: string,
   resolution: ImageResolution = '2K',
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  dispatch?: DispatchResult,
 ): Promise<ImageGenerationResult> {
   console.log(`[ImageAPI] imageToImage: model=${modelId}, resolution=${resolution}`);
 
-  const provider = createProvider(modelId);
+  if (!dispatch) {
+    throw new Error('缺少本次调用的 Keychain dispatch key');
+  }
+  const runtimeModelId = runtimeModelString(dispatch.providerName, dispatch.modelName);
+  const provider = createProvider(runtimeModelId, dispatch.key);
   return provider.imageToImage(sourceImagePath, prompt, resolution, onProgress);
 }
 

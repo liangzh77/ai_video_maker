@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import * as path from 'path';
 import { app } from 'electron';
 import type { AppConfig, SplitConfig, UpscaleConfig, SynthesizeConfig } from '@shared/types';
@@ -110,23 +110,25 @@ function getPythonPath(config?: AppConfig): string {
 }
 
 /**
- * 从 keyStore 导出 API 密钥作为环境变量传给 Python 子进程
- * 替代之前通过 ENV_FILE 指向 .env.local 的方式
+ * 导出非密钥配置和本次调用的临时密钥给 Python 子进程。
+ * 不从 keyStore 导出任何长期模型密钥。
  */
-function getKeyStoreEnv(): Record<string, string> {
-  const apiKeyNames = [
-    'GEMINI_API_KEY', 'GEMINI_BASE_URL',
-    'GEMINI_PROXY_API_KEY', 'GEMINI_PROXY_BASE_URL',
-    'OPENROUTER_API_KEY', 'OPENROUTER_BASE_URL',
-    'DOUBAO_API_KEY',
-    'RUNNINGHUB_API_KEY', 'RUNNINGHUB_BASE_URL',
+function getRuntimeEnv(temporarySecrets?: Record<string, string>): Record<string, string> {
+  const configNames = [
+    'GEMINI_BASE_URL',
+    'GEMINI_PROXY_BASE_URL',
+    'OPENROUTER_BASE_URL',
+    'RUNNINGHUB_BASE_URL',
   ];
   const env: Record<string, string> = {};
-  for (const name of apiKeyNames) {
+  for (const name of configNames) {
     const val = keyStore.get(name);
     if (val) {
       env[name] = val;
     }
+  }
+  if (temporarySecrets) {
+    Object.assign(env, temporarySecrets);
   }
   return env;
 }
@@ -676,7 +678,8 @@ export async function runTextGenerator(
   modelId: string,
   prompt: string,
   systemPrompt?: string,
-  appConfig?: AppConfig
+  appConfig?: AppConfig,
+  temporaryEnv?: Record<string, string>,
 ): Promise<TextGenerateResult> {
   const outputLines: string[] = [];
 
@@ -703,7 +706,7 @@ export async function runTextGenerator(
   await runProcess({
     command,
     args,
-    env: getKeyStoreEnv(),
+    env: getRuntimeEnv(temporaryEnv),
     onStdoutLine: (message: string) => {
       console.log('[TextGenerator]', message);
       outputLines.push(message);
@@ -740,7 +743,8 @@ export async function runSpeechRecognizer(
   modelId: string,
   audioPath: string,
   prompt?: string,
-  appConfig?: AppConfig
+  appConfig?: AppConfig,
+  temporaryEnv?: Record<string, string>,
 ): Promise<SpeechRecognizeResult> {
   const outputLines: string[] = [];
 
@@ -767,7 +771,7 @@ export async function runSpeechRecognizer(
   await runProcess({
     command,
     args,
-    env: getKeyStoreEnv(),
+    env: getRuntimeEnv(temporaryEnv),
     onStdoutLine: (message: string) => {
       console.log('[SpeechRecognizer]', message);
       outputLines.push(message);
@@ -805,6 +809,7 @@ export async function runImageGenerator(
   onProgress?: (progress: number) => void,
   appConfig?: AppConfig,
   aspectRatio?: string,
+  temporaryEnv?: Record<string, string>,
 ): Promise<ImageGenerateResult> {
   let resultWidth = 0;
   let resultHeight = 0;
@@ -846,7 +851,7 @@ export async function runImageGenerator(
   await runProcess({
     command,
     args,
-    env: getKeyStoreEnv(),
+    env: getRuntimeEnv(temporaryEnv),
     onStdoutLine: (message: string) => {
       console.log('[ImageGenerator]', message);
 
@@ -913,6 +918,7 @@ export async function runRunningHubVideo(
   params: RunningHubVideoParams,
   onProgress?: (progress: number) => void,
   onStatusMessage?: (message: string) => void,
+  temporaryEnv?: Record<string, string>,
 ): Promise<RunningHubVideoResult> {
   let resultPath = params.outputPath;
 
@@ -957,7 +963,7 @@ export async function runRunningHubVideo(
   await runProcess({
     command,
     args,
-    env: getKeyStoreEnv(),
+    env: getRuntimeEnv(temporaryEnv),
     onStdoutLine: (message: string) => {
       console.log('[RunningHubVideo]', message);
 
@@ -1010,6 +1016,7 @@ export async function runInfinitetalkVideo(
   params: InfinitetalkVideoParams,
   onProgress?: (progress: number) => void,
   onStatusMessage?: (message: string) => void,
+  temporaryEnv?: Record<string, string>,
 ): Promise<InfinitetalkVideoResult> {
   let resultPath = params.outputPath;
 
@@ -1044,7 +1051,7 @@ export async function runInfinitetalkVideo(
   await runProcess({
     command,
     args,
-    env: getKeyStoreEnv(),
+    env: getRuntimeEnv(temporaryEnv),
     onStdoutLine: (message: string) => {
       console.log('[InfinitetalkVideo]', message);
 

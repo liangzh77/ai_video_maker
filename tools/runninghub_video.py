@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 # ============================================
 
 DEFAULT_BASE_URL = "https://www.runninghub.cn"
-DEFAULT_TIMEOUT = 3600       # 任务超时 1 小时
+DEFAULT_TIMEOUT = 36000      # 任务超时 10 小时
 DEFAULT_POLL_INTERVAL = 3    # 轮询间隔 3 秒
 HTTP_TIMEOUT = 60.0          # HTTP 请求超时 60 秒
 UPLOAD_TIMEOUT = 120.0       # 上传超时 120 秒

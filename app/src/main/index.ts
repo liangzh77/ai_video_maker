@@ -229,9 +229,9 @@ app.whenReady().then(async () => {
     console.log('[Init] No .env.local found, using bundled defaults');
   }
 
-  // 3. 尝试自动登录（云端密钥会 merge 到已有配置上）
+  // 3. 恢复 Keychain 托管用户本地登录态（不会拉取或保存模型密钥）
   const cfg = await appConfig.load();
-  const authBaseUrl = cfg.auth?.baseUrl || 'https://distribute-keys.vercel.app';
+  const authBaseUrl = cfg.keychain?.baseUrl || cfg.auth?.baseUrl || 'https://keychain.liangz77.cn';
   await authService.init(authBaseUrl);
 
   // Register IPC handlers

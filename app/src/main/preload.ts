@@ -74,9 +74,12 @@ export interface ElectronAPI {
     save: (params: { draftId: string; links: { sourceToNew: Record<string, string> } }) => Promise<any>;
   };
   auth: {
-    login: (params: { username: string; password: string; baseUrl?: string }) => Promise<{ success: boolean; error?: string; username?: string }>;
+    register: (params: { username: string; name?: string; password: string; baseUrl?: string; channelId?: string; runtimeToken?: string }) => Promise<{ success: boolean; error?: string; username?: string; userId?: string }>;
+    login: (params: { username: string; password: string; baseUrl?: string; channelId?: string; runtimeToken?: string }) => Promise<{ success: boolean; error?: string; username?: string; userId?: string }>;
     logout: () => Promise<{ success: boolean }>;
-    getState: () => Promise<{ isLoggedIn: boolean; username?: string }>;
+    resetPassword: (params: { password: string }) => Promise<{ success: boolean; error?: string }>;
+    deleteAccount: () => Promise<{ success: boolean; error?: string }>;
+    getState: () => Promise<{ isLoggedIn: boolean; username?: string; userId?: string; name?: string }>;
   };
   promptHistory: {
     load: (params: { draftId: string }) => Promise<any>;
@@ -162,8 +165,11 @@ const api: ElectronAPI = {
     save: (params) => ipcRenderer.invoke('links:save', params),
   },
   auth: {
+    register: (params) => ipcRenderer.invoke('auth:register', params),
     login: (params) => ipcRenderer.invoke('auth:login', params),
     logout: () => ipcRenderer.invoke('auth:logout'),
+    resetPassword: (params) => ipcRenderer.invoke('auth:resetPassword', params),
+    deleteAccount: () => ipcRenderer.invoke('auth:deleteAccount'),
     getState: () => ipcRenderer.invoke('auth:getState'),
   },
   promptHistory: {

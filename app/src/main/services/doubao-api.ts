@@ -5,8 +5,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import axios, { AxiosError } from 'axios';
-import config from './config';
-import { keyStore } from './key-store';
 
 // ============================================
 // Types
@@ -244,40 +242,13 @@ export class DoubaoApiService {
 // Factory Function
 // ============================================
 
-let serviceInstance: DoubaoApiService | null = null;
-
 /**
  * Get Doubao API service instance
- * Priority: environment variables > config.json
+ * Deprecated: model keys are no longer read from local config.
+ * Callers should use Keychain dispatch and construct DoubaoApiService with a one-shot key.
  */
 export async function getDoubaoService(): Promise<DoubaoApiService> {
-  // Read from environment variables
-  const envApiKey = keyStore.get('DOUBAO_API_KEY');
-  const envModelEndpoint = keyStore.get('DOUBAO_MODEL_ENDPOINT');
-
-  // Read from config file
-  const appConfig = await config.load();
-  const configDoubao = appConfig.doubao as any;
-
-  // Merge config (env vars take priority)
-  const apiKey = envApiKey || configDoubao?.apiKey || '';
-  // Always use the correct Volcengine API URL
-  const baseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
-  const modelEndpoint = envModelEndpoint || configDoubao?.modelEndpoint || '';
-
-  // Check if need to recreate instance
-  if (!serviceInstance ||
-      serviceInstance['apiKey'] !== apiKey ||
-      serviceInstance['modelEndpoint'] !== modelEndpoint) {
-    console.log('[DoubaoAPI] Creating new service instance');
-    serviceInstance = new DoubaoApiService({
-      apiKey,
-      baseUrl,
-      modelEndpoint,
-    });
-  }
-
-  return serviceInstance;
+  throw new Error('Doubao 本地密钥服务已停用，请通过 Keychain dispatch 获取一次性密钥');
 }
 
 /**
@@ -286,59 +257,14 @@ export async function getDoubaoService(): Promise<DoubaoApiService> {
  * Format: endpoint:displayName
  */
 export function getAvailableModels(): ModelInfo[] {
-  const models: ModelInfo[] = [];
-
-  console.log('[DoubaoAPI] Reading model list from environment variables...');
-
-  // Read DOUBAO_MODEL_1, DOUBAO_MODEL_2, ... format environment variables
-  for (let i = 1; i <= 10; i++) {
-    const envKey = `DOUBAO_MODEL_${i}`;
-    const envValue = keyStore.get(`DOUBAO_MODEL_${i}`);
-    if (!envValue) {
-      console.log(`[DoubaoAPI] ${envKey}: not set`);
-      continue;
-    }
-
-    console.log(`[DoubaoAPI] ${envKey}: ${envValue}`);
-
-    // Format: endpoint:displayName
-    const colonIndex = envValue.indexOf(':');
-    if (colonIndex > 0) {
-      models.push({
-        id: envValue.substring(0, colonIndex),
-        name: envValue.substring(colonIndex + 1),
-      });
-    } else {
-      // If no colon, use entire value as ID, name as Model i
-      models.push({
-        id: envValue,
-        name: `Model ${i}`,
-      });
-    }
-  }
-
-  console.log(`[DoubaoAPI] Total models found: ${models.length}`);
-  return models;
+  return [];
 }
 
 /**
  * Create service instance with specified model
  */
 export async function createDoubaoServiceWithModel(modelEndpoint: string): Promise<DoubaoApiService> {
-  const envApiKey = keyStore.get('DOUBAO_API_KEY');
-
-  const appConfig = await config.load();
-  const configDoubao = appConfig.doubao as any;
-
-  const apiKey = envApiKey || configDoubao?.apiKey || '';
-  // Always use the correct Volcengine API URL
-  const baseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
-
-  return new DoubaoApiService({
-    apiKey,
-    baseUrl,
-    modelEndpoint,
-  });
+  throw new Error(`Doubao 本地密钥服务已停用，请通过 Keychain dispatch 调用模型: ${modelEndpoint}`);
 }
 
 export default DoubaoApiService;

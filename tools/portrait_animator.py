@@ -45,7 +45,7 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
 
-from runninghub_video import RunningHubClient, RunningHubError, DEFAULT_BASE_URL
+from runninghub_video import RunningHubClient, RunningHubError, DEFAULT_BASE_URL, DEFAULT_TIMEOUT
 
 # ============================================
 # 该 AI 应用的固定配置
@@ -193,7 +193,7 @@ def main():
     parser.add_argument("--max-size",  type=int,   default=DEFAULT_MAX_SIZE, help=f"最长边尺寸（默认: {DEFAULT_MAX_SIZE}）")
     parser.add_argument("--jitter",    type=float, default=DEFAULT_JITTER,   help=f"抖动强度 0~1（默认: {DEFAULT_JITTER}）")
     parser.add_argument("--zoom",      type=float, default=DEFAULT_ZOOM,     help=f"缩放大小（默认: {DEFAULT_ZOOM}）")
-    parser.add_argument("--timeout",       type=int, default=3600, help="任务超时（秒，默认 3600）")
+    parser.add_argument("--timeout",       type=int, default=DEFAULT_TIMEOUT, help=f"任务超时（秒，默认 {DEFAULT_TIMEOUT}）")
     parser.add_argument("--poll-interval", type=int, default=3,    help="轮询间隔（秒，默认 3）")
 
     args = parser.parse_args()

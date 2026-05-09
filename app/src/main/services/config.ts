@@ -9,7 +9,14 @@ import { DEFAULT_CONFIG } from '@shared/types';
 // ============================================
 
 function getConfigPath(): string {
-  return path.join(app.getPath('userData'), 'config.json');
+  return path.join(getLocalConfigDir(), 'config.json');
+}
+
+function getLocalConfigDir(): string {
+  if (app.isPackaged) {
+    return path.dirname(app.getPath('exe'));
+  }
+  return app.getAppPath();
 }
 
 // ============================================

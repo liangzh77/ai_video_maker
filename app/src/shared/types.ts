@@ -248,6 +248,11 @@ export interface AppConfig {
   auth?: {
     baseUrl: string;
   };
+  keychain?: {
+    baseUrl: string;
+    channelId: string;
+    runtimeToken: string;
+  };
   pythonPath?: string;
 }
 
@@ -265,6 +270,11 @@ export const DEFAULT_CONFIG: AppConfig = {
   ui: {
     theme: 'light',
     language: 'zh-CN',
+  },
+  keychain: {
+    baseUrl: 'https://keychain.liangz77.cn',
+    channelId: 'ai_video_maker',
+    runtimeToken: '',
   },
 };
 

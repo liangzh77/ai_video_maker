@@ -109,8 +109,11 @@ export const LINKS_CHANNELS = {
 // Auth Channels (用户认证)
 // ============================================
 export const AUTH_CHANNELS = {
+  REGISTER: 'auth:register',
   LOGIN: 'auth:login',
   LOGOUT: 'auth:logout',
+  RESET_PASSWORD: 'auth:resetPassword',
+  DELETE_ACCOUNT: 'auth:deleteAccount',
   GET_STATE: 'auth:getState',
   STATE_CHANGED: 'auth:stateChanged',      // Main -> Renderer 推送登录状态变化
 } as const;

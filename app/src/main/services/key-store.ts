@@ -11,6 +11,16 @@ class KeyStore {
   private keys: Map<string, string> = new Map();
   private defaults: Record<string, string> = {};
 
+  private isModelSecret(name: string): boolean {
+    return [
+      'GEMINI_API_KEY',
+      'GEMINI_PROXY_API_KEY',
+      'OPENROUTER_API_KEY',
+      'DOUBAO_API_KEY',
+      'RUNNINGHUB_API_KEY',
+    ].includes(name);
+  }
+
   /** 获取值（替代 process.env.XXX） */
   get(name: string): string {
     return this.keys.get(name) || '';
@@ -20,6 +30,7 @@ class KeyStore {
   setAll(entries: Record<string, string>): void {
     this.keys.clear();
     for (const [k, v] of Object.entries(entries)) {
+      if (this.isModelSecret(k)) continue;
       this.keys.set(k, v);
     }
     // 记住首次加载的默认值，供 reloadDefaults() 使用
@@ -32,6 +43,7 @@ class KeyStore {
   /** 合并写入（不清空，只覆盖传入的 key，用于云端密钥叠加） */
   merge(entries: Record<string, string>): void {
     for (const [k, v] of Object.entries(entries)) {
+      if (this.isModelSecret(k)) continue;
       this.keys.set(k, v);
     }
     console.log(`[KeyStore] Merged ${Object.keys(entries).length} entries, total ${this.keys.size}`);

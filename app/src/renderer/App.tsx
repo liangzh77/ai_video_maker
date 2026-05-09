@@ -14,21 +14,10 @@ const { Sider, Content } = Layout;
 const AppContent: React.FC = () => {
   const { loadDrafts, selectedDraftId } = useDraftStore();
   const initAuth = useAuthStore((s) => s.init);
-  const { notification } = AntdApp.useApp();
-
   useEffect(() => {
-    initAuth().then(() => {
-      const { isLoggedIn, missingKeys } = useAuthStore.getState();
-      if (isLoggedIn && missingKeys.length > 0) {
-        notification.warning({
-          message: '部分 API 密钥缺失',
-          description: `以下服务的密钥未在云端配置，相关模型不可用：${missingKeys.map(k => k.label).join('、')}`,
-          duration: 8,
-        });
-      }
-    });
+    initAuth();
     loadDrafts();
-  }, [initAuth, loadDrafts, notification]);
+  }, [initAuth, loadDrafts]);
 
   return (
     <Layout className={styles.layout}>
