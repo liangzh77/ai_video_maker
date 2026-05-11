@@ -79,35 +79,40 @@ async def run(args) -> dict:
 
     print("进度: 5%")
 
-    # 1. 上传图片
-    print(f"[PortraitAnimator] 上传图片: {args.image}")
-    image_filename = await client.upload_file(args.image, file_type='image')
-    print("进度: 20%")
+    if args.resume_task_id:
+        task_id = args.resume_task_id
+        print(f"[PortraitAnimator] 恢复远端任务: {task_id}")
+        print(f"[PortraitAnimator] API_SUBMITTED {task_id}")
+    else:
+        # 1. 上传图片
+        print(f"[PortraitAnimator] 上传图片: {args.image}")
+        image_filename = await client.upload_file(args.image, file_type='image')
+        print("进度: 20%")
 
-    # 2. 上传音频
-    print(f"[PortraitAnimator] 上传音频: {args.audio}")
-    audio_filename = await client.upload_file(args.audio, file_type='audio')
-    print("进度: 35%")
+        # 2. 上传音频
+        print(f"[PortraitAnimator] 上传音频: {args.audio}")
+        audio_filename = await client.upload_file(args.audio, file_type='audio')
+        print("进度: 35%")
 
-    # 3. 构建节点参数
-    node_info_list = [
-        {"nodeId": NODE_IMAGE,    "fieldName": "image",  "fieldValue": image_filename,       "description": "图片上传"},
-        {"nodeId": NODE_MAX_SIZE, "fieldName": "value",  "fieldValue": str(args.max_size),   "description": "最长边尺寸"},
-        {"nodeId": NODE_AUDIO,    "fieldName": "audio",  "fieldValue": audio_filename,        "description": "音频上传"},
-        {"nodeId": NODE_PROMPT,   "fieldName": "prompt", "fieldValue": args.prompt,           "description": "提示词"},
-        {"nodeId": NODE_JITTER,   "fieldName": "value",  "fieldValue": str(args.jitter),      "description": "抖动强度"},
-        {"nodeId": NODE_ZOOM,     "fieldName": "value",  "fieldValue": str(args.zoom),        "description": "缩放大小"},
-    ]
+        # 3. 构建节点参数
+        node_info_list = [
+            {"nodeId": NODE_IMAGE,    "fieldName": "image",  "fieldValue": image_filename,       "description": "图片上传"},
+            {"nodeId": NODE_MAX_SIZE, "fieldName": "value",  "fieldValue": str(args.max_size),   "description": "最长边尺寸"},
+            {"nodeId": NODE_AUDIO,    "fieldName": "audio",  "fieldValue": audio_filename,        "description": "音频上传"},
+            {"nodeId": NODE_PROMPT,   "fieldName": "prompt", "fieldValue": args.prompt,           "description": "提示词"},
+            {"nodeId": NODE_JITTER,   "fieldName": "value",  "fieldValue": str(args.jitter),      "description": "抖动强度"},
+            {"nodeId": NODE_ZOOM,     "fieldName": "value",  "fieldValue": str(args.zoom),        "description": "缩放大小"},
+        ]
 
-    # 4. 创建任务
-    print(f"[PortraitAnimator] 创建任务 appId={APP_ID}")
-    print("进度: 40%")
-    task_id = await client.create_ai_app_task(
-        APP_ID, node_info_list,
-        instance_type="plus",
-        use_personal_queue="false",
-    )
-    print("[PortraitAnimator] API_SUBMITTED")
+        # 4. 创建任务
+        print(f"[PortraitAnimator] 创建任务 appId={APP_ID}")
+        print("进度: 40%")
+        task_id = await client.create_ai_app_task(
+            APP_ID, node_info_list,
+            instance_type="plus",
+            use_personal_queue="false",
+        )
+        print(f"[PortraitAnimator] API_SUBMITTED {task_id}")
 
     # 5. 轮询任务
     print("进度: 45%")
@@ -189,6 +194,7 @@ def main():
     parser.add_argument("--image",     required=True, help="人像图片路径（支持 jpg/png）")
     parser.add_argument("--audio",     required=True, help="音频文件路径（支持 mp3/wav/aac）")
     parser.add_argument("--output",    required=True, help="输出视频路径")
+    parser.add_argument("--resume-task-id", default=None, help="恢复已提交的 RunningHub 任务 ID，只轮询并下载结果")
     parser.add_argument("--prompt",    default=DEFAULT_PROMPT,   help=f"运动提示词（默认: {DEFAULT_PROMPT}）")
     parser.add_argument("--max-size",  type=int,   default=DEFAULT_MAX_SIZE, help=f"最长边尺寸（默认: {DEFAULT_MAX_SIZE}）")
     parser.add_argument("--jitter",    type=float, default=DEFAULT_JITTER,   help=f"抖动强度 0~1（默认: {DEFAULT_JITTER}）")
@@ -199,10 +205,11 @@ def main():
     args = parser.parse_args()
 
     # 检查输入文件
-    for path_arg, name in [(args.image, '图片'), (args.audio, '音频')]:
-        if not os.path.exists(path_arg):
-            print(f"Error: {name}文件不存在: {path_arg}")
-            sys.exit(1)
+    if not args.resume_task_id:
+        for path_arg, name in [(args.image, '图片'), (args.audio, '音频')]:
+            if not os.path.exists(path_arg):
+                print(f"Error: {name}文件不存在: {path_arg}")
+                sys.exit(1)
 
     print(f"[PortraitAnimator] 图片: {args.image}")
     print(f"[PortraitAnimator] 音频: {args.audio}")

@@ -903,6 +903,7 @@ export interface RunningHubVideoParams {
   runningFrames: number;
   skipFrames: number;
   outputPath: string;
+  remoteTaskId?: string;
 }
 
 export interface RunningHubVideoResult {
@@ -934,26 +935,30 @@ export async function runRunningHubVideo(
     args = [path.join(getToolsPath(), 'runninghub_video.py')];
   }
 
-  args.push(
-    '--app-id', RUNNINGHUB_APP_ID,
-    '--upload', params.imageFile,
-    '--upload', params.videoFile,
-    // 节点参数（硬编码工作流节点 ID）
-    '--node', `71:value=${params.width}`,
-    '--node', `72:value=${params.height}`,
-    '--node', `215:value=${params.fps}`,
-    '--node', `74:value=${params.runningFrames}`,
-    '--node', `91:value=${params.skipFrames}`,
-    '--node', '182:image={upload_0}',
-    '--node', '95:video={upload_1}',
-    '--node', '184:boolean=true',
-    '--node', '282:value=false',
-    '--node', '248:value=2.0',
-    '--node', '283:value=2026',
-    '--node', `50:prompt=${params.prompt}`,
-    '--node', `100:prompt=${RUNNINGHUB_NEGATIVE_PROMPT}`,
-    '--output', params.outputPath,
-  );
+  if (params.remoteTaskId) {
+    args.push('--resume-task-id', params.remoteTaskId, '--output', params.outputPath);
+  } else {
+    args.push(
+      '--app-id', RUNNINGHUB_APP_ID,
+      '--upload', params.imageFile,
+      '--upload', params.videoFile,
+      // 节点参数（硬编码工作流节点 ID）
+      '--node', `71:value=${params.width}`,
+      '--node', `72:value=${params.height}`,
+      '--node', `215:value=${params.fps}`,
+      '--node', `74:value=${params.runningFrames}`,
+      '--node', `91:value=${params.skipFrames}`,
+      '--node', '182:image={upload_0}',
+      '--node', '95:video={upload_1}',
+      '--node', '184:boolean=true',
+      '--node', '282:value=false',
+      '--node', '248:value=2.0',
+      '--node', '283:value=2026',
+      '--node', `50:prompt=${params.prompt}`,
+      '--node', `100:prompt=${RUNNINGHUB_NEGATIVE_PROMPT}`,
+      '--output', params.outputPath,
+    );
+  }
 
   console.log('[RunningHubVideo] Starting with command:', command);
   console.log('[RunningHubVideo] Args:', args.slice(0, 5), '...');
@@ -1004,6 +1009,7 @@ export interface InfinitetalkVideoParams {
   prompt?: string;
   maxSize?: number;
   outputPath: string;
+  remoteTaskId?: string;
 }
 
 export interface InfinitetalkVideoResult {
@@ -1037,6 +1043,9 @@ export async function runInfinitetalkVideo(
     '--audio', params.audioFile,
     '--output', params.outputPath,
   );
+  if (params.remoteTaskId) {
+    args.push('--resume-task-id', params.remoteTaskId);
+  }
   if (params.prompt) {
     args.push('--prompt', params.prompt);
   }

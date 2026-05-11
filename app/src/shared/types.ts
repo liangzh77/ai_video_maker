@@ -96,6 +96,7 @@ export interface AudioMetadata {
   bitrate: number;       // kbps
   channels: number;
   codec: string;
+  description?: string;   // 音频说明，来自同名伴随元数据文件
 }
 
 export type PromptTag = 'text' | 'image' | 'video';
@@ -191,7 +192,29 @@ export interface ResourceMetadataFile {
     sourceFileHashes?: Record<string, string>;  // resourceId → "sha256:xxx"
     generatedAt: string;
   };
+  description?: string;
   savedAt: string;
+}
+
+export type AIGenerationTaskType = 'image' | 'text' | 'video';
+export type AIGenerationTaskStatus = 'pending' | 'waiting' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export interface AIGenerationTask {
+  id: string;
+  type: AIGenerationTaskType;
+  status: AIGenerationTaskStatus;
+  draftId: string;
+  prompt: string;
+  label: string;
+  params: Record<string, any>;
+  error?: string;
+  resultText?: string;
+  resultResourceId?: string;
+  progressMessage?: string;
+  remoteTaskId?: string;
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
 }
 
 export interface UpscaleConfig {

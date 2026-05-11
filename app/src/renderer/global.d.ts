@@ -58,6 +58,8 @@ export interface ElectronAPI {
       newSectionLabel?: string;
     }) => Promise<any>;
     cancel: (params: { id: string }) => Promise<any>;
+    loadAiTasks: (params: { draftId: string }) => Promise<any>;
+    saveAiTasks: (params: { draftId: string; tasks: any[] }) => Promise<any>;
   };
   config: {
     get: () => Promise<any>;

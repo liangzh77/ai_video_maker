@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Tooltip, Popconfirm, message } from 'antd';
+import { Button, Tooltip, Popconfirm, message, Input } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
-import type { Resource, ResourceMetadataFile } from '@shared/types';
+import type { Resource, ResourceMetadataFile, AudioMetadata } from '@shared/types';
 import { isVideoMetadata, isImageMetadata, isAudioMetadata } from '@shared/types';
 import { parseFolderName } from '@shared/section-utils';
 import { useDraftStore } from '../../stores/draft';
@@ -18,7 +18,9 @@ const GenerationTypeLabel: Record<string, string> = {
 };
 
 const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
-  const { deleteResource, selectResource } = useDraftStore();
+  const { deleteResource, selectResource, updateResource } = useDraftStore();
+  const [audioDescription, setAudioDescription] = useState('');
+  const [savingDescription, setSavingDescription] = useState(false);
 
   // 加载生成信息
   const [generationMeta, setGenerationMeta] = useState<ResourceMetadataFile['generation'] | null>(null);
@@ -67,6 +69,30 @@ const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
   const isVideo = isVideoMetadata(resource.metadata);
   const isImage = isImageMetadata(resource.metadata);
   const isAudio = isAudioMetadata(resource.metadata);
+
+  useEffect(() => {
+    if (isAudioMetadata(resource.metadata)) {
+      setAudioDescription(resource.metadata.description || '');
+    } else {
+      setAudioDescription('');
+    }
+  }, [resource.id, resource.metadata]);
+
+  const saveAudioDescription = async () => {
+    if (!isAudio) return;
+    const current = resource.metadata.description || '';
+    const next = audioDescription.trim();
+    if (next === current) return;
+    setSavingDescription(true);
+    const updated = await updateResource(resource.id, { description: next } as Partial<AudioMetadata>);
+    setSavingDescription(false);
+    if (updated) {
+      message.success('说明已保存');
+    } else {
+      setAudioDescription(current);
+      message.error('说明保存失败');
+    }
+  };
 
   return (
     <div className={styles.info}>
@@ -121,6 +147,23 @@ const ResourceInfo: React.FC<ResourceInfoProps> = ({ resource }) => {
 
         {isAudio && (
           <>
+            <div className={styles.descriptionItem}>
+              <span className={styles.label}>说明</span>
+              <Input.TextArea
+                value={audioDescription}
+                onChange={(e) => setAudioDescription(e.target.value)}
+                onBlur={saveAudioDescription}
+                onPressEnter={(e) => {
+                  if (e.ctrlKey || e.metaKey) {
+                    e.currentTarget.blur();
+                  }
+                }}
+                autoSize={{ minRows: 2, maxRows: 5 }}
+                placeholder="点击填写音频说明"
+                disabled={savingDescription}
+                className={styles.descriptionInput}
+              />
+            </div>
             <div className={styles.item}>
               <span className={styles.label}>时长</span>
               <span className={styles.value}>{formatDuration(resource.metadata.duration)}</span>

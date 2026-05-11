@@ -21,6 +21,7 @@ import { authService } from '../services/auth';
 import keychainRuntime, { providerKeyEnvName, runtimeModelString, type DispatchResult } from '../services/keychain-runtime';
 import type {
   ProcessingTask,
+  AIGenerationTask,
   OperationResult,
   GenerateConfig,
   SplitConfig,
@@ -673,6 +674,36 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
     return models;
   });
 
+  ipcMain.handle(
+    TASK_CHANNELS.LOAD_AI_TASKS,
+    async (_, request: { draftId: string }): Promise<OperationResult<AIGenerationTask[]>> => {
+      try {
+        const tasks = await storage.aiTask.load(request.draftId);
+        return { success: true, data: tasks };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'LOAD_AI_TASKS_ERROR',
+        };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    TASK_CHANNELS.SAVE_AI_TASKS,
+    async (_, request: { draftId: string; tasks: AIGenerationTask[] }): Promise<OperationResult> => {
+      try {
+        await storage.aiTask.save(request.draftId, request.tasks);
+        return { success: true };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'SAVE_AI_TASKS_ERROR',
+        };
+      }
+    },
+  );
+
   // List tasks
   ipcMain.handle(
     TASK_CHANNELS.LIST,
@@ -1239,6 +1270,11 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
         console.log('[TaskIPC] FFmpeg command:', ffmpegCmd);
         await execAsync(ffmpegCmd);
 
+        const resourceId = buildResourceId(draftId, outputPath);
+        await storage.metadata.save(draftId, resourceId, {
+          description: videoResource.fileName,
+        });
+
         console.log('[TaskIPC] Audio extracted to:', outputPath);
         return { success: true, data: { filePath: outputPath } };
       } catch (error) {
@@ -1486,6 +1522,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
       skipFrames: number;
       targetSectionId?: string;
       taskId?: string;
+      remoteTaskId?: string;
     }): Promise<OperationResult<{ resourceId: string }>> => {
       console.log('[TaskIPC] Received RunningHub video generation request');
       try {
@@ -1555,6 +1592,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
             runningFrames: request.runningFrames,
             skipFrames: request.skipFrames,
             outputPath: filePath,
+            remoteTaskId: request.remoteTaskId,
           },
           onProgress ? (progress) => onProgress(`进度: ${progress}%`) : undefined,
           onProgress,
@@ -1587,6 +1625,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
       maxSize?: number;
       targetSectionId?: string;
       taskId?: string;
+      remoteTaskId?: string;
     }): Promise<OperationResult<{ resourceId: string }>> => {
       console.log('[TaskIPC] Received Infinitetalk video generation request');
       try {
@@ -1640,6 +1679,7 @@ export function registerTaskHandlers(mainWindow: BrowserWindow | null): void {
             prompt: request.prompt,
             maxSize: request.maxSize,
             outputPath: filePath,
+            remoteTaskId: request.remoteTaskId,
           },
           onProgress ? (progress) => onProgress(`进度: ${progress}%`) : undefined,
           onProgress,

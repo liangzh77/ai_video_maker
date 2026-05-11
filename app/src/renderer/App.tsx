@@ -7,6 +7,7 @@ import NotificationBar from './components/NotificationBar';
 import FullscreenPreviewModal from './components/FullscreenPreviewModal';
 import { useDraftStore } from './stores/draft';
 import { useAuthStore } from './stores/auth';
+import { useGenerationStore } from './stores/generation';
 import styles from './App.module.css';
 
 const { Sider, Content } = Layout;
@@ -14,10 +15,17 @@ const { Sider, Content } = Layout;
 const AppContent: React.FC = () => {
   const { loadDrafts, selectedDraftId } = useDraftStore();
   const initAuth = useAuthStore((s) => s.init);
+  const loadGenerationTasks = useGenerationStore((s) => s.loadTasksForDraft);
   useEffect(() => {
     initAuth();
     loadDrafts();
   }, [initAuth, loadDrafts]);
+
+  useEffect(() => {
+    if (selectedDraftId) {
+      loadGenerationTasks(selectedDraftId);
+    }
+  }, [selectedDraftId, loadGenerationTasks]);
 
   return (
     <Layout className={styles.layout}>

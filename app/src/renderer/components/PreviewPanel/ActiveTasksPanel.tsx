@@ -49,6 +49,7 @@ const ElapsedTimer: React.FC<{ startedAt: number }> = ({ startedAt }) => {
 const STATUS_CONFIG: Record<TaskStatus, { icon: React.ReactNode; className: string }> = {
   running: { icon: <LoadingOutlined spin />, className: styles.taskRunning },
   pending: { icon: <ClockCircleOutlined />, className: styles.taskPending },
+  waiting: { icon: <ClockCircleOutlined />, className: styles.taskPending },
   completed: { icon: <CheckCircleOutlined />, className: styles.taskCompleted },
   failed: { icon: <CloseCircleOutlined />, className: styles.taskFailed },
   cancelled: { icon: <StopOutlined />, className: styles.taskCancelled },
@@ -63,7 +64,7 @@ const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ onNavigateToResult 
   const [filter, setFilter] = useState<FilterMode>('all');
 
   const runningCount = tasks.filter((t) => t.status === 'running').length;
-  const pendingCount = tasks.filter((t) => t.status === 'pending').length;
+  const pendingCount = tasks.filter((t) => t.status === 'pending' || t.status === 'waiting').length;
   const finishedCount = tasks.filter(
     (t) => t.status === 'completed',
   ).length;
@@ -74,7 +75,7 @@ const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ onNavigateToResult 
       case 'running':
         return t.status === 'running';
       case 'pending':
-        return t.status === 'pending';
+        return t.status === 'pending' || t.status === 'waiting';
       case 'finished':
         return t.status === 'completed';
       case 'failed':
@@ -89,6 +90,7 @@ const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ onNavigateToResult 
     const statusOrder: Record<TaskStatus, number> = {
       running: 0,
       pending: 1,
+      waiting: 1,
       completed: 2,
       failed: 2,
       cancelled: 2,
@@ -107,7 +109,7 @@ const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ onNavigateToResult 
 
   const renderTaskItem = (task: GenerationTask) => {
     const config = STATUS_CONFIG[task.status];
-    const canCancel = task.status === 'pending' || task.status === 'running';
+    const canCancel = task.status === 'pending' || task.status === 'waiting' || task.status === 'running';
     const isClickable = task.status === 'completed' && (task.params as any).targetSectionId;
 
     return (
@@ -132,6 +134,7 @@ const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ onNavigateToResult 
               <>{task.progressMessage || '运行中'} <ElapsedTimer startedAt={task.startedAt} /></>
             )}
             {task.status === 'pending' && '等待中'}
+            {task.status === 'waiting' && (task.progressMessage || '等待中')}
             {task.status === 'completed' && task.startedAt && task.completedAt && (
               <>完成 ({formatElapsed(task.completedAt - task.startedAt)})</>
             )}

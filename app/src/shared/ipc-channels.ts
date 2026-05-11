@@ -63,6 +63,8 @@ export const TASK_CHANNELS = {
   SYNTHESIZE_VIDEO: 'task:synthesizeVideo',
   CANCEL: 'task:cancel',
   GET_MODELS: 'task:getModels',
+  LOAD_AI_TASKS: 'task:loadAiTasks',
+  SAVE_AI_TASKS: 'task:saveAiTasks',
 } as const;
 
 // ============================================

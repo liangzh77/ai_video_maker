@@ -24,7 +24,7 @@ const Sidebar: React.FC = () => {
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [generateDialogInitialMode, setGenerateDialogInitialMode] = useState<'image' | 'text' | 'video' | 'tasks' | undefined>(undefined);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
-  const activeTaskCount = useGenerationStore((s) => s.tasks.filter((t) => t.status === 'running' || t.status === 'pending').length);
+  const activeTaskCount = useGenerationStore((s) => s.tasks.filter((t) => t.status === 'running' || t.status === 'waiting' || t.status === 'pending').length);
   const { isLoggedIn, username, logout, resetPassword, deleteAccount } = useAuthStore();
 
   // 加载工作目录信息

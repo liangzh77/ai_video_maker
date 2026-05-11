@@ -115,11 +115,15 @@ export function isProviderFailure(error: unknown): boolean {
   if (/请先选择模型|提示词内容不能为空|文件路径不能为空|DRAFT_NOT_FOUND|资源未找到|Prompt content/i.test(message)) {
     return false;
   }
+  if (/队列已满|TASK_QUEUE_MAXED|TASK_INSTANCE_MAXED|PERSONAL_QUEUE_COUNT_LIMIT|APIKEY_TASK_IS_QUEUED|APIKEY_TASK_IS_RUNNING|Resources are busy|Concurrency Limit|Dedicated Instances Exhausted|System is currently busy|Service unavailable/i.test(message)) {
+    return false;
+  }
   return true;
 }
 
 export function errorCodeFrom(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || '');
+  if (/416|812|NOT_ENOUGH_WALLET|INSUFFICIENT_FUNDS|insufficient.?funds|insufficient.?balance|余额不足|额度不足|wallet/i.test(message)) return 'insufficient_quota';
   if (/429|rate.?limit|quota/i.test(message)) return 'rate_limit';
   if (/401|unauthorized|invalid.?key|API Key/i.test(message)) return 'unauthorized';
   if (/403|forbidden|permission/i.test(message)) return 'forbidden';

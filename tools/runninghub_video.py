@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 # ============================================
 
 DEFAULT_BASE_URL = "https://www.runninghub.cn"
-DEFAULT_TIMEOUT = 36000      # 任务超时 10 小时
+DEFAULT_TIMEOUT = 315360000  # 任务超时 10 年，实际等同于不限制
 DEFAULT_POLL_INTERVAL = 3    # 轮询间隔 3 秒
 HTTP_TIMEOUT = 60.0          # HTTP 请求超时 60 秒
 UPLOAD_TIMEOUT = 120.0       # 上传超时 120 秒
@@ -229,14 +229,28 @@ class RunningHubClient:
                 error_message = result.get('errorMessage', '')
 
                 if error_code and error_code != '0':
-                    # 队列满
-                    if 'QUEUE' in error_message.upper() or 'MAXED' in error_message.upper():
+                    # 临时容量满：共享并发满、专属实例忙、个人队列满
+                    if (
+                        'QUEUE' in error_message.upper()
+                        or 'MAXED' in error_message.upper()
+                        or error_code in ('415', '421', '814')
+                    ):
                         if attempt < MAX_QUEUE_RETRIES:
                             logger.info(f"[RunningHub] 队列已满，{QUEUE_FULL_RETRY_DELAY}秒后重试 ({attempt}/{MAX_QUEUE_RETRIES})...")
                             await asyncio.sleep(QUEUE_FULL_RETRY_DELAY)
                             continue
                         else:
                             raise RunningHubError("任务队列已满，请稍后重试")
+
+                    if error_code in ('416', '812') or any(
+                        token in error_message.upper()
+                        for token in ('NOT_ENOUGH_WALLET', 'INSUFFICIENT_FUNDS', 'INSUFFICIENT BALANCE')
+                    ):
+                        raise RunningHubError(
+                            f"RunningHub 额度不足: {error_message}",
+                            code=error_code,
+                            raw=result
+                        )
 
                     raise RunningHubError(
                         f"创建任务失败: {error_message}",
@@ -254,14 +268,21 @@ class RunningHubClient:
             # ---- V1 响应格式: {code, msg, data: {taskId, ...}} ----
             msg = result.get('msg', '')
 
-            # 检查队列满
-            if msg == 'TASK_QUEUE_MAXED':
+            # 检查临时容量满
+            if msg in ('TASK_QUEUE_MAXED', 'TASK_INSTANCE_MAXED', 'PERSONAL_QUEUE_COUNT_LIMIT') or result.get('code') in (415, 421, 814):
                 if attempt < MAX_QUEUE_RETRIES:
                     logger.info(f"[RunningHub] 队列已满，{QUEUE_FULL_RETRY_DELAY}秒后重试 ({attempt}/{MAX_QUEUE_RETRIES})...")
                     await asyncio.sleep(QUEUE_FULL_RETRY_DELAY)
                     continue
                 else:
                     raise RunningHubError("任务队列已满，请稍后重试")
+
+            if msg in ('TASK_CREATE_FAILED_BY_NOT_ENOUGH_WALLET', 'CORPAPIKEY_INSUFFICIENT_FUNDS') or result.get('code') in (416, 812):
+                raise RunningHubError(
+                    f"RunningHub 额度不足: {msg or '余额不足'}",
+                    code=str(result.get('code')),
+                    raw=result
+                )
 
             if result.get('code') != 0:
                 raise RunningHubError(
@@ -459,49 +480,54 @@ async def run(args) -> dict:
 
     print(f"进度: 5%")
 
-    # 1. 上传文件（如果有）
-    uploaded_filenames = []
-    if args.upload:
-        for i, file_path in enumerate(args.upload):
-            logger.info(f"[RunningHub] 上传文件 {i + 1}/{len(args.upload)}: {file_path}")
-            # 根据文件扩展名判断类型
-            ext = Path(file_path).suffix.lower()
-            if ext in ('.mp4', '.avi', '.mov', '.mkv', '.webm'):
-                file_type = 'video'
-            elif ext in ('.mp3', '.wav', '.aac', '.flac', '.ogg'):
-                file_type = 'audio'
-            else:
-                file_type = 'image'
-            filename = await client.upload_file(file_path, file_type=file_type)
-            uploaded_filenames.append(filename)
-
-    print(f"进度: 15%")
-
-    # 2. 解析节点参数
-    node_info_list = []
-    if args.node:
-        for node_str in args.node:
-            node_info_list.append(parse_node_arg(node_str))
-
-    # 替换上传文件占位符
-    if uploaded_filenames:
-        node_info_list = substitute_uploads(node_info_list, uploaded_filenames)
-
-    logger.info(f"[RunningHub] 节点参数: {json.dumps(node_info_list, ensure_ascii=False)}")
-
-    # 3. 创建任务
-    print(f"进度: 20%")
-    if args.app_id:
-        logger.info(f"[RunningHub] 创建 AI 应用任务: appId={args.app_id}")
-        task_id = await client.create_ai_app_task(args.app_id, node_info_list)
-    elif args.workflow_id:
-        logger.info(f"[RunningHub] 创建工作流任务: workflowId={args.workflow_id}")
-        task_id = await client.create_task(args.workflow_id, node_info_list)
+    if args.resume_task_id:
+        task_id = args.resume_task_id
+        logger.info(f"[RunningHub] 恢复远端任务: {task_id}")
+        print(f"[RunningHub] API_SUBMITTED {task_id}")
     else:
-        raise RunningHubError("必须指定 --app-id 或 --workflow-id")
+        # 1. 上传文件（如果有）
+        uploaded_filenames = []
+        if args.upload:
+            for i, file_path in enumerate(args.upload):
+                logger.info(f"[RunningHub] 上传文件 {i + 1}/{len(args.upload)}: {file_path}")
+                # 根据文件扩展名判断类型
+                ext = Path(file_path).suffix.lower()
+                if ext in ('.mp4', '.avi', '.mov', '.mkv', '.webm'):
+                    file_type = 'video'
+                elif ext in ('.mp3', '.wav', '.aac', '.flac', '.ogg'):
+                    file_type = 'audio'
+                else:
+                    file_type = 'image'
+                filename = await client.upload_file(file_path, file_type=file_type)
+                uploaded_filenames.append(filename)
 
-    # 通知前端 API 提交成功（用于释放排队槽位）
-    print("[RunningHub] API_SUBMITTED")
+        print(f"进度: 15%")
+
+        # 2. 解析节点参数
+        node_info_list = []
+        if args.node:
+            for node_str in args.node:
+                node_info_list.append(parse_node_arg(node_str))
+
+        # 替换上传文件占位符
+        if uploaded_filenames:
+            node_info_list = substitute_uploads(node_info_list, uploaded_filenames)
+
+        logger.info(f"[RunningHub] 节点参数: {json.dumps(node_info_list, ensure_ascii=False)}")
+
+        # 3. 创建任务
+        print(f"进度: 20%")
+        if args.app_id:
+            logger.info(f"[RunningHub] 创建 AI 应用任务: appId={args.app_id}")
+            task_id = await client.create_ai_app_task(args.app_id, node_info_list)
+        elif args.workflow_id:
+            logger.info(f"[RunningHub] 创建工作流任务: workflowId={args.workflow_id}")
+            task_id = await client.create_task(args.workflow_id, node_info_list)
+        else:
+            raise RunningHubError("必须指定 --app-id 或 --workflow-id")
+
+        # 通知前端 API 提交成功（用于释放排队槽位和持久化远端任务 ID）
+        print(f"[RunningHub] API_SUBMITTED {task_id}")
 
     # 4. 轮询任务
     print(f"进度: 25%")
@@ -610,7 +636,7 @@ def main():
         help=f"RunningHub API 地址（默认: {DEFAULT_BASE_URL}）"
     )
 
-    # 任务模式（二选一）
+    # 任务模式：新建任务或恢复远端任务
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--app-id",
@@ -619,6 +645,10 @@ def main():
     group.add_argument(
         "--workflow-id",
         help="工作流 ID"
+    )
+    group.add_argument(
+        "--resume-task-id",
+        help="恢复已提交的 RunningHub 任务 ID，只轮询并下载结果"
     )
 
     # 参数

@@ -6,7 +6,7 @@ import { RESOURCE_CHANNELS } from '@shared/ipc-channels';
 import storage from '../services/storage';
 import { extractMetadata, getResourceTypeFromMime, getMimeType, serializeTextContent } from '../services/metadata';
 import thumbnailCache from '../services/thumbnailCache';
-import type { Resource, OperationResult, PromptTag } from '@shared/types';
+import type { Resource, OperationResult, PromptTag, AudioMetadata } from '@shared/types';
 
 // ============================================
 // Request Types
@@ -216,6 +216,12 @@ async function createResourceFromFile(
   // 构建相对路径作为资源 ID
   const filesDir = storage.getFilesPath(draftId);
   const relativePath = path.relative(filesDir, destPath).replace(/\\/g, '/');
+
+  const audioDescription = mimeType.startsWith('audio/') ? originalFileName : undefined;
+  if (audioDescription) {
+    (metadata as AudioMetadata).description = audioDescription;
+    await storage.metadata.save(draftId, relativePath, { description: audioDescription });
+  }
 
   // 直接构建资源对象（不再写入 resources.json）
   const resource: Resource = {
@@ -442,6 +448,21 @@ export function registerResourceHandlers(): void {
           } catch (err) {
             console.error('[Resource] Failed to update text file:', err);
             return { success: false, error: 'Failed to update text file' };
+          }
+        }
+
+        if (foundResource.mimeType.startsWith('audio/') && request.metadata && 'description' in request.metadata) {
+          const description = String((request.metadata as Partial<AudioMetadata>).description || '');
+          try {
+            const existingMeta = await storage.metadata.load(foundDraftId, foundResource.id) || {};
+            await storage.metadata.save(foundDraftId, foundResource.id, {
+              ...existingMeta,
+              description,
+            });
+            console.log('[Resource] Updated audio description:', foundResource.id);
+          } catch (err) {
+            console.error('[Resource] Failed to update audio description:', err);
+            return { success: false, error: 'Failed to update audio description' };
           }
         }
 

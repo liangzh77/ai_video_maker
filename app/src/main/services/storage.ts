@@ -2,7 +2,7 @@ import { app } from 'electron';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import type { Draft, Resource, ResourceType, ProcessingTask, ResourceMetadata, SectionDescriptor, MediaType, ResourceMetadataFile } from '@shared/types';
+import type { Draft, Resource, ResourceType, ProcessingTask, AIGenerationTask, ResourceMetadata, SectionDescriptor, MediaType, ResourceMetadataFile } from '@shared/types';
 import { parseFolderName, buildFolderName } from '@shared/section-utils';
 import { loadConfig, saveConfig } from './config';
 import { extractMetadata, getMimeType } from './metadata';
@@ -149,6 +149,10 @@ function getResourcesPath(draftId: string): string {
 
 function getTasksPath(draftId: string): string {
   return path.join(getDraftPath(draftId), 'tasks.json');
+}
+
+function getAiTasksPath(draftId: string): string {
+  return path.join(getDraftPath(draftId), 'ai_tasks.json');
 }
 
 function getLinksPath(draftId: string): string {
@@ -592,12 +596,17 @@ async function buildResource(
 
     // 检查伴随 JSON 是否有 generation 字段
     let hasGenerationMeta = false;
+    let companionData: any = null;
     try {
-      const companionData = await readJson<any>(getCompanionPath(filePath), null);
+      companionData = await readJson<any>(getCompanionPath(filePath), null);
       if (companionData?.generation) {
         hasGenerationMeta = true;
       }
     } catch {}
+
+    if (getMimeType(filePath).startsWith('audio/') && companionData?.description && typeof companionData.description === 'string') {
+      (metadata as any).description = companionData.description;
+    }
 
     const resource: Resource = {
       id: relativePath, // 使用相对路径作为 ID
@@ -1185,6 +1194,11 @@ export async function getResource(draftId: string, resourceId: string): Promise<
     // 提取元数据（使用持久化缓存）
     const draftPath = getDraftPath(draftId);
     const metadata = await extractMetadata(filePath, resourceType, draftPath);
+    const mimeType = getMimeType(filePath);
+    const companionData = await readJson<any>(getCompanionPath(filePath), null);
+    if (mimeType.startsWith('audio/') && companionData?.description && typeof companionData.description === 'string') {
+      (metadata as any).description = companionData.description;
+    }
 
     const resource: Resource = {
       id: resourceId,
@@ -1193,7 +1207,7 @@ export async function getResource(draftId: string, resourceId: string): Promise<
       fileName: path.basename(filePath),
       filePath,
       fileSize: stat.size,
-      mimeType: getMimeType(filePath),
+      mimeType,
       metadata,
       createdAt: stat.birthtime.toISOString(),
     };
@@ -1347,6 +1361,11 @@ interface TasksFile {
   tasks: ProcessingTask[];
 }
 
+interface AiTasksFile {
+  tasks: AIGenerationTask[];
+  savedAt?: string;
+}
+
 export async function listTasks(draftId: string): Promise<ProcessingTask[]> {
   const tasksPath = getTasksPath(draftId);
   const data = await readJson<TasksFile>(tasksPath, { tasks: [] });
@@ -1395,6 +1414,18 @@ export async function updateTask(
 
   await writeJson(tasksPath, data);
   return data.tasks[index];
+}
+
+export async function loadAiTasks(draftId: string): Promise<AIGenerationTask[]> {
+  const data = await readJson<AiTasksFile>(getAiTasksPath(draftId), { tasks: [] });
+  return data.tasks || [];
+}
+
+export async function saveAiTasks(draftId: string, tasks: AIGenerationTask[]): Promise<void> {
+  await writeJson<AiTasksFile>(getAiTasksPath(draftId), {
+    tasks,
+    savedAt: new Date().toISOString(),
+  });
 }
 
 // ============================================
@@ -1560,6 +1591,10 @@ export const storage = {
     get: getTask,
     add: addTask,
     update: updateTask,
+  },
+  aiTask: {
+    load: loadAiTasks,
+    save: saveAiTasks,
   },
   links: {
     load: loadLinks,

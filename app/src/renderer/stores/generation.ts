@@ -9,7 +9,7 @@ import { useNotificationStore } from './notification';
 // ============================================
 
 export type TaskType = 'image' | 'text' | 'video';
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type TaskStatus = 'pending' | 'waiting' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface ImageTaskParams {
   sourceImageIds: string[];
@@ -58,6 +58,7 @@ export interface GenerationTask {
   resultText?: string;
   resultResourceId?: string;
   progressMessage?: string;
+  remoteTaskId?: string;
   createdAt: number;
   startedAt?: number;
   completedAt?: number;
@@ -71,6 +72,7 @@ interface GenerationStore {
   cancelTask: (taskId: string) => void;
   cancelPendingByType: (type: TaskType) => void;
   clearFinished: () => void;
+  loadTasksForDraft: (draftId: string) => Promise<void>;
   setThreadCount: (type: TaskType, count: number) => void;
   processQueue: (type: TaskType) => void;
 }
@@ -82,6 +84,38 @@ interface GenerationStore {
 let taskIdCounter = 0;
 function generateTaskId(): string {
   return `gen_${Date.now()}_${++taskIdCounter}`;
+}
+
+function isUnfinishedTask(task: GenerationTask): boolean {
+  return task.status === 'pending' || task.status === 'waiting' || task.status === 'running';
+}
+
+const aiTaskPersistChains = new Map<string, Promise<void>>();
+const loadedAiTaskDrafts = new Set<string>();
+
+function persistDraftTasks(draftId: string, tasks: GenerationTask[]): void {
+  if (typeof window === 'undefined' || !window.api?.task?.saveAiTasks) return;
+  const draftTasks = tasks.filter((task) => task.draftId === draftId);
+  const previous = aiTaskPersistChains.get(draftId) || Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(() => window.api.task.saveAiTasks({ draftId, tasks: draftTasks }))
+    .then((result) => {
+      if (result && result.success === false) {
+        console.error('[Generation] Failed to save ai_tasks.json:', result.error);
+      }
+    })
+    .catch((error) => {
+      console.error('[Generation] Failed to save ai_tasks.json:', error);
+    });
+  aiTaskPersistChains.set(draftId, next);
+}
+
+function persistChangedDrafts(tasks: GenerationTask[], draftIds?: Iterable<string>): void {
+  const ids = draftIds ? [...draftIds] : [...new Set(tasks.map((task) => task.draftId))];
+  for (const draftId of ids) {
+    persistDraftTasks(draftId, tasks);
+  }
 }
 
 // Per-draftId debounce timers for resource refresh
@@ -197,10 +231,40 @@ function notifyApiSubmitted(taskId: string) {
   }
 }
 
-const RH_RETRY_DELAY = 10_000; // 队列满重试间隔 10 秒
+const RH_RETRY_DELAY = 30_000; // 临时容量满重试间隔 30 秒
 
 function isQueueFullError(error: string): boolean {
-  return error.includes('队列已满') || error.includes('QUEUE') || error.includes('MAXED');
+  return /队列已满|稍后重试|TASK_QUEUE_MAXED|TASK_INSTANCE_MAXED|PERSONAL_QUEUE_COUNT_LIMIT|APIKEY_TASK_IS_QUEUED|APIKEY_TASK_IS_RUNNING|QUEUE|MAXED|Resources are busy|Concurrency Limit|Dedicated Instances Exhausted|System is currently busy|Service unavailable/i.test(error);
+}
+
+function queueRetryMessage(): string {
+  return 'RunningHub 队列已满，30秒后重试...';
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function markTaskWaiting(taskId: string, message: string): void {
+  useGenerationStore.setState((state) => ({
+    tasks: state.tasks.map((t) =>
+      t.id === taskId
+        ? { ...t, status: 'waiting' as TaskStatus, progressMessage: message }
+        : t,
+    ),
+  }));
+  persistChangedDrafts(useGenerationStore.getState().tasks);
+}
+
+function markTaskRunning(taskId: string): void {
+  useGenerationStore.setState((state) => ({
+    tasks: state.tasks.map((t) =>
+      t.id === taskId && t.status === 'waiting'
+        ? { ...t, status: 'running' as TaskStatus, startedAt: t.startedAt || Date.now() }
+        : t,
+    ),
+  }));
+  persistChangedDrafts(useGenerationStore.getState().tasks);
 }
 
 async function executeVideoTask(task: GenerationTask): Promise<string | undefined> {
@@ -236,6 +300,7 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
           skipFrames: params.rhSkipFrames || 0,
           targetSectionId: params.targetSectionId,
           taskId: task.id,
+          remoteTaskId: task.remoteTaskId,
         });
 
         // 等待 API 提交成功或整个任务完成（取先到达的）
@@ -260,14 +325,11 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
           return result.data?.resourceId;
         }
 
-        // 队列满 → 等 10 秒重试
+        // 临时容量满 → 等待后重试，不进入失败列表
         if (isQueueFullError(result.error || '')) {
-          useGenerationStore.setState((state) => ({
-            tasks: state.tasks.map((t) =>
-              t.id === task.id ? { ...t, progressMessage: '队列已满，10秒后重试...' } : t,
-            ),
-          }));
-          await new Promise((r) => setTimeout(r, RH_RETRY_DELAY));
+          markTaskWaiting(task.id, queueRetryMessage());
+          await sleep(RH_RETRY_DELAY);
+          markTaskRunning(task.id);
           continue;
         }
 
@@ -307,6 +369,7 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
           maxSize: params.itMaxSize,
           targetSectionId: params.targetSectionId,
           taskId: task.id,
+          remoteTaskId: task.remoteTaskId,
         });
 
         submittedPromise.then(() => {
@@ -328,12 +391,9 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
         }
 
         if (isQueueFullError(result.error || '')) {
-          useGenerationStore.setState((state) => ({
-            tasks: state.tasks.map((t) =>
-              t.id === task.id ? { ...t, progressMessage: '队列已满，10秒后重试...' } : t,
-            ),
-          }));
-          await new Promise((r) => setTimeout(r, RH_RETRY_DELAY));
+          markTaskWaiting(task.id, queueRetryMessage());
+          await sleep(RH_RETRY_DELAY);
+          markTaskRunning(task.id);
           continue;
         }
 
@@ -378,6 +438,15 @@ function setupVideoProgressListener() {
     if (task && task.status === 'running') {
       // 检测 API 提交成功标记，释放排队槽位
       if (data.message.includes('API_SUBMITTED')) {
+        const remoteTaskId = data.message.match(/API_SUBMITTED\s+(\S+)/)?.[1];
+        if (remoteTaskId) {
+          useGenerationStore.setState((state) => ({
+            tasks: state.tasks.map((t) =>
+              t.id === data.taskId ? { ...t, remoteTaskId, progressMessage: '已提交，等待生成结果...' } : t,
+            ),
+          }));
+          persistChangedDrafts(useGenerationStore.getState().tasks);
+        }
         notifyApiSubmitted(data.taskId);
         return; // 不显示这个内部标记
       }
@@ -386,6 +455,7 @@ function setupVideoProgressListener() {
           t.id === data.taskId ? { ...t, progressMessage: data.message } : t,
         ),
       }));
+      persistChangedDrafts(useGenerationStore.getState().tasks);
     }
   });
 }
@@ -436,6 +506,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
     }));
 
     set((state) => ({ tasks: [...state.tasks, ...created] }));
+    persistChangedDrafts(get().tasks, new Set(created.map((task) => task.draftId)));
 
     // Trigger processing for each unique task type
     const types = new Set(created.map((t) => t.type));
@@ -449,11 +520,12 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
     const task = get().tasks.find((t) => t.id === taskId);
     if (!task) return;
 
-    if (task.status === 'pending') {
+    if (task.status === 'pending' || task.status === 'waiting') {
       // 等待中的任务直接移除
       set((state) => ({
         tasks: state.tasks.filter((t) => t.id !== taskId),
       }));
+      persistChangedDrafts(get().tasks, [task.draftId]);
     } else if (task.status === 'running') {
       // 运行中的任务标记取消（IPC 返回时会检查此状态并丢弃结果）
       set((state) => ({
@@ -463,6 +535,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
             : t,
         ),
       }));
+      persistChangedDrafts(get().tasks, [task.draftId]);
     }
     // 释放槽位，尝试启动下一个任务
     get().processQueue(task.type);
@@ -471,19 +544,55 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
   cancelPendingByType: (type) => {
     set((state) => ({
       tasks: state.tasks.map((t) =>
-        t.type === type && t.status === 'pending'
+        t.type === type && (t.status === 'pending' || t.status === 'waiting')
           ? { ...t, status: 'cancelled' as TaskStatus, completedAt: Date.now() }
           : t,
       ),
     }));
+    persistChangedDrafts(get().tasks);
   },
 
   clearFinished: () => {
+    const beforeDraftIds = new Set(get().tasks.map((task) => task.draftId));
     set((state) => ({
       tasks: state.tasks.filter(
-        (t) => t.status === 'pending' || t.status === 'running',
+        (t) => t.status === 'pending' || t.status === 'waiting' || t.status === 'running',
       ),
     }));
+    persistChangedDrafts(get().tasks, beforeDraftIds);
+  },
+
+  loadTasksForDraft: async (draftId: string) => {
+    if (loadedAiTaskDrafts.has(draftId)) return;
+    if (!window.api?.task?.loadAiTasks) return;
+    const result = await window.api.task.loadAiTasks({ draftId });
+    if (!result.success) {
+      console.error('[Generation] Failed to load ai_tasks.json:', result.error);
+      return;
+    }
+    loadedAiTaskDrafts.add(draftId);
+    const loaded = ((result.data || []) as GenerationTask[]).map((task) => {
+      if (isUnfinishedTask(task)) {
+        return {
+          ...task,
+          status: 'pending' as TaskStatus,
+          progressMessage: task.remoteTaskId ? '恢复任务，继续查询结果...' : '恢复任务，等待重新提交...',
+          completedAt: undefined,
+          error: undefined,
+        };
+      }
+      return task;
+    });
+    set((state) => ({
+      tasks: [
+        ...state.tasks.filter((task) => task.draftId !== draftId),
+        ...loaded,
+      ],
+    }));
+    persistChangedDrafts(get().tasks, [draftId]);
+    for (const type of new Set(loaded.filter(isUnfinishedTask).map((task) => task.type))) {
+      setTimeout(() => get().processQueue(type), 0);
+    }
   },
 
   setThreadCount: (type, count) => {
@@ -537,6 +646,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
           : t,
       ),
     }));
+    persistChangedDrafts(get().tasks);
 
     // Execute each task
     for (const task of toStart) {
@@ -558,17 +668,19 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
           const current = get().tasks.find((t) => t.id === task.id);
           if (current?.status === 'cancelled') {
             set((s) => ({ tasks: s.tasks.filter((t) => t.id !== task.id) }));
+            persistChangedDrafts(get().tasks, [task.draftId]);
             return;
           }
 
           // Mark completed
           set((s) => ({
             tasks: s.tasks.map((t) =>
-              t.id === task.id && t.status === 'running'
+              t.id === task.id && (t.status === 'running' || t.status === 'waiting')
                 ? { ...t, status: 'completed' as TaskStatus, completedAt: Date.now(), resultText, resultResourceId }
                 : t,
             ),
           }));
+          persistChangedDrafts(get().tasks, [task.draftId]);
 
           // 持久化生成元数据（后端会自动计算源文件哈希）
           if (resultResourceId) {
@@ -592,6 +704,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
           const current = get().tasks.find((t) => t.id === task.id);
           if (current?.status === 'cancelled') {
             set((s) => ({ tasks: s.tasks.filter((t) => t.id !== task.id) }));
+            persistChangedDrafts(get().tasks, [task.draftId]);
             return;
           }
 
@@ -599,7 +712,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
           const errorMessage = err instanceof Error ? err.message : String(err);
           set((s) => ({
             tasks: s.tasks.map((t) =>
-              t.id === task.id && t.status === 'running'
+              t.id === task.id && (t.status === 'running' || t.status === 'waiting')
                 ? {
                     ...t,
                     status: 'failed' as TaskStatus,
@@ -609,6 +722,7 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
                 : t,
             ),
           }));
+          persistChangedDrafts(get().tasks, [task.draftId]);
 
           // 显示持久化错误通知（可复制、需手动关闭）
           const typeLabel = task.type === 'video' ? '视频' : task.type === 'image' ? '图片' : '文本';

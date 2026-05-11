@@ -183,6 +183,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
   // Infinitetalk 专属状态
   const [itImageId, setItImageId] = useState<string | null>(null);
   const [itAudioId, setItAudioId] = useState<string | null>(null);
+  const [itBatchTarget, setItBatchTarget] = useState<'image' | 'audio' | null>(null);
+  const [itBatchImageIds, setItBatchImageIds] = useState<string[]>([]);
+  const [itBatchAudioIds, setItBatchAudioIds] = useState<string[]>([]);
   const [itMaxSize, setItMaxSize] = useState(1280);
 
   // 提示词历史
@@ -338,6 +341,55 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     setVideoModeAudioIds((prev) =>
       prev.includes(audioId) ? prev.filter((id) => id !== audioId) : [...prev, audioId]
     );
+  };
+
+  const setInfinitetalkBatchMode = (target: 'image' | 'audio', checked: boolean) => {
+    if (!checked) {
+      if (target === 'image' && itBatchImageIds.length > 0) {
+        setItImageId(itBatchImageIds[0]);
+      }
+      if (target === 'audio' && itBatchAudioIds.length > 0) {
+        setItAudioId(itBatchAudioIds[0]);
+      }
+      setItBatchTarget(null);
+      return;
+    }
+
+    if (itBatchTarget === 'image' && target === 'audio' && itBatchImageIds.length > 0) {
+      setItImageId(itBatchImageIds[0]);
+    }
+    if (itBatchTarget === 'audio' && target === 'image' && itBatchAudioIds.length > 0) {
+      setItAudioId(itBatchAudioIds[0]);
+    }
+
+    setItBatchTarget(target);
+    if (target === 'image') {
+      setItBatchImageIds((prev) => (prev.length > 0 ? prev : (itImageId ? [itImageId] : [])));
+      setItBatchAudioIds([]);
+    } else {
+      setItBatchAudioIds((prev) => (prev.length > 0 ? prev : (itAudioId ? [itAudioId] : [])));
+      setItBatchImageIds([]);
+    }
+  };
+
+  const toggleInfinitetalkImageSelection = (imageId: string) => {
+    if (itBatchTarget === 'image') {
+      setItBatchImageIds((prev) =>
+        prev.includes(imageId) ? prev.filter((id) => id !== imageId) : [...prev, imageId],
+      );
+      return;
+    }
+    setItImageId((prev) => (prev === imageId ? null : imageId));
+  };
+
+  const toggleInfinitetalkAudioSelection = (audioId: string) => {
+    if (itBatchTarget === 'audio') {
+      setItBatchAudioIds((prev) =>
+        prev.includes(audioId) ? prev.filter((id) => id !== audioId) : [...prev, audioId],
+      );
+      return;
+    }
+    setItAudioId((prev) => (prev === audioId ? null : audioId));
   };
 
   // 视频选择变化时，自动根据第一个选中视频的元数据更新时长和比例
@@ -614,6 +666,9 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       // 重置 Infinitetalk 状态
       setItImageId(null);
       setItAudioId(null);
+      setItBatchTarget(null);
+      setItBatchImageIds([]);
+      setItBatchAudioIds([]);
       // 根据 initialMode 或 prompt 的 tag 设置默认生成模式
       let resolvedMode: string;
       if (initialMode) {
@@ -836,37 +891,70 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
     }
 
     if (videoMethod === 'infinitetalk') {
-      if (!itImageId) {
+      const infinitetalkImageIds = itBatchTarget === 'image'
+        ? itBatchImageIds
+        : (itImageId ? [itImageId] : []);
+      const infinitetalkAudioIds = itBatchTarget === 'audio'
+        ? itBatchAudioIds
+        : (itAudioId ? [itAudioId] : []);
+
+      if (infinitetalkImageIds.length === 0) {
         message.error('请选择一张图片');
         return;
       }
-      if (!itAudioId) {
+      if (infinitetalkAudioIds.length === 0) {
         message.error('请选择一段音频');
+        return;
+      }
+      if (itBatchTarget === 'image' && !itAudioId) {
+        message.error('图片批量模式请先选择一段音频');
+        return;
+      }
+      if (itBatchTarget === 'audio' && !itImageId) {
+        message.error('音频批量模式请先选择一张图片');
         return;
       }
 
       savePromptToHistory(editedPrompt);
 
-      addTasks([{
+      const infinitetalkTasks = itBatchTarget === 'image'
+        ? infinitetalkImageIds.map((imageId, index) => ({
+          imageId,
+          audioId: itAudioId!,
+          label: `Infinitetalk #${index + 1}`,
+        }))
+        : itBatchTarget === 'audio'
+          ? infinitetalkAudioIds.map((audioId, index) => ({
+            imageId: itImageId!,
+            audioId,
+            label: `Infinitetalk #${index + 1}`,
+          }))
+          : [{
+            imageId: infinitetalkImageIds[0],
+            audioId: infinitetalkAudioIds[0],
+            label: 'Infinitetalk #1',
+          }];
+
+      addTasks(infinitetalkTasks.map((item) => ({
         type: 'video' as const,
         draftId: selectedDraftId,
         prompt: editedPrompt,
-        label: 'Infinitetalk #1',
+        label: item.label,
         params: {
-          imageResourceIds: [itImageId],
+          imageResourceIds: [item.imageId],
           videoResourceIds: [],
-          audioResourceIds: [itAudioId],
+          audioResourceIds: [item.audioId],
           duration: 0,
           ratio: '',
           targetSectionId: targetVideoSection || undefined,
           method: 'infinitetalk',
-          itImageResourceId: itImageId,
-          itAudioResourceId: itAudioId,
+          itImageResourceId: item.imageId,
+          itAudioResourceId: item.audioId,
           itMaxSize,
         },
-      }]);
+      })));
 
-      message.success('已提交 1 个 Infinitetalk 视频任务');
+      message.success(`已提交 ${infinitetalkTasks.length} 个 Infinitetalk 视频任务`);
       setMode('tasks');
       return;
     }
@@ -1679,12 +1767,20 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
             {/* Video mode: Infinitetalk - Image & Audio Selection */}
             {mode === 'video' && videoMethod === 'infinitetalk' && (
               <>
-                {/* 选择图片（单选） */}
+                {/* 选择图片 */}
                 <div className={styles.section}>
                   <div className={styles.sectionTitle}>
-                    选择图片（必选，1 张）
+                    选择图片（必选）
+                    <Checkbox
+                      checked={itBatchTarget === 'image'}
+                      onChange={(e) => setInfinitetalkBatchMode('image', e.target.checked)}
+                    >
+                      批量
+                    </Checkbox>
                     <span className={styles.count}>
-                      {itImageId ? '已选 1' : '未选'} / 共 {allImages.length} 张
+                      {itBatchTarget === 'image'
+                        ? `已选 ${itBatchImageIds.length}`
+                        : (itImageId ? '已选 1' : '未选')} / 共 {allImages.length} 张
                     </span>
                     <span className={styles.scaleControls}>
                       <Button type="text" size="small" icon={<MinusOutlined />} onClick={handleDecreaseScale} disabled={cardScale <= SCALE_STEPS[0]} />
@@ -1700,39 +1796,53 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                     />
                   ) : (
                     <div className={styles.imageGrid} style={{ maxHeight: '30vh' }}>
-                      {allImages.map((img) => (
-                        <div
-                          key={img.id}
-                          className={`${styles.imageItem} ${itImageId === img.id ? styles.selected : ''}`}
-                          onClick={() => setItImageId(itImageId === img.id ? null : img.id)}
-                        >
-                          <img
-                            src={getImageUrl(img)}
-                            alt={img.fileName}
-                            className={styles.thumbnail}
-                            style={{
-                              height: `calc(37.5vh * ${cardScale})`,
-                              maxWidth: `calc(52.5vw * ${cardScale})`,
-                            }}
-                          />
-                          {itImageId === img.id && (
-                            <div className={styles.selectedBadge}>1</div>
-                          )}
-                          <div className={styles.imageName} title={img.fileName}>
-                            {img.fileName}
+                      {allImages.map((img) => {
+                        const selectedIndex = itBatchTarget === 'image'
+                          ? itBatchImageIds.indexOf(img.id)
+                          : (itImageId === img.id ? 0 : -1);
+                        const selected = selectedIndex >= 0;
+                        return (
+                          <div
+                            key={img.id}
+                            className={`${styles.imageItem} ${selected ? styles.selected : ''}`}
+                            onClick={() => toggleInfinitetalkImageSelection(img.id)}
+                          >
+                            <img
+                              src={getImageUrl(img)}
+                              alt={img.fileName}
+                              className={styles.thumbnail}
+                              style={{
+                                height: `calc(37.5vh * ${cardScale})`,
+                                maxWidth: `calc(52.5vw * ${cardScale})`,
+                              }}
+                            />
+                            {selected && (
+                              <div className={styles.selectedBadge}>{selectedIndex + 1}</div>
+                            )}
+                            <div className={styles.imageName} title={img.fileName}>
+                              {img.fileName}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
-                {/* 选择音频（单选） */}
+                {/* 选择音频 */}
                 <div className={styles.section}>
                   <div className={styles.sectionTitle}>
-                    选择音频（必选，1 段）
+                    选择音频（必选）
+                    <Checkbox
+                      checked={itBatchTarget === 'audio'}
+                      onChange={(e) => setInfinitetalkBatchMode('audio', e.target.checked)}
+                    >
+                      批量
+                    </Checkbox>
                     <span className={styles.count}>
-                      {itAudioId ? '已选 1' : '未选'} / 共 {allAudios.length} 段
+                      {itBatchTarget === 'audio'
+                        ? `已选 ${itBatchAudioIds.length}`
+                        : (itAudioId ? '已选 1' : '未选')} / 共 {allAudios.length} 段
                     </span>
                   </div>
                   {allAudios.length === 0 ? (
@@ -1744,25 +1854,31 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                     />
                   ) : (
                     <div className={styles.imageGrid} style={{ maxHeight: '20vh' }}>
-                      {allAudios.map((audio) => (
-                        <div
-                          key={audio.id}
-                          className={`${styles.imageItem} ${itAudioId === audio.id ? styles.selected : ''}`}
-                          onClick={() => setItAudioId(itAudioId === audio.id ? null : audio.id)}
-                          style={{ minWidth: 120 }}
-                        >
-                          <div style={{
-                            height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            background: 'rgba(255,255,255,0.05)', borderRadius: 4, fontSize: 22,
-                          }}>🎵</div>
-                          {itAudioId === audio.id && (
-                            <div className={styles.selectedBadge}>1</div>
-                          )}
-                          <div className={styles.imageName} title={audio.fileName}>
-                            {audio.fileName}
+                      {allAudios.map((audio) => {
+                        const selectedIndex = itBatchTarget === 'audio'
+                          ? itBatchAudioIds.indexOf(audio.id)
+                          : (itAudioId === audio.id ? 0 : -1);
+                        const selected = selectedIndex >= 0;
+                        return (
+                          <div
+                            key={audio.id}
+                            className={`${styles.imageItem} ${selected ? styles.selected : ''}`}
+                            onClick={() => toggleInfinitetalkAudioSelection(audio.id)}
+                            style={{ minWidth: 120 }}
+                          >
+                            <div style={{
+                              height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              background: 'rgba(255,255,255,0.05)', borderRadius: 4, fontSize: 22,
+                            }}>🎵</div>
+                            {selected && (
+                              <div className={styles.selectedBadge}>{selectedIndex + 1}</div>
+                            )}
+                            <div className={styles.imageName} title={audio.fileName}>
+                              {audio.fileName}
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
