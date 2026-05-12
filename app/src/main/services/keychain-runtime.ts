@@ -392,7 +392,7 @@ class KeychainRuntimeService {
     return data as T;
   }
 
-  private async fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = 15000): Promise<Response> {
+  private async fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = 60000): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {

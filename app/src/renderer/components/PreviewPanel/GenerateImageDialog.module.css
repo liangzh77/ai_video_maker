@@ -290,6 +290,21 @@
   background-color: rgba(0, 0, 0, 0.5);
 }
 
+.audioDescription {
+  position: absolute;
+  bottom: 16px;
+  left: 0;
+  right: 0;
+  padding: 2px 4px;
+  font-size: 10px;
+  color: #fff;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-color: rgba(0, 0, 0, 0.42);
+}
+
 /* 图片类型标签 */
 .typeTag {
   position: absolute;

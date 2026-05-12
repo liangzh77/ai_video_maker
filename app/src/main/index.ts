@@ -2,6 +2,17 @@
 const electron = require('electron');
 const { app, BrowserWindow, protocol } = electron;
 
+function ignoreBrokenStdoutPipe(stream: NodeJS.WriteStream): void {
+  stream.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code !== 'EPIPE') {
+      throw error;
+    }
+  });
+}
+
+ignoreBrokenStdoutPipe(process.stdout);
+ignoreBrokenStdoutPipe(process.stderr);
+
 // Register custom protocol IMMEDIATELY - must be before app ready
 protocol.registerSchemesAsPrivileged([
   {

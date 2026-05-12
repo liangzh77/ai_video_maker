@@ -1729,6 +1729,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                       {allAudios.map((audio) => {
                         const sel = videoModeAudioIds.includes(audio.id);
                         const meta = isAudioMetadata(audio.metadata) ? audio.metadata : null;
+                        const description = meta?.description?.trim();
                         return (
                           <div
                             key={audio.id}
@@ -1741,6 +1742,11 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                             <div className={styles.imageName} title={audio.fileName}>
                               {audio.fileName}
                             </div>
+                            {description && (
+                              <div className={styles.audioDescription} title={description}>
+                                {description}
+                              </div>
+                            )}
                             {meta && (
                               <span style={{
                                 position: 'absolute', top: 4, left: 4,
@@ -1859,6 +1865,8 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                           ? itBatchAudioIds.indexOf(audio.id)
                           : (itAudioId === audio.id ? 0 : -1);
                         const selected = selectedIndex >= 0;
+                        const meta = isAudioMetadata(audio.metadata) ? audio.metadata : null;
+                        const description = meta?.description?.trim();
                         return (
                           <div
                             key={audio.id}
@@ -1876,6 +1884,11 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                             <div className={styles.imageName} title={audio.fileName}>
                               {audio.fileName}
                             </div>
+                            {description && (
+                              <div className={styles.audioDescription} title={description}>
+                                {description}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
