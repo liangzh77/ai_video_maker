@@ -115,6 +115,9 @@ export function isProviderFailure(error: unknown): boolean {
   if (/请先选择模型|提示词内容不能为空|文件路径不能为空|DRAFT_NOT_FOUND|资源未找到|Prompt content/i.test(message)) {
     return false;
   }
+  if (/Keychain|密钥服务|keychain\.baseUrl/i.test(message)) {
+    return false;
+  }
   if (/队列已满|TASK_QUEUE_MAXED|TASK_INSTANCE_MAXED|PERSONAL_QUEUE_COUNT_LIMIT|APIKEY_TASK_IS_QUEUED|APIKEY_TASK_IS_RUNNING|Resources are busy|Concurrency Limit|Dedicated Instances Exhausted|System is currently busy|Service unavailable/i.test(message)) {
     return false;
   }
@@ -130,6 +133,36 @@ export function errorCodeFrom(error: unknown): string {
   if (/timeout|超时|ECONNABORTED/i.test(message)) return 'timeout';
   if (/network|ENOTFOUND|ECONNREFUSED|连接失败/i.test(message)) return 'network_error';
   return 'provider_error';
+}
+
+function formatKeychainUrlError(url: string, error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error || 'unknown error');
+  let host = url;
+  try {
+    host = new URL(url).origin;
+  } catch {
+    // keep original url for invalid-url diagnostics
+  }
+
+  if (/ERR_INVALID_URL|Invalid URL/i.test(message)) {
+    return new Error(`Keychain 配置错误：keychain.baseUrl 不是有效地址，请检查安装目录 config.json (${host})`);
+  }
+  if (/ERR_NAME_NOT_RESOLVED|ENOTFOUND|ERR_UNKNOWN_URL_SCHEME/i.test(message)) {
+    return new Error(`无法解析 Keychain 服务地址：${host}，请检查 config.json 中的 keychain.baseUrl 或 DNS/网络设置`);
+  }
+  if (/ERR_CONNECTION_CLOSED/i.test(message)) {
+    return new Error(`无法连接 Keychain 密钥服务：连接被关闭 (${host})。请检查网络、代理、防火墙或杀软 HTTPS 扫描`);
+  }
+  if (/ERR_CONNECTION_REFUSED|ECONNREFUSED/i.test(message)) {
+    return new Error(`无法连接 Keychain 密钥服务：连接被拒绝 (${host})，请检查 keychain.baseUrl 是否配置正确`);
+  }
+  if (/ERR_CERT|CERT_|certificate/i.test(message)) {
+    return new Error(`无法连接 Keychain 密钥服务：证书校验失败 (${host})，请检查系统时间、代理或 HTTPS 证书设置`);
+  }
+  if (/network|ERR_|ECONN|EAI_AGAIN/i.test(message)) {
+    return new Error(`无法连接 Keychain 密钥服务：${message} (${host})`);
+  }
+  return error instanceof Error ? error : new Error(message);
 }
 
 class KeychainRuntimeService {
@@ -333,8 +366,14 @@ class KeychainRuntimeService {
     if (!settings.baseUrl) throw new Error('Keychain 地址未配置');
     if (!settings.channelId && path.includes('/channels/')) throw new Error('Keychain 渠道 ID 未配置');
     if (!settings.runtimeToken) throw new Error('Keychain Runtime Token 未配置');
+    let requestUrl: string;
+    try {
+      requestUrl = new URL(path, settings.baseUrl).toString();
+    } catch {
+      throw new Error(`Keychain 配置错误：keychain.baseUrl 不是有效地址，请检查安装目录 config.json (${settings.baseUrl})`);
+    }
 
-    const response = await this.fetchWithTimeout(`${settings.baseUrl}${path}`, {
+    const response = await this.fetchWithTimeout(requestUrl, {
       ...init,
       headers: {
         'Authorization': `Bearer ${settings.runtimeToken}`,
@@ -360,9 +399,9 @@ class KeychainRuntimeService {
       return await net.fetch(url, { ...init, signal: controller.signal });
     } catch (error: any) {
       if (error?.name === 'AbortError') {
-        throw new Error(`请求超时 (${timeoutMs / 1000}s)`);
+        throw new Error(`Keychain 密钥服务请求超时 (${timeoutMs / 1000}s)`);
       }
-      throw error;
+      throw formatKeychainUrlError(url, error);
     } finally {
       clearTimeout(timer);
     }

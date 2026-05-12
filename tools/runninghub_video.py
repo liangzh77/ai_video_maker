@@ -219,9 +219,11 @@ class RunningHubClient:
                     code=str(e.response.status_code)
                 )
             except httpx.TimeoutException:
-                raise RunningHubError("API 请求超时")
+                raise RunningHubError("RunningHub 服务请求超时，请检查网络或稍后重试")
             except httpx.ConnectError as e:
-                raise RunningHubError(f"无法连接到 RunningHub 服务器: {e}")
+                raise RunningHubError(f"无法连接 RunningHub 服务：连接失败，请检查网络、代理或防火墙设置: {e}")
+            except httpx.NetworkError as e:
+                raise RunningHubError(f"无法连接 RunningHub 服务：网络连接异常，请检查网络、代理或防火墙设置: {e}")
 
             # ---- V2 响应格式: {taskId, status, errorCode, errorMessage, ...} ----
             if 'errorCode' in result or 'errorMessage' in result:

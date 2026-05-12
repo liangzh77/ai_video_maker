@@ -107,6 +107,14 @@ function getPythonPath(config?: AppConfig): string {
   return config?.pythonPath || 'python';
 }
 
+const MODEL_SECRET_ENV_NAMES = new Set([
+  'GEMINI_API_KEY',
+  'GEMINI_PROXY_API_KEY',
+  'OPENROUTER_API_KEY',
+  'DOUBAO_API_KEY',
+  'RUNNINGHUB_API_KEY',
+]);
+
 /**
  * 导出非密钥配置和本次调用的临时密钥给 Python 子进程。
  * 不从 keyStore 导出任何长期模型密钥。
@@ -131,6 +139,16 @@ function getRuntimeEnv(temporarySecrets?: Record<string, string>): Record<string
   return env;
 }
 
+function getSanitizedProcessEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!MODEL_SECRET_ENV_NAMES.has(name)) {
+      env[name] = value;
+    }
+  }
+  return env;
+}
+
 // ============================================
 // Process Runner
 // ============================================
@@ -151,11 +169,11 @@ function runProcess(options: RunProcessOptions): Promise<void> {
       stdio: ['pipe', 'pipe', 'pipe'],
       // 设置 Python UTF-8 环境变量
       env: {
-        ...process.env,
+        ...getSanitizedProcessEnv(),
         PYTHONIOENCODING: 'utf-8',
         PYTHONUTF8: '1',  // Python 3.7+ UTF-8 模式
         PYTHONLEGACYWINDOWSSTDIO: '0',  // 禁用旧版 Windows stdio
-        ...options.env,  // 合并额外的环境变量
+        ...options.env,  // 只允许本次调用的临时密钥进入子进程
       },
       // Windows 下不使用 shell，避免编码问题
       shell: false,

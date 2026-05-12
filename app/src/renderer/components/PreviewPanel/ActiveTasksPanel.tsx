@@ -11,7 +11,10 @@ import {
   FileTextOutlined,
   VideoCameraOutlined,
 } from '@ant-design/icons';
+import type { Resource } from '@shared/types';
+import { parseFolderName } from '@shared/section-utils';
 import { useGenerationStore, type GenerationTask, type TaskStatus } from '../../stores/generation';
+import { useDraftStore } from '../../stores/draft';
 import styles from './ActiveTasksPanel.module.css';
 
 type FilterMode = 'all' | 'running' | 'pending' | 'finished' | 'failed';
@@ -27,6 +30,47 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
   text: <FileTextOutlined />,
   video: <VideoCameraOutlined />,
 };
+
+function uniqueIds(ids: Array<string | undefined>): string[] {
+  return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+}
+
+function getInputResourceIds(task: GenerationTask): string[] {
+  const params = task.params as Record<string, unknown>;
+  const ids: string[] = [];
+
+  for (const key of [
+    'sourceImageIds',
+    'promptResourceId',
+    'imageResourceIds',
+    'videoResourceIds',
+    'audioResourceIds',
+    'itImageResourceId',
+    'itAudioResourceId',
+  ]) {
+    const value = params[key];
+    if (Array.isArray(value)) {
+      ids.push(...value.filter((id): id is string => typeof id === 'string'));
+    } else if (typeof value === 'string') {
+      ids.push(value);
+    }
+  }
+
+  return uniqueIds(ids);
+}
+
+function formatInputFiles(task: GenerationTask, resourceMap: Map<string, Resource>): string {
+  const parts = getInputResourceIds(task)
+    .map((id) => resourceMap.get(id))
+    .filter((resource): resource is Resource => Boolean(resource))
+    .map((resource) => {
+      const section = parseFolderName(resource.type);
+      const groupName = section?.label || resource.type;
+      return `${groupName}: ${resource.fileName}`;
+    });
+
+  return parts.join(' / ');
+}
 
 function formatElapsed(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -61,7 +105,12 @@ interface ActiveTasksPanelProps {
 
 const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ onNavigateToResult }) => {
   const { tasks, threadCounts, setThreadCount, cancelTask, clearFinished } = useGenerationStore();
+  const resources = useDraftStore((state) => state.resources);
   const [filter, setFilter] = useState<FilterMode>('all');
+  const resourceMap = React.useMemo(
+    () => new Map(resources.map((resource) => [resource.id, resource])),
+    [resources],
+  );
 
   const runningCount = tasks.filter((t) => t.status === 'running').length;
   const pendingCount = tasks.filter((t) => t.status === 'pending' || t.status === 'waiting').length;
@@ -111,6 +160,8 @@ const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ onNavigateToResult 
     const config = STATUS_CONFIG[task.status];
     const canCancel = task.status === 'pending' || task.status === 'waiting' || task.status === 'running';
     const isClickable = task.status === 'completed' && (task.params as any).targetSectionId;
+    const inputFiles = formatInputFiles(task, resourceMap);
+    const promptLine = inputFiles ? `${task.prompt} / ${inputFiles}` : task.prompt;
 
     return (
       <div
@@ -126,8 +177,8 @@ const ActiveTasksPanel: React.FC<ActiveTasksPanelProps> = ({ onNavigateToResult 
               {TYPE_ICONS[task.type]} {TYPE_LABELS[task.type]}
             </span>
           </div>
-          <div className={styles.taskPrompt} title={task.prompt}>
-            {task.prompt.length > 80 ? task.prompt.slice(0, 80) + '...' : task.prompt}
+          <div className={styles.taskPrompt} title={promptLine}>
+            {promptLine}
           </div>
           <div className={styles.taskStatus}>
             {task.status === 'running' && task.startedAt && (
