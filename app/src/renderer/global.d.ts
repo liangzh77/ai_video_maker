@@ -25,6 +25,7 @@ export interface ElectronAPI {
       timestamp: number;
       outputType: string;
     }) => Promise<any>;
+    loadUsageIndex: (params: { draftId: string }) => Promise<any>;
   };
   task: {
     list: (params?: { draftId?: string; status?: string }) => Promise<any>;

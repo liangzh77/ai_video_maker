@@ -148,7 +148,7 @@ function formatKeychainUrlError(url: string, error: unknown): Error {
   }
 
   if (/ERR_INVALID_URL|Invalid URL/i.test(message)) {
-    return new Error(`Keychain 配置错误：keychain.baseUrl 不是有效地址，请检查安装目录 config.json (${host})`);
+    return new Error(`Keychain 配置错误：keychain.baseUrl 不是有效地址，请检查用户配置目录中的 config.json (${host})`);
   }
   if (/ERR_NAME_NOT_RESOLVED|ENOTFOUND|ERR_UNKNOWN_URL_SCHEME/i.test(message)) {
     return new Error(`无法解析 Keychain 服务地址：${host}，请检查 config.json 中的 keychain.baseUrl 或 DNS/网络设置`);
@@ -373,7 +373,7 @@ class KeychainRuntimeService {
     try {
       requestUrl = new URL(path, settings.baseUrl).toString();
     } catch {
-      throw new Error(`Keychain 配置错误：keychain.baseUrl 不是有效地址，请检查安装目录 config.json (${settings.baseUrl})`);
+      throw new Error(`Keychain 配置错误：keychain.baseUrl 不是有效地址，请检查用户配置目录中的 config.json (${settings.baseUrl})`);
     }
 
     const response = await this.fetchWithTimeout(requestUrl, {

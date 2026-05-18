@@ -31,6 +31,7 @@ export interface ElectronAPI {
     loadSplitPoints: (params: { draftId: string; videoId: string }) => Promise<any>;
     saveMetadata: (params: { draftId: string; resourceId: string; generation: any }) => Promise<any>;
     loadMetadata: (params: { draftId: string; resourceId: string }) => Promise<any>;
+    loadUsageIndex: (params: { draftId: string }) => Promise<any>;
     resolveSourceFiles: (params: { draftId: string; files: Array<{ resourceId: string; hash: string }> }) => Promise<any>;
   };
   task: {
@@ -124,6 +125,7 @@ const api: ElectronAPI = {
     loadSplitPoints: (params) => ipcRenderer.invoke('resource:loadSplitPoints', params),
     saveMetadata: (params) => ipcRenderer.invoke('resource:saveMetadata', params),
     loadMetadata: (params) => ipcRenderer.invoke('resource:loadMetadata', params),
+    loadUsageIndex: (params) => ipcRenderer.invoke('resource:loadUsageIndex', params),
     resolveSourceFiles: (params) => ipcRenderer.invoke('resource:resolveSourceFiles', params),
   },
   task: {

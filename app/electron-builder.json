@@ -10,13 +10,11 @@
   "files": [
     "out/**/*"
   ],
-  "extraFiles": [
+  "extraResources": [
     {
       "from": "config.json",
       "to": "config.json"
-    }
-  ],
-  "extraResources": [
+    },
     {
       "from": "default.config",
       "to": "default.config"
@@ -78,8 +76,9 @@
     "category": "Video"
   },
   "nsis": {
-    "oneClick": false,
-    "allowToChangeInstallationDirectory": true,
+    "oneClick": true,
+    "perMachine": false,
+    "allowElevation": false,
     "createDesktopShortcut": true
   }
 }

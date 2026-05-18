@@ -80,9 +80,53 @@ interface ResourceThumbnailRequest {
   resourceId: string;
 }
 
+type UsageMode = 'all' | 'image' | 'text' | 'video' | 'runninghub' | 'infinitetalk' | 'jimeng';
+
 // ============================================
 // Helper Functions
 // ============================================
+
+const GENERATION_INPUT_KEYS = [
+  'sourceImageIds',
+  'promptResourceId',
+  'imageResourceIds',
+  'videoResourceIds',
+  'audioResourceIds',
+  'itImageResourceId',
+  'itAudioResourceId',
+];
+
+function collectGenerationInputIds(params: Record<string, any> | undefined): string[] {
+  if (!params) return [];
+  const ids: string[] = [];
+  for (const key of GENERATION_INPUT_KEYS) {
+    const value = params[key];
+    if (Array.isArray(value)) {
+      ids.push(...value.filter((id): id is string => typeof id === 'string' && id.length > 0));
+    } else if (typeof value === 'string' && value.length > 0) {
+      ids.push(value);
+    }
+  }
+  return [...new Set(ids)];
+}
+
+function usageModesForGeneration(generation: { type: 'image' | 'text' | 'video'; params: Record<string, any> }): UsageMode[] {
+  const modes = new Set<UsageMode>(['all', generation.type]);
+  if (generation.type === 'video') {
+    const method = generation.params?.method;
+    if (method === 'runninghub' || method === 'infinitetalk' || method === 'jimeng') {
+      modes.add(method);
+    } else {
+      modes.add('jimeng');
+    }
+  }
+  return [...modes];
+}
+
+function bumpUsageCount(index: Record<string, Record<string, number>>, mode: UsageMode, resourceId: string): void {
+  index[mode] ||= {};
+  index[mode][resourceId] = (index[mode][resourceId] || 0) + 1;
+}
 
 async function createResourceFromImageData(
   draftId: string,
@@ -903,6 +947,43 @@ export function registerResourceHandlers(): void {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to load metadata',
+        };
+      }
+    }
+  );
+
+  // Load generated-resource usage index for the current draft.
+  ipcMain.handle(
+    RESOURCE_CHANNELS.LOAD_USAGE_INDEX,
+    async (
+      _,
+      request: { draftId: string }
+    ): Promise<OperationResult<Record<string, Record<string, number>>>> => {
+      try {
+        const resources = await storage.resource.list(request.draftId);
+        const index: Record<string, Record<string, number>> = {};
+
+        for (const resource of resources) {
+          if (!resource.hasGenerationMeta) continue;
+          const meta = await storage.metadata.load(request.draftId, resource.id);
+          if (!meta?.generation) continue;
+
+          const inputIds = collectGenerationInputIds(meta.generation.params);
+          if (inputIds.length === 0) continue;
+
+          const modes = usageModesForGeneration(meta.generation);
+          for (const mode of modes) {
+            for (const inputId of inputIds) {
+              bumpUsageCount(index, mode, inputId);
+            }
+          }
+        }
+
+        return { success: true, data: index };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to load resource usage index',
         };
       }
     }

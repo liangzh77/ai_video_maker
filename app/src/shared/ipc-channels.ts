@@ -37,6 +37,7 @@ export const RESOURCE_CHANNELS = {
   LOAD_SPLIT_POINTS: 'resource:loadSplitPoints',
   SAVE_METADATA: 'resource:saveMetadata',
   LOAD_METADATA: 'resource:loadMetadata',
+  LOAD_USAGE_INDEX: 'resource:loadUsageIndex',
   RESOLVE_SOURCE_FILES: 'resource:resolveSourceFiles',
 } as const;
 

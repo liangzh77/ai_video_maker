@@ -91,6 +91,8 @@ interface ModelInfo {
 }
 
 type GenerateMode = 'image' | 'text' | 'video' | 'tasks';
+type UsageMode = 'all' | 'image' | 'text' | 'video' | 'runninghub' | 'infinitetalk' | 'jimeng';
+type UsageIndex = Record<string, Record<string, number>>;
 
 // 根据视频宽高计算最接近的 API 比例
 function calcRatioFromDimensions(width: number, height: number): string {
@@ -190,6 +192,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   // 提示词历史
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
+  const [usageIndex, setUsageIndex] = useState<UsageIndex>({});
 
   // 高亮提示词 refs
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -197,6 +200,23 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
 
   // 进行中的任务数（running + pending）
   const activeCount = allStoreTasks.filter((t) => t.status === 'running' || t.status === 'pending').length;
+
+  const usageMode: UsageMode = mode === 'video' ? videoMethod : (mode === 'tasks' ? 'all' : mode);
+  const currentUsageMap = React.useMemo(
+    () => usageIndex[usageMode] || {},
+    [usageIndex, usageMode],
+  );
+
+  const getUsageCount = (resourceId: string) => currentUsageMap[resourceId] || 0;
+  const renderUsedBadge = (resourceId: string) => {
+    const count = getUsageCount(resourceId);
+    if (count <= 0) return null;
+    return (
+      <div className={styles.usedBadge} title={`已用于 ${count} 次当前生成模式`}>
+        已使用
+      </div>
+    );
+  };
 
   // RunningHub: 选中视频后自动计算运行帧数
   useEffect(() => {
@@ -219,6 +239,25 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
       }).catch(() => {});
     }
   }, [visible, selectedDraftId]);
+
+  // 对话框打开时从生成结果 JSON 动态索引当前草稿已使用资源
+  useEffect(() => {
+    if (!visible || !selectedDraftId) {
+      setUsageIndex({});
+      return;
+    }
+    let cancelled = false;
+    window.api.resource.loadUsageIndex({ draftId: selectedDraftId })
+      .then((result) => {
+        if (!cancelled && result.success) {
+          setUsageIndex(result.data || {});
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setUsageIndex({});
+      });
+    return () => { cancelled = true; };
+  }, [visible, selectedDraftId, resources.length]);
 
   const savePromptToHistory = async (prompt: string) => {
     if (!selectedDraftId || !prompt.trim()) return;
@@ -1543,6 +1582,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                             maxWidth: `calc(52.5vw * ${cardScale})`,
                           }}
                         />
+                        {renderUsedBadge(img.id)}
                         {selectedImageIds.includes(img.id) && (
                           <div className={styles.selectedBadge}>
                             {selectedImageIds.indexOf(img.id) + 1}
@@ -1655,6 +1695,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                               maxWidth: `calc(52.5vw * ${cardScale})`,
                             }}
                           />
+                          {renderUsedBadge(img.id)}
                           {videoModeImageIds.includes(img.id) && (
                             <div className={styles.selectedBadge}>
                               {videoModeImageIds.indexOf(img.id) + 1}
@@ -1699,6 +1740,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                               maxWidth: `calc(52.5vw * ${cardScale})`,
                             }}
                           />
+                          {renderUsedBadge(vid.id)}
                           {selectedVideoIds.includes(vid.id) && (
                             <div className={styles.selectedBadge}>
                               {selectedVideoIds.indexOf(vid.id) + 1}
@@ -1739,6 +1781,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                             <div className={styles.videoThumbPlaceholder} style={{ width: 120, height: 80 }}>
                               <SoundOutlined style={{ fontSize: 24, color: 'var(--color-text-tertiary)' }} />
                             </div>
+                            {renderUsedBadge(audio.id)}
                             <div className={styles.imageName} title={audio.fileName}>
                               {audio.fileName}
                             </div>
@@ -1748,11 +1791,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                               </div>
                             )}
                             {meta && (
-                              <span style={{
-                                position: 'absolute', top: 4, left: 4,
-                                fontSize: 10, color: '#fff',
-                                background: 'rgba(0,0,0,0.5)', borderRadius: 3, padding: '1px 4px',
-                              }}>
+                              <span className={styles.durationBadge}>
                                 {Math.floor(meta.duration / 60)}:{String(Math.floor(meta.duration % 60)).padStart(2, '0')}
                               </span>
                             )}
@@ -1822,6 +1861,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                                 maxWidth: `calc(52.5vw * ${cardScale})`,
                               }}
                             />
+                            {renderUsedBadge(img.id)}
                             {selected && (
                               <div className={styles.selectedBadge}>{selectedIndex + 1}</div>
                             )}
@@ -1878,6 +1918,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                               height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center',
                               background: 'rgba(255,255,255,0.05)', borderRadius: 4, fontSize: 22,
                             }}>🎵</div>
+                            {renderUsedBadge(audio.id)}
                             {selected && (
                               <div className={styles.selectedBadge}>{selectedIndex + 1}</div>
                             )}
@@ -1937,6 +1978,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                               maxWidth: `calc(52.5vw * ${cardScale})`,
                             }}
                           />
+                          {renderUsedBadge(img.id)}
                           {rhImageId === img.id && (
                             <div className={styles.selectedBadge}>1</div>
                           )}
@@ -1984,6 +2026,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                                 maxWidth: `calc(52.5vw * ${cardScale})`,
                               }}
                             />
+                            {renderUsedBadge(vid.id)}
                             {rhVideoId === vid.id && (
                               <div className={styles.selectedBadge}>1</div>
                             )}
@@ -1991,11 +2034,7 @@ const GenerateImageDialog: React.FC<GenerateImageDialogProps> = ({
                               {vid.fileName}
                             </div>
                             {vidMeta && (
-                              <span style={{
-                                position: 'absolute', top: 4, left: 4,
-                                fontSize: 10, color: '#fff',
-                                background: 'rgba(0,0,0,0.5)', borderRadius: 3, padding: '1px 4px',
-                              }}>
+                              <span className={styles.durationBadge}>
                                 {vidMeta.duration.toFixed(1)}s
                               </span>
                             )}

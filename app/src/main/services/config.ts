@@ -9,14 +9,11 @@ import { DEFAULT_CONFIG } from '@shared/types';
 // ============================================
 
 function getConfigPath(): string {
-  return path.join(getLocalConfigDir(), 'config.json');
+  return path.join(getConfigDir(), 'config.json');
 }
 
-function getLocalConfigDir(): string {
-  if (app.isPackaged) {
-    return path.dirname(app.getPath('exe'));
-  }
-  return app.getAppPath();
+function getConfigDir(): string {
+  return app.getPath('userData');
 }
 
 // ============================================
@@ -31,6 +28,7 @@ export async function loadConfig(): Promise<AppConfig> {
   }
 
   const configPath = getConfigPath();
+  await seedUserConfigIfMissing(configPath);
 
   try {
     const content = await fs.readFile(configPath, 'utf-8');
@@ -50,8 +48,12 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   const configPath = getConfigPath();
   const dir = path.dirname(configPath);
 
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  } catch (error) {
+    throw formatConfigFileError(error, configPath);
+  }
 
   cachedConfig = config;
 }
@@ -93,6 +95,47 @@ function deepMerge(target: unknown, source: unknown): unknown {
 
 function isObject(item: unknown): item is Record<string, unknown> {
   return item !== null && typeof item === 'object' && !Array.isArray(item);
+}
+
+async function seedUserConfigIfMissing(configPath: string): Promise<void> {
+  try {
+    await fs.access(configPath);
+    return;
+  } catch {
+    // Create the user's writable config from the bundled config on first launch.
+  }
+
+  const bundledConfigPath = getBundledConfigPath();
+  if (!bundledConfigPath) return;
+
+  try {
+    const content = await fs.readFile(bundledConfigPath, 'utf-8');
+    const parsed = JSON.parse(content) as Partial<AppConfig>;
+    const seededConfig = deepMerge(DEFAULT_CONFIG, parsed) as AppConfig;
+    await saveConfig(seededConfig);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+    if (nodeError?.code !== 'ENOENT') {
+      console.warn('[Config] Failed to seed user config:', error instanceof Error ? error.message : error);
+    }
+  }
+}
+
+function getBundledConfigPath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'config.json')
+    : path.join(app.getAppPath(), 'config.json');
+}
+
+function formatConfigFileError(error: unknown, configPath: string): Error {
+  const nodeError = error as NodeJS.ErrnoException;
+  if (nodeError?.code === 'EACCES' || nodeError?.code === 'EPERM') {
+    return new Error(
+      `配置文件写入失败：没有权限写入 ${configPath}。` +
+      '请检查当前 Windows 用户是否有权限写入应用配置目录。'
+    );
+  }
+  return error instanceof Error ? error : new Error(String(error || '配置文件写入失败'));
 }
 
 // ============================================

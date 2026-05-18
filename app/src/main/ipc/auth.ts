@@ -17,6 +17,20 @@ function getSettings(params: AuthSettingsParams | undefined): Partial<KeychainSe
   return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
+async function saveSettingsIfNeeded(settings: Partial<KeychainSettings> | undefined): Promise<{ success: true } | { success: false; isLoggedIn: false; error: string }> {
+  if (!settings) return { success: true };
+  try {
+    await keychainRuntime.saveSettings(settings);
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      isLoggedIn: false,
+      error: error instanceof Error ? error.message : String(error || '保存 Keychain 配置失败'),
+    };
+  }
+}
+
 export default function registerAuthHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle(AUTH_CHANNELS.REGISTER, async (_, params: {
     username: string;
@@ -27,9 +41,8 @@ export default function registerAuthHandlers(mainWindow: BrowserWindow | null): 
     runtimeToken?: string;
   }) => {
     const settings = getSettings(params);
-    if (settings) {
-      await keychainRuntime.saveSettings(settings);
-    }
+    const saveResult = await saveSettingsIfNeeded(settings);
+    if (!saveResult.success) return saveResult;
     const result = await authService.register({
       username: params.username,
       name: params.name,
@@ -50,9 +63,8 @@ export default function registerAuthHandlers(mainWindow: BrowserWindow | null): 
     runtimeToken?: string;
   }) => {
     const settings = getSettings(params);
-    if (settings) {
-      await keychainRuntime.saveSettings(settings);
-    }
+    const saveResult = await saveSettingsIfNeeded(settings);
+    if (!saveResult.success) return saveResult;
     const result = await authService.login({
       username: params.username,
       password: params.password,
