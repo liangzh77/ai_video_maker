@@ -118,6 +118,9 @@ export function isProviderFailure(error: unknown): boolean {
   if (/Keychain|密钥服务|keychain\.baseUrl/i.test(message)) {
     return false;
   }
+  if (/APIKEY_TASK_NOT_FOUND|TASK_NOT_FOUND|Unknown error, please retry|未知错误，请重试|contact support|联系支持/i.test(message)) {
+    return false;
+  }
   if (/队列已满|TASK_QUEUE_MAXED|TASK_INSTANCE_MAXED|PERSONAL_QUEUE_COUNT_LIMIT|APIKEY_TASK_IS_QUEUED|APIKEY_TASK_IS_RUNNING|Resources are busy|Concurrency Limit|Dedicated Instances Exhausted|System is currently busy|Service unavailable/i.test(message)) {
     return false;
   }

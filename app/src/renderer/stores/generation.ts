@@ -232,9 +232,18 @@ function notifyApiSubmitted(taskId: string) {
 }
 
 const RH_RETRY_DELAY = 30_000; // 临时容量满重试间隔 30 秒
+const REMOTE_TASK_KEY_LOST_MESSAGE = 'APIKEY_TASK_NOT_FOUND：程序重启后失去了本次 RunningHub key 的追踪，请去 RunningHub 查看生成的视频。';
 
 function isQueueFullError(error: string): boolean {
   return /队列已满|稍后重试|TASK_QUEUE_MAXED|TASK_INSTANCE_MAXED|PERSONAL_QUEUE_COUNT_LIMIT|APIKEY_TASK_IS_QUEUED|APIKEY_TASK_IS_RUNNING|QUEUE|MAXED|Resources are busy|Concurrency Limit|Dedicated Instances Exhausted|System is currently busy|Service unavailable/i.test(error);
+}
+
+function isTransientRunningHubError(error: string): boolean {
+  return /Unknown error, please retry|未知错误，请重试|contact support|联系支持/i.test(error);
+}
+
+function isRemoteTaskNotFoundError(error: string): boolean {
+  return /APIKEY_TASK_NOT_FOUND|TASK_NOT_FOUND/i.test(error);
 }
 
 function queueRetryMessage(): string {
@@ -300,7 +309,7 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
           skipFrames: params.rhSkipFrames || 0,
           targetSectionId: params.targetSectionId,
           taskId: task.id,
-          remoteTaskId: task.remoteTaskId,
+          remoteTaskId: current?.remoteTaskId,
         });
 
         // 等待 API 提交成功或整个任务完成（取先到达的）
@@ -325,9 +334,15 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
           return result.data?.resourceId;
         }
 
-        // 临时容量满 → 等待后重试，不进入失败列表
-        if (isQueueFullError(result.error || '')) {
-          markTaskWaiting(task.id, queueRetryMessage());
+        const error = result.error || '';
+
+        if (isRemoteTaskNotFoundError(error) && useGenerationStore.getState().tasks.find((t) => t.id === task.id)?.remoteTaskId) {
+          throw new Error(REMOTE_TASK_KEY_LOST_MESSAGE);
+        }
+
+        // 临时容量满或 RunningHub 临时错误 → 等待后重试，不进入失败列表
+        if (isQueueFullError(error) || isTransientRunningHubError(error)) {
+          markTaskWaiting(task.id, isQueueFullError(error) ? queueRetryMessage() : 'RunningHub 临时错误，30秒后重试...');
           await sleep(RH_RETRY_DELAY);
           markTaskRunning(task.id);
           continue;
@@ -338,7 +353,7 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
           releaseRhApiSlot();
           slotReleased = true;
         }
-        throw new Error(result.error || 'RunningHub 视频生成失败');
+        throw new Error(error || 'RunningHub 视频生成失败');
       }
     } catch (err) {
       rhSubmittedCallbacks.delete(task.id);
@@ -369,7 +384,7 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
           maxSize: params.itMaxSize,
           targetSectionId: params.targetSectionId,
           taskId: task.id,
-          remoteTaskId: task.remoteTaskId,
+          remoteTaskId: current?.remoteTaskId,
         });
 
         submittedPromise.then(() => {
@@ -390,8 +405,14 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
           return result.data?.resourceId;
         }
 
-        if (isQueueFullError(result.error || '')) {
-          markTaskWaiting(task.id, queueRetryMessage());
+        const error = result.error || '';
+
+        if (isRemoteTaskNotFoundError(error) && useGenerationStore.getState().tasks.find((t) => t.id === task.id)?.remoteTaskId) {
+          throw new Error(REMOTE_TASK_KEY_LOST_MESSAGE);
+        }
+
+        if (isQueueFullError(error) || isTransientRunningHubError(error)) {
+          markTaskWaiting(task.id, isQueueFullError(error) ? queueRetryMessage() : 'RunningHub 临时错误，30秒后重试...');
           await sleep(RH_RETRY_DELAY);
           markTaskRunning(task.id);
           continue;
@@ -401,7 +422,7 @@ async function executeVideoTask(task: GenerationTask): Promise<string | undefine
           releaseRhApiSlot();
           slotReleased = true;
         }
-        throw new Error(result.error || 'Infinitetalk 视频生成失败');
+        throw new Error(error || 'Infinitetalk 视频生成失败');
       }
     } catch (err) {
       rhSubmittedCallbacks.delete(task.id);
@@ -573,10 +594,19 @@ export const useGenerationStore = create<GenerationStore>((set, get) => ({
     loadedAiTaskDrafts.add(draftId);
     const loaded = ((result.data || []) as GenerationTask[]).map((task) => {
       if (isUnfinishedTask(task)) {
+        if (task.remoteTaskId) {
+          return {
+            ...task,
+            status: 'failed' as TaskStatus,
+            error: REMOTE_TASK_KEY_LOST_MESSAGE,
+            progressMessage: undefined,
+            completedAt: Date.now(),
+          };
+        }
         return {
           ...task,
           status: 'pending' as TaskStatus,
-          progressMessage: task.remoteTaskId ? '恢复任务，继续查询结果...' : '恢复任务，等待重新提交...',
+          progressMessage: '恢复任务，等待重新提交...',
           completedAt: undefined,
           error: undefined,
         };

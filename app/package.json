@@ -1,6 +1,6 @@
 {
   "name": "ai-video-maker",
-  "version": "1.0.37",
+  "version": "1.0.38",
   "description": "视频制作流程管理应用",
   "main": "out/main/index.js",
   "scripts": {
