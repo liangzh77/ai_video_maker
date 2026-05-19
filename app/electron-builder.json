@@ -79,6 +79,7 @@
     "oneClick": true,
     "perMachine": false,
     "allowElevation": false,
+    "include": "build/installer.nsh",
     "createDesktopShortcut": true
   }
 }
