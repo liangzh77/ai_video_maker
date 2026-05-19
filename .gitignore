@@ -15,6 +15,7 @@ node_modules/
 dist/
 build/
 !app/build/
+app/build/*
 !app/build/installer.nsh
 *.log
 npm-debug.log*
